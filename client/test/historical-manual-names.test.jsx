@@ -140,8 +140,24 @@ it('permission loss during save requires exact read recovery after regrant',asyn
 it('closing during local preparation ignores its late reply; reopening requires an explicit fresh read',async()=>{
   const view=mount();await begin();const pending=deferred();client.previewManualNames.mockReturnValueOnce(pending.promise);fireEvent.click(screen.getByRole('button',{name:'Ввести ручну UA/EN назву'}));
   view.rerender(<HistoricalReactivationReview open={false} config={config} apiClient={client}/>);await act(async()=>pending.resolve({data:current()}));
-  view.rerender(<HistoricalReactivationReview open config={config} apiClient={client}/>);fill();fireEvent.click(show());expect(screen.queryByText(full.nameEn)).toBeNull();expect(save().disabled).toBe(true);
-  fireEvent.click(screen.getByRole('button',{name:'Прочитати збережені назви'}));await waitFor(()=>expect(client.previewManualNames).toHaveBeenCalledTimes(2));await proposed();expect(consent().checked).toBe(false);
+  view.rerender(<HistoricalReactivationReview open config={config} apiClient={client}/>);
+  expect(client.previewManualNames).toHaveBeenCalledTimes(1);
+  expect(screen.getByLabelText('Назва UA').value).toBe('');expect(screen.getByLabelText('Назва EN').value).toBe('');
+  fill();fireEvent.click(show());expect(screen.queryByText(full.nameEn)).toBeNull();expect(save().disabled).toBe(true);
+  const fresh=deferred();client.previewManualNames.mockReturnValueOnce(fresh.promise);
+  fireEvent.click(screen.getByRole('button',{name:'Прочитати збережені назви'}));
+  expect(client.previewManualNames.mock.calls).toEqual([[request],[request]]);
+  expect(screen.getByLabelText('Назва UA').disabled).toBe(true);expect(screen.getByLabelText('Назва EN').disabled).toBe(true);
+  expect(show().disabled).toBe(true);expect(save().disabled).toBe(true);expect(screen.queryByText(full.nameEn)).toBeNull();
+  // An API call starts preparation; only its completed response enables editing
+  // and local preview. Keep that response pending to exercise the real boundary.
+  await act(async()=>fresh.resolve({data:current()}));
+  await waitFor(()=>{
+    expect(screen.getByLabelText('Назва UA').disabled).toBe(false);expect(screen.getByLabelText('Назва EN').disabled).toBe(false);
+    expect(show().disabled).toBe(false);
+  });
+  await proposed();expect(screen.getByText(full.nameUa)).toBeTruthy();expect(consent().checked).toBe(false);expect(save().disabled).toBe(true);
+  expect(client.previewManualNames.mock.calls).toEqual([[request],[request]]);expect(client.saveManualNames).not.toHaveBeenCalled();expect(client.confirm).not.toHaveBeenCalled();
 });
 it('foreign save receipt requires read recovery and cannot trigger a full-list refresh',async()=>{
   client.saveManualNames.mockResolvedValueOnce({data:receipt({subjectEn:'Foreign pair'})});mount();await begin();await openNames();await proposed();fireEvent.click(consent());fireEvent.click(save());
