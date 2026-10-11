@@ -59,6 +59,9 @@ function requirements(definition, schema) {
     return Object.values(node).some((v) => semanticLookupProof(v, table, sourceId, seen));
   }
   const result = [];
+  // Keep the original canonical identity and first evaluation point. Reuse it
+  // only during this synchronous call; a later call must hash fresh input.
+  let definitionHash;
   for (const plan of tools.plans) {
     if (plan.predicates.some((p) => definition.sources[p.sourceId]?.kind !== 'semantic'
       || definition.sources[p.sourceId].category !== plan.amberGroup)) invalid();
@@ -78,7 +81,8 @@ function requirements(definition, schema) {
             : usage.dynamicOutput ? 'dynamic_exact_label_option' : 'constant_option';
       // Domain identity binds exact template + cell expression. Output identity is the
       // evaluator's exact string, not a remote option label or a fabricated value_id.
-      const domainKey = hash({ definitionHash: hash(definition), group: group.route, row: row.id, target, cell });
+      definitionHash ??= hash(definition);
+      const domainKey = hash({ definitionHash, group: group.route, row: row.id, target, cell });
       const options = [];
       let unsupportedSemanticOutput = false;
       for (const v of values) {
