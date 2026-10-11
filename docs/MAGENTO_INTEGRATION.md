@@ -2380,3 +2380,60 @@ Keep or receive each eligible conflict under the existing field policy. A
 delivers it and fresh readback verifies it. First-name authority remains once per
 language. This repository path and disposable tests do not establish live
 production acceptance or resolve unknown retained-file history.
+
+The published SV size expression may select optional or required text using an
+unchanged semantic answer. First-sync can import a missing `size` only when both
+branches are the same exact reversible information source, the guard has a known
+value in its captured question contract, and fresh catalog validation proves size
+independent of SKU and pricing. The receipt seals that guard; a changed guard,
+alternate input, calculation, trimmed remote text or stale publication fails
+closed. Existing populated dimensions retain the ordinary conflict decision.
+Size adoption and ledger progress remain atomic and require a fresh post-import
+check. Missing processing, unapproved fields and history blockers remain visible.
+
+An automatically captured V1 SKU snapshot is not proof of an older product's
+original encoding. In particular, a souvenir-first legacy article that cannot be
+reconstructed from its attached snapshot does not gain permission to fill an
+encoded characteristic through the automatic canonical setter. That setter's
+existing identity checks remain unchanged.
+
+The separate Administrator command `first-sync/legacy-inputs/preview` and `/apply`
+completes missing legacy SV inputs using an explicit historical attestation. Both
+POST routes require `export_templates.manage`, `export_templates.publish`,
+`exports.view`, `products.recount`, active authentication and CSRF. The service
+rechecks actual Administrator status and all capabilities, including on replay.
+The request contains `sku`, current `bindingRevisionId`, selected semantic
+`processingValueId`, exact `attestation: "processing_not_encoded_in_historical_sku"`
+and a 10–500-character `reason`. Apply additionally requires the returned
+`previewToken`. This proof is labelled
+`administrator_attested_historical_characteristic`; it never claims reconstruction
+from a frozen schema or infers processing from the article, material or colour.
+
+The product must be an active, unique legacy public/internal SV identity with no
+correction lineage, created at a known time strictly before its anonymous V1
+bootstrap capture. A malformed/ambiguous grammar, any supported reconstruction,
+unknown creation date, changed reservation or already filled processing refuses
+this command. The selected current option must retain its frozen semantic/code
+meaning and exact approved current Magento mapping. A populated remote processing
+must agree; failed or malformed reads do not become empty. Only a missing local
+size can be copied from exact confirmed remote text, under the information
+validator. SKU, prices, physical/mirrored weight, material, colour and effective
+UA/EN names remain unchanged. SKU/pricing dependencies, concurrent local changes,
+publication changes and revoked authority fail closed.
+
+Preview performs no adoption or durable writes. Apply stores the missing facts
+and their exact before/after observations with the Administrator attestation in
+one audited transaction. It creates no Magento sync job and performs no remote
+write. Normal local revision and automatic-request generation hooks still run;
+the returned `automaticRequest` reports that state, not delivery success.
+
+A valid existing first-sync admission is rechecked before mutation. The same
+transaction records the post-mutation state against its immutable admission root;
+existing received-field records remain unchanged and all new fields require a
+fresh review. Manual completion never invents an imported/received processing
+receipt. When the sole existing restriction is `FIRST_SYNC_DELIVERY_HISTORY_CHANGED`,
+completion changes local data only and retains the history blocker without
+creating or renewing an admission/session. Available but unaccepted cutover
+admission must be reviewed first. No historical counter is reset and no blocker
+becomes automatic outbound approval. The local fixtures do not establish that
+every real legacy product passes this class or that production delivery is accepted.

@@ -162,4 +162,23 @@ function inspectLegacyInputs({product,schema,current,patch,weight,hasWeight}) {
   return {proof:{version:2,sku:product.full_sku,schemaVersionId:schema.id,schemaHash:schema.config_hash,
     interpretation:before,currentSkuFlags:current.questions.map(q=>({key:q.key,includeInSku:q.include_in_sku})),...(hasWeight?{weightCompatibility:'sequence-or-rounded-weight'}:{})}};
 }
-module.exports={isLegacySv,inspectLegacyInputs};
+// Classification for the SEPARATE Administrator attestation command. No missing
+// field is proved here: an attached bootstrap cannot reinterpret an older SKU.
+function inspectBootstrapEncoding(product,schema) {
+  if(!isLegacySv(product) || !schema || schema.category_code!==product.category
+    || String(schema.id)!==String(product.sku_schema_version_id) || Number(schema.version)!==1
+    || schema.marker!=='' || schemas.hashSnapshot(snapshotQuestions(schema.questions))!==schema.config_hash) {
+    fail('FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN');
+  }
+  assertSupportedGrammar(schema);
+  const variation=parseVariationSku(product.full_sku),parsed=parseVersionedSkuPart(variation.baseFullSku.slice(product.category.length));
+  if(variation.normalizedSku!==product.full_sku || parsed.version!==1 || parsed.marker!==''
+    || !product.base_sku?.startsWith(product.category) || product.sequence_number==null
+    || !Number.isSafeInteger(Number(product.sequence_number)) || Number(product.sequence_number)<0
+    || appendSkuSuffix(product.base_sku,Number(product.sequence_number))!==variation.baseFullSku) fail('FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN');
+  const encoded=product.base_sku.slice(product.category.length);
+  if(!encoded || encoded.length>256)fail('FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN');
+  return {reconstructable:enumerate(schema,encoded,product.details?.answers || {}).length>0,
+    schemaHash:schema.config_hash,baseSku:product.base_sku,sequenceNumber:Number(product.sequence_number)};
+}
+module.exports={isLegacySv,inspectLegacyInputs,inspectBootstrapEncoding};

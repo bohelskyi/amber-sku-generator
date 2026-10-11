@@ -47,6 +47,8 @@ const ENDPOINT_MANIFEST = Object.freeze([
   endpoint('POST', '/admin/magento-integration/bindings/:id/controlled-products/resolve', 'export_templates.view'),
   ...['first-sync/preview','first-sync/apply','first-sync/history-apply'].map((path)=>Object.freeze({
     ...endpoint('POST', `/admin/magento-integration/${path}`, 'export_templates.manage'), additionalPermissions: Object.freeze(['export_templates.publish','exports.view']) })),
+  ...['preview','apply'].map((action)=>Object.freeze({
+    ...endpoint('POST', `/admin/magento-integration/first-sync/legacy-inputs/${action}`, 'export_templates.manage'), additionalPermissions: Object.freeze(['export_templates.publish','exports.view','products.recount']) })),
   ...['publication/preview','publication/apply','controlled/preview','controlled/apply'].map((path)=>Object.freeze({
     ...endpoint('POST', `/admin/magento-integration/${path}`, 'export_templates.manage'), additionalPermissions: Object.freeze(['export_templates.publish','exports.view']) })),
   endpoint('POST', '/admin/magento-integration/bindings/:id/clone', 'export_templates.manage'),

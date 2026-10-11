@@ -382,6 +382,83 @@ function conditionalSvFixture(souvenir = 4, changePublication) {
 }
 const inactiveSvTargets = ['fraction', 'kamin_obrobka', 'kamin_suvenirnyi'];
 
+function sizeSuccessorFixture(souvenir = 5, mutate) {
+  return conditionalSvFixture(souvenir, publication => {
+    const binding = publication.definition.bindings.find(item => item.id === 'SV.rozmir_suveniriv');
+    binding.value = { op: 'when', if: { op: 'eq',
+      left: { op: 'semanticKey', input: source('SV.souvenir') }, right: literal('6') },
+    then: { ...text('SV.size'), trim: true }, else: binding.value };
+    mutate?.(publication, binding.value);
+  });
+}
+
+test('published optional-size successor imports missing old SV size independently of missing processing', () => {
+  const input = sizeSuccessorFixture(), product = require('./fixtures/legacy-sv-schema6').product(1359);
+  input.observation.amber.product = product; input.observation.raw.sku = product.full_sku;
+  input.observation.raw.custom_attributes = [{ attribute_code: 'rozmir_suveniriv', value: '9.5/3.5' }];
+  const before = JSON.stringify(input), projected = projectFirstSyncFields(input);
+  assert.equal(metadata(projected, 'rozmir_suveniriv').persistence, 'information');
+  assert.equal(metadata(projected, 'rozmir_suveniriv').storagePath, 'details.answers.size');
+  assert.deepEqual(metadata(projected, 'rozmir_suveniriv').source.informationConditions,
+    [{ sourceId: 'SV.souvenir', value: 5 }]);
+  assert.equal(field(projected, 'rozmir_suveniriv').status, 'imported');
+  assert.equal(field(projected, 'rozmir_suveniriv').importValue, '9.5/3.5');
+  assert.equal(field(projected, 'kamin_obrobka').status, 'review_required');
+  assert.equal(projected.readyForOutbound, false);
+  assert.equal(JSON.stringify(input), before);
+});
+
+test('size conditional proof seals the exact guard and retains branch requiredness and existing decisions', () => {
+  const input = sizeSuccessorFixture(6); delete input.observation.amber.product.details.answers.size;
+  let projected = projectFirstSyncFields(input);
+  assert.equal(field(projected, 'rozmir_suveniriv').status, 'optional_empty');
+  const previous = prepareProgress(projected, null);
+  input.observation.amber.product.details.answers.souvenir = 4;
+  projected = projectFirstSyncFields(input);
+  assert.equal(field(projected, 'rozmir_suveniriv').status, 'review_required');
+  assert.equal(field(projected, 'rozmir_suveniriv').reason, 'REQUIRED_FIELD_EMPTY');
+  assert.notEqual(hash(prepareProgress(projected, null).rows), hash(previous.rows));
+  input.observation.amber.product.details.answers.size = '12/5/3';
+  input.observation.raw.custom_attributes = [{ attribute_code: 'rozmir_suveniriv', value: '9/5/3' }];
+  projected = projectFirstSyncFields(input);
+  assert.equal(field(projected, 'rozmir_suveniriv').status, 'conflict');
+  assert.equal(field(projected, 'rozmir_suveniriv').importValue, undefined);
+  input.observation.raw.custom_attributes[0].value = '12/5/3';
+  assert.equal(field(projectFirstSyncFields(input), 'rozmir_suveniriv').status, 'equal');
+});
+
+test('conditional size inverse rejects alternate/calculated inputs, inconsistent trim and unknown guards', () => {
+  const mutations = [
+    (_publication, node) => { node.then = text('SV.weight'); },
+    (_publication, node) => { node.then.trim = false; },
+    (_publication, node) => { node.if.left.input = source('SV.size'); },
+    (_publication, node) => { node.then = { op: 'interpolate', template: '{size} cm',
+      slots: { size: text('SV.size') } }; },
+    ...['numberText', 'decimalText'].map(op => (_publication, node) => {
+      node.then = { op, input: op === 'decimalText' ? text('SV.size') : source('SV.size'),
+        error: { op: 'error', field: 'rozmir_suveniriv', message: literal('Numeric size unavailable') },
+        format: op === 'decimalText' ? 'unsigned-comma-dot-v1' : 'js-number-positive-v1' };
+      node.else = structuredClone(node.then);
+    }),
+  ];
+  for (const mutate of mutations) {
+    const input = sizeSuccessorFixture(5, mutate); delete input.observation.amber.product.details.answers.size;
+    input.observation.raw.custom_attributes = [{ attribute_code: 'rozmir_suveniriv', value: '9.5/3.5' }];
+    const projected = projectFirstSyncFields(input);
+    assert.equal(metadata(projected, 'rozmir_suveniriv').persistence, 'derived');
+    assert.notEqual(field(projected, 'rozmir_suveniriv').status, 'imported');
+  }
+  for (const value of [undefined, null, '', false, '01', 'broken', 1.2, 999]) {
+    const input = sizeSuccessorFixture(5, (_publication, node) => { node.if.left.input = source('SV.material'); });
+    input.observation.amber.product.details.answers.material = value;
+    delete input.observation.amber.product.details.answers.size;
+    input.observation.raw.custom_attributes = [{ attribute_code: 'rozmir_suveniriv', value: '9.5/3.5' }];
+    const projected = projectFirstSyncFields(input);
+    assert.equal(metadata(projected, 'rozmir_suveniriv').persistence, 'derived');
+    assert.notEqual(field(projected, 'rozmir_suveniriv').status, 'imported');
+  }
+});
+
 function semanticRequirement(input, target, sourceKey, { historical = false, kind = 'semantic', routeKey } = {}) {
   const { product, compiled } = input.observation.amber;
   return classifySemanticRequirement({ compiled, target, scope: 'all',
