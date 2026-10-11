@@ -24,6 +24,19 @@ transaction. With the gate enabled it upserts one `magento_product_sync_requests
 row and increments `desired_generation`. Rollback also rolls back the request.
 No remote discovery, enqueue or writer runs in a business request.
 
+Fresh ordinary non-test native allocations after delivery cutover can prove that
+their initial `csv_retired_revision=1` is administrative retirement, not delivery.
+The narrow server birth proof also permits a matching initial pending/unbound
+photo job only when every media step is absent and its creation receipt, current
+photo set, assets and intent remain exact. Actual exports/history or changed,
+bound, inherited, superseded or dispatched obligations retain their gates. The
+automatic enqueue stores an immutable reference and rechecks it before initial
+CREATE and through owned/reviewed recovery. Native CREATE remains disabled
+(status `2`); existing verified-photo activation remains separate. See
+[first-sync birth proof](MAGENTO_FIRST_SYNC_FIELDS.md#eligibility-and-actual-delivery-history) for
+the full predicate. This change does not enroll parked `needs_attention` rows;
+their exact reviewed broader resync requires a separate operator decision.
+
 The trigger compares stored evaluator/eligibility inputs: SKU, category, physical
 weight, final UAH price, schema ID, saved answers, UA/EN subjects, name review,
 active/successor identity and exclusion. Unchanged inputs, attribution and pricing

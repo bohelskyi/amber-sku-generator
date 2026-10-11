@@ -37,6 +37,33 @@ predecessor history can carry the same exact receipt.
 Native ownership uses the server loader's private proof. An allocated native SKU
 without its own acknowledged remote identity remains a collision.
 
+An ordinary, non-test native allocation after the immutable delivery cutover has
+one narrowly proven CREATE exception. `first-sync-native-create.js` requires a
+fresh confirmed remote absence, the current published binding, one unchanged
+allocated identity with immutable characteristic configuration and its exact
+`product.created` audit, normal initial lifecycle (`revision=delivery_version=1`,
+`csv_retired_revision=1`, other delivery floors zero), and no actual export,
+session, correction, historical/visibility/deletion or other native job evidence.
+The CSV floor is administrative retirement at birth, not a delivery receipt.
+Optional initial photos must be one pending, unbound `products.create` job with
+zero **any** media steps, no preservation/inheritance/supersession, and exact
+version/order/enable/asset ownership and same-creation `product.photos_saved`
+receipt. Unknown or malformed evidence retains the original review blocker.
+
+This private SELECT-only proof allows only the existing automatic generation and
+atomic enqueue/attachment protocol. Manual enqueue cannot create a job in this
+exceptional lane. The immutable `baseline.allocatedFirstCreate` reference binds
+only that exact new automatic job; server proof and existing authority, binding,
+product/generation and readback protections are rechecked at enqueue and before
+dispatch. Existing CREATE/owned/reviewed-recovery shortcuts must also revalidate
+marked jobs. Verified original CREATE continuation and exact GET reconciliation
+can retain their original job without first-sync adoption or repeated writes.
+No lifecycle counters, history, media receipts or first-sync ledger are reset.
+The catalog CREATE still sends status `2`; only the existing photo workflow may
+enable after complete photo readback. Deployment does not re-enroll parked
+`needs_attention` products: an exact reviewed `broader_resync` is a separate
+operator action after current publication, source and transport review.
+
 ## Exact field projection
 
 `first-sync-projection.js` consumes the original server-owned

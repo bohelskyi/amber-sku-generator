@@ -132,11 +132,20 @@ async function readFirstSyncEligibility(client, config, observation, {jobId = nu
     sameOriginAcknowledged:facts.previous_delivery,externalDelivery:external.externalDelivery,externalDeliveryIssue:external.issue,
     otherOrigin:facts.other_origin,protectedWork:facts.protected_work,
     historicalEvidence:facts.historical_evidence||facts.snapshot_evidence||history.hasRecount};
-  const classification=classifyFirstSyncEvidence(evidence);
+  let classification=classifyFirstSyncEvidence(evidence);
+  // CSV retirement at an ordinary allocation's birth is not an export receipt.
+  // Only a private, SELECT-only proof may discharge that exact administrative
+  // floor and its untouched initial-photo dependency. All other gates remain.
+  const nativeCreate=raw===null && classification.mode==='review'
+    && classification.blockers.length===1 && classification.blockers[0].code==='FIRST_SYNC_HISTORY_REVIEW_REQUIRED'
+    && history.complete && !history.issues.length && !history.identityChanged
+    && !evidence.ownershipIssue && !evidence.lifecycleBlockers.length && !optionalReceiptAssessment.blockers.length
+    ? await require('./first-sync-native-create').readOnClient(client,config,observation,{jobId}) : null;
+  if(nativeCreate) classification={mode:'create',blockers:[]};
   const reviewAssessment=classification.mode==='review' && classification.blockers.length===1
     && classification.blockers[0].code==='FIRST_SYNC_HISTORY_REVIEW_REQUIRED'
     ? await cutover.assessProposal(client,config,observation,{history,progress,facts,evidence}) : null;
-  return {...classification,progress,key,historyReview:reviewAssessment?.proposal || null,
+  return {...classification,nativeCreate,progress,key,historyReview:reviewAssessment?.proposal || null,
     ...(reviewAssessment ? {historyReviewAssessment:reviewAssessment.assessment} : {}),
     admissionGuards:{protectedWork:evidence.protectedWork,otherOrigin:evidence.otherOrigin},
     historyAdmission:admitted.admission,historyAdmissionHash:admitted.evidenceHash,
