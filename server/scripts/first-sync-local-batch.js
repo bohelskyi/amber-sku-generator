@@ -114,7 +114,7 @@ async function main(args=process.argv.slice(2),dependencies={}) {
       await appendReceipt(output,{contract:'first-sync-local-batch-journal-v1',planHash:options.planHash,total:commands.length},config,run.sensitiveValues);
       for(const command of commands) {
         applyStarted=true;
-        try{results.push({sku:command.sku,status:'recorded',result:await (dependencies.apply||first.apply)(config,command,run)});}
+        try{results.push({sku:command.sku,status:'recorded',result:await (dependencies.apply||first.apply)(config,command,{...run,validateFirstSyncDecision:(base,report,choices)=>batch.validatePacketDecision(base,report,document.request,document.request.items.find(i=>i.sku===command.sku),choices)})});}
         catch(e){results.push({sku:command.sku,status:e.statusCode>=400&&e.statusCode<500?'blocked':'unconfirmed',code:safeCode(e)});}
         // Persist every committed receipt before moving to another product.
         await appendReceipt(output,{contract:'first-sync-local-batch-receipt-v1',...results.at(-1)},config,run.sensitiveValues);

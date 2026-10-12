@@ -84,6 +84,11 @@ hash, same actor/database, and a new output path:
 node scripts/first-sync-local-batch.js --mode apply --input new-preview.json --output new-local-receipts.jsonl --expected-database DATABASE_NAME --actor-id ADMIN_ID --plan-sha256 REVIEWED_PLAN_HASH
 ```
 
+A plan hash does not prove field facts by itself. On a fresh apply, the server
+compares every requested source, identity, definition, actual field value and
+rounding claim with the already obtained canonical preview before any commit.
+Exact committed receipt replay precedes this check and performs no new transition.
+
 This mode writes canonical local first-sync receipts and any explicitly reviewed
 canonical initial imports visible in the plan. It sends no Magento mutation and
 directly enqueues no job. Canonical initial imports can change product/name data

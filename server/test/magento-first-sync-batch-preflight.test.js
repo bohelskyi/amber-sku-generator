@@ -59,9 +59,18 @@ test('validated preparation reports remaining canonical blockers honestly',async
  assert.equal(r.results[0].remainingBlockers[0].code,'CANONICAL_IMPORT_REQUIRES_FRESH_PREVIEW');
 });
 test('historical admission and ordinary workflow stay separate',async t=>{
- const h=harness(t,['NM1','NM2']);t.mock.method(first,'inspect',async(_c,o)=>o.raw.sku==='NM1'?{mode:'review',blockers:[{code:'HISTORY_REQUIRED'}],historyReview:{sku:'NM1'}}:{mode:'ordinary',blockers:[]});
+ const h=harness(t,['NM1','NM2']);t.mock.method(first,'inspect',async(_c,o)=>o.raw.sku==='NM1'?{observation:o,mode:'review',blockers:[{code:'HISTORY_REQUIRED'}],historyReview:{sku:'NM1'}}:{observation:o,mode:'ordinary',blockers:[]});
  const r=await batch.preflight(h.config,h.input,h.options);assert.equal(r.results[0].status,'blocked');assert.ok(r.results[0].historyReview);
  assert.equal(r.results[1].status,'ordinary_preview_required');assert.equal(r.counts.ordinaryPreviewRequired,1);assert.equal(h.calls.prepare,0);
+});
+test('fresh apply packet validator rejects a fabricated rounding claim and accepts only the actual source/fields',async t=>{
+ const h=harness(t),observed=h.observations.get('NM1'),base={...h.base,observation:observed};
+ const report={evaluation:{ready:true},syncEligibility:{eligible:true},sendable:true},choices=[{target:'decor_weight',scope:'all',choice:'keep_local'}];
+ assert.doesNotThrow(()=>batch.validatePacketDecision(base,report,h.input,h.input.items[0],choices));
+ h.row.remote.value=140;assert.throws(()=>batch.validatePacketDecision(base,report,h.input,h.input.items[0],choices),{code:'BATCH_PLAN_CHANGED'});
+ h.input.items[0].fields[0].remote=140;assert.throws(()=>batch.validatePacketDecision(base,report,h.input,h.input.items[0],choices),{code:'BATCH_PLAN_CHANGED'});
+ h.row.remote.value=132;h.input.items[0].fields[0].remote=132;h.input.items[0].expectedProduct.answers={forged:1};
+ assert.throws(()=>batch.validatePacketDecision(base,report,h.input,h.input.items[0],choices),{code:'BATCH_PLAN_CHANGED'});
 });
 test('rights failure aborts further reads and invalidates earlier commands',async t=>{
  const h=harness(t,['NM1','NM2','NM3']);t.mock.method(h.boundary,'guard',async(_c,input,_o,fn)=>{if(input.sku==='NM2')throw Object.assign(Error('Revoked'),{statusCode:403,code:'ADMIN_PERMISSION_REVOKED'});return fn({publicSku:input.sku});});

@@ -193,9 +193,10 @@ async function apply(config,input,options={}) {
         ...(Array.isArray(decision)?{fields:fields.map(f=>({target:f.target,scope:f.scope,state:f.state}))}:{state:fields[0].state}),alreadyApplied:true},complete:prior.result.completed,
         readyForOutbound:prior.result.readyForOutbound===true};
     }
-    const {observation}=await boundary.observe(config,{sku:state.publicSku,bindingRevisionId:input.bindingRevisionId},options);
+    const {observation,report}=await boundary.observe(config,{sku:state.publicSku,bindingRevisionId:input.bindingRevisionId},options);
     const base=await inspect(config,observation,options);
     if(base.mode!=='first'||base.previewToken!==input.previewToken) fail('PREVIEW_STALE');
+    if(options.validateFirstSyncDecision)await options.validateFirstSyncDecision(base,report,choices);
     // Reuse the fresh observation and captured external evidence for this exact decision.
     const {prepared}=await prepareDecision(config,base,decision,options);
     const selected=choices.map(d=>prepared.rows.find(row=>fieldKey(row)===fieldKey(d)));

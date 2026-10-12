@@ -285,11 +285,12 @@ test('canonical local authority and atomic batch decisions',async t=>{
    assert.equal(await f.fingerprint(),before);assert.ok(f.calls.slice(callsBefore).every(x=>x.method==='GET'));
    assert.equal(out.counts.readyForApply,1,JSON.stringify(out));assert.equal(out.results[0].readyForOutboundAfterChoices,true);
    const original=(await f.db.query('SELECT * FROM products WHERE id=$1',[p.id])).rows[0],choice=out.results[0].applyInput;
-   const applied=await service.apply(f.config,choice,f.run);assert.equal(applied.readyForOutbound,true);
+   const packetRun={...f.run,validateFirstSyncDecision:(base,report,choices)=>batch.validatePacketDecision(base,report,input,input.items[0],choices)};
+   const applied=await service.apply(f.config,choice,packetRun);assert.equal(applied.readyForOutbound,true);
    const pending=await currentFields(f,p);assert.equal(pending.session.completed_at,null);
    assert.ok(pending.fields.filter(x=>targets.includes(x.target)||x.target==='decor_weight').every(x=>x.state==='pending_outward_confirmation'));
    const auditCount=(await f.db.query("SELECT count(*)::int n FROM audit_events WHERE event_key='magento.first_sync_progress_recorded' AND subject_id=$1",[pending.session.id])).rows[0].n;
-   const retry=await service.apply(f.config,{...choice,choices:[...choice.choices].reverse()},f.run);assert.equal(retry.receipt.alreadyApplied,true);
+   const retry=await service.apply(f.config,{...choice,choices:[...choice.choices].reverse()},packetRun);assert.equal(retry.receipt.alreadyApplied,true);
    assert.equal((await f.db.query("SELECT count(*)::int n FROM audit_events WHERE event_key='magento.first_sync_progress_recorded' AND subject_id=$1",[pending.session.id])).rows[0].n,auditCount);
    const job=await jobs.enqueue(f.config,request(f,p),f.run);assert.equal(job.baseline.firstSyncSeo,undefined);
    const done=await jobs.applyJob(f.config,job.id,{...f.run,apply:true});assert.equal(done.state,'succeeded',JSON.stringify(done.failure));
@@ -308,6 +309,10 @@ test('canonical local authority and atomic batch decisions',async t=>{
      fields:inspection.fields.filter(x=>x.canKeepLocal).map(x=>({target:x.target,scope:x.scope,local:x.local.value,remote:x.remote.value}))}]};
    let before=await f.fingerprint(),out=await batch.preflight(f.config,input,f.run);assert.equal(out.counts.readyForApply,0);
    assert.ok(out.results[0].blockers.some(b=>b.code==='BATCH_WEIGHT_NOT_ROUNDING_ONLY'));assert.equal(await f.fingerprint(),before);
+   const claimed=structuredClone(input);claimed.items[0].fields.find(f=>f.target==='decor_weight').remote=132;
+   await assert.rejects(service.apply(f.config,{...request(f,p),previewToken:inspection.previewToken,choices:[{target:'decor_weight',scope:'all',choice:'keep_local'}]},
+     {...f.run,validateFirstSyncDecision:(base,report,choices)=>batch.validatePacketDecision(base,report,claimed,claimed.items[0],choices)}),{code:'BATCH_PLAN_CHANGED'});
+   assert.equal(await f.fingerprint(),before);assert.equal(await currentFields(f,p),null);
    input.items[0].fields=input.items[0].fields.filter(f=>f.target!=='decor_weight');input.items[0].expectedProduct.answers={changed:1};
    out=await batch.preflight(f.config,input,f.run);assert.ok(out.results[0].blockers.some(b=>b.code==='BATCH_PRODUCT_CHANGED'));assert.equal(await f.fingerprint(),before);
    input.items[0].expectedProduct= batch.source(observation.amber.product);f.remotes.get(p.sku).en.meta_title=42;

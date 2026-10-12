@@ -119,6 +119,14 @@ test('fresh decision rejects raw source drift even when projected output stays e
   h.observed.amber.product.details.answers.unmappedSource='changed again';h.failObservation=true;
   const retry=await service.apply(h.config,fresh,h.options);assert.equal(retry.receipt.alreadyApplied,true);assert.equal(h.calls.ledger,1);
 });
+test('internal packet validation runs before any write, and exact receipt replay precedes fresh validation',async t=>{
+  const h=harness(t),input=await inputFor(h);let checks=0;
+  const denied={...h.options,validateFirstSyncDecision:()=>{checks++;throw c.error(409,'BATCH_PLAN_CHANGED','Changed packet');}};
+  await assert.rejects(service.apply(h.config,input,denied),{code:'BATCH_PLAN_CHANGED'});assert.equal(checks,1);assert.equal(h.calls.ledger,0);
+  const accepted={...h.options,validateFirstSyncDecision:()=>{checks++;}};await service.apply(h.config,input,accepted);
+  assert.equal(checks,2);assert.equal(h.calls.ledger,1);h.failObservation=true;
+  const retry=await service.apply(h.config,input,denied);assert.equal(retry.receipt.alreadyApplied,true);assert.equal(checks,2);assert.equal(h.calls.ledger,1);
+});
 
 test('public apply recovers a lost response exactly and retains blocked whole-product readiness', async t => {
   const h = harness(t), input = await inputFor(h);

@@ -54,40 +54,52 @@ async function packetAuthority(config,input,options) {
       || revision.definitionHash!==input.expectedDefinitionHash)throw c.error(409,'BATCH_BINDING_CHANGED','Опубліковані відповідності змінилися.');
   }finally{await gate.rollback(client).catch(()=>{});await gate.release(client).catch(()=>{});client.release();}
 }
+function packetDecision(base,report,input,item) {
+  const observation=base.observation;
+  const p=observation.amber.product,blockers=[];
+  const block=(code,target,scope)=>blockers.push({code,...(target?{target,scope}:{})});
+  if(p.public_sku!==item.sku || observation.raw?.sku!==item.sku || observation.raw?.id!==item.remoteProductId)block('BATCH_IDENTITY_CHANGED');
+  if(c.hash(source(p))!==c.hash(item.expectedProduct))block('BATCH_PRODUCT_CHANGED');
+  if(observation.amber.compiled.hash!==input.expectedDefinitionHash)block('BATCH_DEFINITION_CHANGED');
+  if(p.status!=='active'||p.corrected_to_product_id!=null||p.is_test_product===true||Number(p.exclude_from_export)!==0
+    || p.exportState?.route!=='normal'||p.exportState.business_exclusion_state!=='none'
+    || p.exportState.recount_compatibility_excluded||p.exportState.independentExclusion===true)block('BATCH_LIFECYCLE_NOT_NORMAL');
+  if(report?.evaluation?.ready!==true || report?.syncEligibility?.eligible!==true || report?.sendable!==true)
+    block('BATCH_PRODUCT_PAYLOAD_NOT_READY');
+  const choices=[];
+  if(base.mode!=='first')return {blockers,choices};
+  for(const wanted of item.fields) {
+    const row=base.fields.find(f=>fieldKey(f)===fieldKey(wanted));
+    const meta=base.projection.projection.find(f=>fieldKey(f)===fieldKey(wanted));
+    const seo=['meta_title','meta_description'].includes(wanted.target)&&['all','en'].includes(wanted.scope);
+    const price=wanted.target==='price'&&wanted.scope==='all';
+    const weight=meta?.persistence==='weight'&&wanted.scope==='all';
+    if(!seo&&!price&&!weight){block('BATCH_FIELD_NOT_APPROVED',wanted.target,wanted.scope);continue;}
+    if(!row||!row.local.known||!row.remote.known||!sameValue(wanted,wanted.local,row.local.value)
+      || !sameValue(wanted,wanted.remote,row.remote.value)) {block('BATCH_FIELD_CHANGED',wanted.target,wanted.scope);continue;}
+    const priorSeoPending=seo&&base.first.progress?.fields.some(f=>fieldKey(f)===fieldKey(wanted)&&f.state==='seo_pending_initial_readback');
+    if(!priorSeoPending&&sameValue(wanted,row.local.value,row.remote.value))continue;
+    if(weight&&!roundedWeight(row.local.value,row.remote.value)){block('BATCH_WEIGHT_NOT_ROUNDING_ONLY',wanted.target,wanted.scope);continue;}
+    if(!row.canKeepLocal){block('BATCH_LOCAL_CHOICE_UNAVAILABLE',wanted.target,wanted.scope);continue;}
+    choices.push({target:wanted.target,scope:wanted.scope,choice:'keep_local'});
+  }
+  return {blockers,choices};
+}
+function validatePacketDecision(base,report,input,item,choices) {
+  const checked=packetDecision(base,report,input,item);
+  if(checked.blockers.length || !checked.choices.length || c.hash(first.decisions({choices:checked.choices}))!==c.hash(first.decisions({choices})))
+    throw c.error(409,'BATCH_PLAN_CHANGED','Потрібна нова перевірка точного пакета.', {blockers:checked.blockers});
+}
 async function inspectItem(config,input,item,options) {
   const boundary=require('./sync-job.service').recoveryBoundary;
   return boundary.guard(config,{sku:item.sku,bindingRevisionId:input.bindingRevisionId},options,async state=>{
     const {observation,report}=await boundary.observe(config,{sku:state.publicSku,bindingRevisionId:input.bindingRevisionId},options);
-    const p=observation.amber.product,blockers=[];
-    const block=(code,target,scope)=>blockers.push({code,...(target?{target,scope}:{})});
-    if(p.public_sku!==item.sku || observation.raw?.sku!==item.sku || observation.raw?.id!==item.remoteProductId)block('BATCH_IDENTITY_CHANGED');
-    if(c.hash(source(p))!==c.hash(item.expectedProduct))block('BATCH_PRODUCT_CHANGED');
-    if(observation.amber.compiled.hash!==input.expectedDefinitionHash)block('BATCH_DEFINITION_CHANGED');
-    if(p.status!=='active'||p.corrected_to_product_id!=null||p.is_test_product===true||Number(p.exclude_from_export)!==0
-      || p.exportState?.route!=='normal'||p.exportState.business_exclusion_state!=='none'
-      || p.exportState.recount_compatibility_excluded||p.exportState.independentExclusion===true)block('BATCH_LIFECYCLE_NOT_NORMAL');
-    if(report.evaluation?.ready!==true || report.syncEligibility?.eligible!==true || report.sendable!==true)
-      block('BATCH_PRODUCT_PAYLOAD_NOT_READY');
     const base=await first.inspect(config,observation,options);
+    const {blockers,choices}=packetDecision(base,report,input,item);
+    const block=(code,target,scope)=>blockers.push({code,...(target?{target,scope}:{})});
     if(base.mode!=='first') {
       return {sku:item.sku,mode:base.mode,status:base.mode==='ordinary'&&!blockers.length?'ordinary_preview_required':'blocked',
         blockers:[...blockers,...base.blockers],...(base.historyReview?{historyReview:base.historyReview}:{}),readyForApply:false};
-    }
-    const choices=[];
-    for(const wanted of item.fields) {
-      const row=base.fields.find(f=>fieldKey(f)===fieldKey(wanted));
-      const meta=base.projection.projection.find(f=>fieldKey(f)===fieldKey(wanted));
-      const seo=['meta_title','meta_description'].includes(wanted.target)&&['all','en'].includes(wanted.scope);
-      const price=wanted.target==='price'&&wanted.scope==='all';
-      const weight=meta?.persistence==='weight'&&wanted.scope==='all';
-      if(!seo&&!price&&!weight){block('BATCH_FIELD_NOT_APPROVED',wanted.target,wanted.scope);continue;}
-      if(!row||!row.local.known||!row.remote.known||!sameValue(wanted,wanted.local,row.local.value)
-        || !sameValue(wanted,wanted.remote,row.remote.value)) {block('BATCH_FIELD_CHANGED',wanted.target,wanted.scope);continue;}
-      const priorSeoPending=seo&&base.first.progress?.fields.some(f=>fieldKey(f)===fieldKey(wanted)&&f.state==='seo_pending_initial_readback');
-      if(!priorSeoPending&&sameValue(wanted,row.local.value,row.remote.value))continue;
-      if(weight&&!roundedWeight(row.local.value,row.remote.value)){block('BATCH_WEIGHT_NOT_ROUNDING_ONLY',wanted.target,wanted.scope);continue;}
-      if(!row.canKeepLocal){block('BATCH_LOCAL_CHOICE_UNAVAILABLE',wanted.target,wanted.scope);continue;}
-      choices.push({target:wanted.target,scope:wanted.scope,choice:'keep_local'});
     }
     let planned=null;
     if(!blockers.length && choices.length) {
@@ -144,4 +156,4 @@ async function preflight(config,input,options={}) {
     ...(globalFailure?{globalFailure}:{}),
     execution:'Per-product atomic choices only; no enqueue, adoption or Magento writes performed.'};
 }
-module.exports={preflight,command,source,roundedWeight,MAX_PRODUCTS};
+module.exports={preflight,command,source,roundedWeight,MAX_PRODUCTS,validatePacketDecision};
