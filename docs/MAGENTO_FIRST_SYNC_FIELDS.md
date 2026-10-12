@@ -176,6 +176,42 @@ the existing generated-name anchor and a valid saved pair; inability to build th
 pair is an explicit setter blocker. Information/price changes retain accepted or
 manual names while reanchoring them to the resulting generated pair.
 
+## NM SEO received for the first verified delivery
+
+Migration [075](../server/migrations/075_nm_first_sync_seo_receipts.sql) adds the
+closed `nm-first-sync-seo-v1` receipt contract for category `NM`, targets
+`meta_title` and `meta_description`, and scopes `all` and `en`. Valid populated
+Magento text is authoritative for this initial phase, even when the active
+template has a different output. Exact identity, approved mapping, pinned/current
+text metadata, scope and successful fresh reads remain required. Confirmed empty
+remote fields keep the existing guarded outward policy; malformed or unavailable
+reads remain blockers.
+
+Adoption stores the exact text and provenance in the existing first-sync ledger
+as `seo_pending_initial_readback`. It never writes product inputs, weights,
+prices, names or template definitions. Old `review_required` SEO rows can receive
+this snapshot; existing equal terminal receipts remain unchanged. Pending SEO
+is permanent and cannot be reset or replaced after remote/mapping changes.
+Preview is read-only and cannot complete this receipt, including when every
+other field is equal.
+
+Enqueue binds `baseline.firstSyncSeo` to the immutable originating session and
+revision, exact origin/product/public identity/SKU/remote ID, binding/definition,
+schema observation, field/scope values and mapping hashes. An opaque server proof
+suppresses only these accepted populated SEO fields in the first job's base/EN
+payload and English verification intent. Restart, pre-step reads, recovery and
+final readback reconstruct and revalidate that proof from immutable evidence;
+changed values or context block the original job.
+
+Only verified final delivery plus successful job acknowledgment advances pending
+SEO to `seo_received`. Both share the existing local transaction and audit:
+failure rolls back acknowledgment and completion. Reviewed GET reconciliation
+may record an already verified result without a repeated remote write. Retries
+create no duplicate terminal receipts. After completion, a distinct ordinary
+generation applies the unchanged active template rules. No new publication,
+history admission, automatic production enrollment or delivery acceptance is
+implied by installing this migration.
+
 ## Canonical setters and unsupported coverage
 
 | Mapping | Current persistence support |

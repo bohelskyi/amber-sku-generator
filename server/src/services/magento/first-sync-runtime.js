@@ -3,6 +3,7 @@ const service = require('./first-sync.service');
 const ledger = require('./first-sync-ledger');
 const optionalReceipts = require('./first-sync-optional-receipt-audit');
 const nativeCreate = require('./first-sync-native-create');
+const seo = require('./first-sync-seo-proof');
 const { TERMINAL, fieldKey } = require('./first-sync-progress-plan');
 const fail = code => {throw c.error(409,'MAGENTO_FIRST_SYNC_' + code,'Передавання потребує актуального рішення щодо полів першої синхронізації.');};
 const lanes = new WeakMap();
@@ -58,6 +59,7 @@ function hasProgressChange(inspection) {
     || c.hash(record(row.record))!==c.hash(previous.get(fieldKey(row))));
 }
 async function enforce(config,observation,state,options,{job=null,createLane=null,intent=null}={}) {
+  if(job?.baseline?.firstSyncSeo && job.intent?.mode!=='update') fail('SEO_RECEIPT_CHANGED');
   let inspection;
   if(createLane) {
     const proof=lanes.get(createLane);
@@ -90,6 +92,7 @@ async function enforce(config,observation,state,options,{job=null,createLane=nul
     finally {await require('../full-product-cutover-gate').release(manualClient).catch(()=>{});manualClient.release();}
   }
   if(manualProof) {
+    if(job?.baseline?.firstSyncSeo) fail('SEO_RECEIPT_CHANGED');
     const token=Object.freeze({});
     lanes.set(token,{mode:'reviewed_manual',manualProof,nameProof:null,key:receiptKey(state)});
     return token;
@@ -131,6 +134,12 @@ async function enforce(config,observation,state,options,{job=null,createLane=nul
     fieldNameProof=await readNameProof(options.databasePool,job,observation);
     if(!fieldNameProof) fail('NAME_RECEIPT_CHANGED');
   }
+  let seoProof=inspection.mode==='first' ? seo.issue(observation,inspection.prepared,inspection.projection) : null;
+  if(job?.baseline?.firstSyncSeo) {
+    seoProof=await readSeoProof(options.databasePool,job,observation);
+    if(!seoProof) fail('SEO_RECEIPT_CHANGED');
+  } else if(job && seoProof) fail('SEO_DELIVERY_REVIEW_REQUIRED');
+  if(inspection.prepared?.rows.some(row=>row.record.state===seo.PENDING) && !seoProof) fail('SEO_RECEIPT_CHANGED');
   const token=Object.freeze({});
   lanes.set(token,{mode:inspection.mode,key:inspection.first?.key || receiptKey(state),receiptRevision,sessionId,
     jobId:job?.id,productId:state.productId,bindingId:state.revision.id,
@@ -139,7 +148,7 @@ async function enforce(config,observation,state,options,{job=null,createLane=nul
     installationKey:observation.amber.revision.installationKey,
     historyAdmission:inspection.first?.historyAdmission,reviewedRecovery:inspection.reviewedRecovery===true,config,observation,
     manifest:inspection.prepared?.manifest,
-    nameProof:fieldNameProof,nativeCreate:birthProof});
+    nameProof:fieldNameProof,seoProof,seoJob:job,nativeCreate:birthProof});
   return token;
 }
 function reviewedRecovery(job,steps,observation,review,{allowDispatched=false}={}) {
@@ -198,7 +207,48 @@ async function readNameProof(db,job,observation) {
   } catch(cause) {await client.query('ROLLBACK').catch(()=>{});throw cause;}
   finally {client.release();}
 }
+async function seoBaselineOnClient(client,token,observation) {
+  const proof=lanes.get(token);if(!proof?.seoProof) return null;
+  const current=await ledger.readOnClient(client,proof.key);
+  if(!current || current.session.id!==proof.sessionId || current.session.revision!==proof.receiptRevision) fail('DISPATCH_RECEIPT_CHANGED');
+  return seo.baselineReceipt(observation,proof.seoProof,current);
+}
+async function readSeoProof(db,job,observation) {
+  const ref=job?.baseline?.firstSyncSeo;if(!ref) return null;
+  if(typeof ref.sessionId!=='string'||!/^[a-f0-9-]{36}$/.test(ref.sessionId)
+    ||typeof ref.revision!=='string'||!/^[1-9][0-9]{0,18}$/.test(ref.revision)) return null;
+  const client=await db.connect();
+  try {
+    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    const progress=await ledger.readOnClient(client,{originHash:job.origin_hash,publicIdentityId:String(job.public_product_identity_id)});
+    const row=(await client.query('SELECT command FROM magento_first_sync_progress WHERE session_id=$1 AND revision=$2',[ref.sessionId,ref.revision])).rows[0];
+    await client.query('COMMIT');return row&&progress ? seo.restore({observation,job,progress,command:row.command}) : null;
+  } catch(cause) {await client.query('ROLLBACK').catch(()=>{});throw cause;}
+  finally {client.release();}
+}
+async function completeSeoOnClient(client,token,job,observation,actorUserId) {
+  if(!job.baseline?.firstSyncSeo) return null;
+  const proof=lanes.get(token);if(!proof?.seoProof) fail('SEO_RECEIPT_CHANGED');
+  if(job.state!=='succeeded'||!job.acknowledged_at || !seo.allows(observation,proof.seoProof,job)) fail('SEO_RECEIPT_CHANGED');
+  const current=await ledger.readOnClient(client,proof.key);
+  if(!current || current.session.revision!==proof.receiptRevision) fail('DISPATCH_RECEIPT_CHANGED');
+  const fields=seo.receivedFields(current,proof.seoProof,job);
+  if(!current.fields.some(f=>f.state===seo.PENDING)) return null;
+  const latest=(await client.query('SELECT command FROM magento_first_sync_progress WHERE session_id=$1 AND revision=$2',
+    [current.session.id,current.session.revision])).rows[0]?.command;
+  if(!latest?.requiredScopes?.length || fields.some(f=>!TERMINAL.has(f.state))) fail('FIELDS_UNRESOLVED');
+  const result=await ledger.recordProgressOnClient(client,{key:proof.key,identity:{installationKey:current.session.installation_key,
+    publicSku:current.session.public_sku,remoteProductId:String(current.session.remote_product_id),
+    initialProductId:current.session.initial_product_id,initialBindingRevisionId:current.session.initial_binding_revision_id,
+    contractVersion:current.session.initial_contract_version},expectedRevision:current.session.revision,
+    previewHash:c.hash({contract:seo.CONTRACT,jobId:job.id,planHash:job.plan_hash,revision:current.session.revision,fields}),
+    fields,actorUserId,complete:true,readyForOutbound:true,requiredScopes:latest.requiredScopes,
+    ...(current.historyAdmissionEventId?{historyAdmissionEventId:current.historyAdmissionEventId,
+      captureAdmissionState:tx=>require('./first-sync-cutover-admission').captureState(tx,job.product_id)}:{})});
+  proof.receiptRevision=result.revision;return result;
+}
 function nameProof(token) {return lanes.get(token)?.nameProof || null;}
+function seoProof(token) {return lanes.get(token)?.seoProof || null;}
 function nativeCreateReference(token) {const proof=lanes.get(token)?.nativeCreate;return proof ? nativeCreate.baselineReference(proof) : null;}
 function isCreateLane(token) {return lanes.get(token)?.mode==='create';}
 async function assertDispatchOnClient(client,token) {
@@ -206,6 +256,7 @@ async function assertDispatchOnClient(client,token) {
   // Recheck every lane, including completed sessions and durable CREATE/manual
   // recovery. A terminal receipt is immutable history, not proof of validity.
   const current=await assertOptionalReceipts(client,proof.key);
+  if(proof.seoProof) seo.assertProgress(current,proof.seoProof,proof.seoJob||null);
   if(proof.nativeCreate) await nativeCreate.assertOnClient(client,proof.nativeCreate);
   if(proof.mode==='reviewed_manual') {
     await require('./first-sync-reviewed-manual').assertOnClient(client,proof.manualProof);
@@ -218,9 +269,10 @@ async function assertDispatchOnClient(client,token) {
   if(!current || current.session.revision!==proof.receiptRevision
     || current.session.public_sku!==proof.sku || Number(current.session.remote_product_id)!==proof.remoteId
     || current.session.installation_key!==proof.installationKey) fail('DISPATCH_RECEIPT_CHANGED');
-  const acceptable=field=>TERMINAL.has(field.state)||field.state==='pending_outward_confirmation';
+  const acceptable=field=>TERMINAL.has(field.state)||field.state==='pending_outward_confirmation'||field.state===seo.PENDING;
   const fields=new Map(current.fields.map(field=>[fieldKey(field),field]));
   if(current.fields.some(field=>!acceptable(field)) || proof.manifest.some(scope=>!acceptable(fields.get(fieldKey(scope)) || {})))
     fail('FIELDS_UNRESOLVED');
 }
-module.exports={needsExistingReview,enforce,isCreateLane,nameProof,nativeCreateReference,nameBaselineOnClient,readNameProof,assertDispatchOnClient,reviewedRecovery,recoveryIsReviewed};
+module.exports={needsExistingReview,enforce,isCreateLane,nameProof,seoProof,nativeCreateReference,nameBaselineOnClient,readNameProof,
+  seoBaselineOnClient,readSeoProof,completeSeoOnClient,assertDispatchOnClient,reviewedRecovery,recoveryIsReviewed};

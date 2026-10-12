@@ -485,4 +485,28 @@ function applyFirstSyncNameProof(report,observation,proof,{job=null,freshObserva
   return {...report,blockers,sendable:blockers.length===0,
     sendability:sendability(blockers,report.candidatePayload,report.transport)};
 }
-module.exports = { previewProduct, planPreview, preparePreview, comparison, readCategoryObservation,applyFirstSyncNameProof };
+function applyFirstSyncSeoProof(report,observation,proof,options={}) {
+  if(!proof) {
+    if(options.job?.baseline?.firstSyncSeo) throw error(409,'MAGENTO_FIRST_SYNC_SEO_RECEIPT_CHANGED','Потрібна перевірка SEO першої доставки.');
+    return report;
+  }
+  const fields=require('./first-sync-seo-proof').fieldsFor(observation,proof,options);
+  if(!fields.length) throw error(409,'MAGENTO_FIRST_SYNC_SEO_RECEIPT_CHANGED','Потрібна перевірка SEO першої доставки.');
+  const base=new Set(fields.filter(f=>f.scope==='all').map(f=>f.target)),en=new Set(fields.filter(f=>f.scope==='en').map(f=>f.target));
+  const omit=product=>({...product,custom_attributes:(product.custom_attributes||[]).filter(a=>!en.has(a.attribute_code))});
+  const candidatePayload={product:{...report.candidatePayload.product,
+    custom_attributes:(report.candidatePayload.product.custom_attributes||[]).filter(a=>!base.has(a.attribute_code))}};
+  const store={...report.transport.storeViews,diff:report.transport.storeViews.diff.map(d=>en.has(d.target)
+    ? {...d,action:'preserve',authority:'first_sync_seo',reason:'FIRST_SYNC_MAGENTO_SEO_ACCEPTED'} : d),
+    preservedFields:[...new Set([...report.transport.storeViews.preservedFields,...en])]};
+  if(store.candidatePayload) {
+    const product=omit(store.candidatePayload.product);
+    store.candidatePayload=product.name!==undefined||product.custom_attributes.length ? {product} : null;
+    store.action=store.candidatePayload?'would_update':'unchanged';
+  }
+  const transport={...report.transport,storeViews:store};
+  return {...report,candidatePayload,transport,diff:report.diff.map(d=>base.has(d.target)
+    ? {...d,action:'preserve',includedInPayload:false,reason:'FIRST_SYNC_MAGENTO_SEO_ACCEPTED'} : d),
+    sendability:sendability(report.blockers,candidatePayload,transport)};
+}
+module.exports = { previewProduct, planPreview, preparePreview, comparison, readCategoryObservation,applyFirstSyncNameProof,applyFirstSyncSeoProof };

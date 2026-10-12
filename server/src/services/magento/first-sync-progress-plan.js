@@ -1,5 +1,5 @@
 const { hash } = require('./binding-contract');
-const TERMINAL = new Set(['imported','equal','optional_empty','outward_verified','name_received']);
+const TERMINAL = new Set(['imported','equal','optional_empty','outward_verified','name_received','seo_received']);
 const CORRECTION_REASONS = new Set(['FIRST_SYNC_LEGACY_SKU_CORRECTION_REQUIRED',
   'FIRST_SYNC_LEGACY_MISSING_ONLY_REVIEW_REQUIRED', 'FIRST_SYNC_LEGACY_WEIGHT_IDENTITY_REVIEW_REQUIRED',
   'FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN', 'FIRST_SYNC_CANONICAL_CALIBRATION_REVIEW_REQUIRED']);
@@ -23,7 +23,9 @@ function prepareProgress(projection, progress, decision = null) {
     const supported=['name','information','price','weight','characteristic'].includes(meta.persistence) && !meta.importBlocker && !meta.reason;
     const reverseValues = field.kind==='option' ? [...new Set((field.reverseCandidates || [])
       .filter(candidate=>candidate.optionId===String(field.remote.value)).map(candidate=>String(candidate.value)))] : null;
-    const canAcceptRemote=result.status==='conflict' && supported && field.mapping.proven
+    const seo=meta.persistence==='seo_snapshot' && field.kind==='seo';
+    const canAcceptRemote=seo ? result.status==='seo_pending_initial_readback' && prior?.state!=='seo_pending_initial_readback'
+      : result.status==='conflict' && supported && field.mapping.proven
       && (!reverseValues || reverseValues.length===1);
     const canKeepLocal=result.status==='conflict' && field.mapping.proven
       && meta.outwardPolicy==='authoritative_create_update';
@@ -36,7 +38,7 @@ function prepareProgress(projection, progress, decision = null) {
     if (selected && decision.choice==='accept_remote' && !canAcceptRemote) fail('DECISION_NOT_AVAILABLE');
     if (priorKeep || selected && decision.choice==='keep_local') {
       status='pending_outward_confirmation';reason='ADMINISTRATOR_KEPT_LOCAL_AWAITING_READBACK';
-    } else if (selected && decision.choice==='accept_remote') {
+    } else if (selected && decision.choice==='accept_remote' && !seo) {
       status='imported';after=reverseValues ? reverseValues[0] : field.remote.value;reason='ADMINISTRATOR_ACCEPTED_REMOTE';
     } else if (status==='imported') after=result.importValue;
     if (status==='imported' && !supported) {
@@ -61,6 +63,14 @@ function prepareProgress(projection, progress, decision = null) {
       ...(selected && decision.choice==='accept_remote' ? {decision:'accept_remote'}:{})};
     const record={target:field.target,scope:field.scope,state,before:field.local,remote:field.remote,
       after,source,mappingHash:meta.mappingHash};
+    if (seo && prior?.state==='seo_pending_initial_readback') {
+      Object.assign(record,Object.fromEntries(['target','scope','state','before','remote','after','source','mappingHash'].map(k=>[k,prior[k]])));
+      if(!['unknown','review_required'].includes(status) && (prior.mappingHash!==meta.mappingHash || hash(prior.remote)!==hash(field.remote))) {
+        status='review_required';reason='FIRST_SYNC_ACCEPTED_SEO_CHANGED';
+      }
+    } else if (seo && status==='seo_pending_initial_readback') {
+      record.after=result.importValue;
+    }
     return {...result,status,reason,local:field.local,remote:field.remote,record,
       canAcceptRemote,canKeepLocal,terminal:TERMINAL.has(state)};
   });

@@ -128,6 +128,7 @@ async function enqueue(config, input, options) {
     const firstLane=await firstSync.enforce(config,observation,state,options,{intent:reviewedIntent});
     const firstNameProof=firstSync.nameProof(firstLane);
     report=require('./sync-preview').applyFirstSyncNameProof(report,observation,firstNameProof);
+    report=require('./sync-preview').applyFirstSyncSeoProof(report,observation,firstSync.seoProof(firstLane));
     if (options.automatic && Object.hasOwn(observation.amber, 'nameState')
       && !require('./first-sync-name-proof').allows(observation,firstNameProof)) {
       const nameResult = await require('./name-state').reconcileObservation(config, observation, options);
@@ -149,6 +150,8 @@ async function enqueue(config, input, options) {
       await firstSync.assertDispatchOnClient(client,firstLane);
       const nameReceipt=await firstSync.nameBaselineOnClient(client,firstLane,observation);
       if(nameReceipt) baseline.firstSyncNames=nameReceipt;
+      const seoReceipt=await firstSync.seoBaselineOnClient(client,firstLane,observation);
+      if(seoReceipt) baseline.firstSyncSeo=seoReceipt;
       const nativeCreateReference=firstSync.nativeCreateReference(firstLane);
       if(nativeCreateReference) baseline.allocatedFirstCreate=nativeCreateReference;
       const job = (await client.query(`
@@ -168,7 +171,7 @@ async function applyJob(config, id, options) {
   if (options.apply !== true) plan.fail('MAGENTO_SYNC_APPLY_REQUIRED');
   c.identity(id);
   let job = (await options.databasePool.query('SELECT * FROM magento_sync_jobs WHERE id=$1', [id])).rows[0];
-  let guardedState; let finalFirstLane;
+  let guardedState; let finalFirstLane; let finalObservation;
   if (!job) plan.fail('MAGENTO_SYNC_JOB_NOT_FOUND');
   const input = { sku: job.sku, bindingRevisionId: job.binding_revision_id };
   const saveState = (state, failure = null) => ledger(options.databasePool, options.actorUserId, state, async (client) => {
@@ -180,6 +183,7 @@ async function applyJob(config, id, options) {
       attempts=attempts+CASE WHEN $2='running' THEN 1 ELSE 0 END,
       acknowledged_at=CASE WHEN $2='succeeded' THEN CURRENT_TIMESTAMP ELSE NULL END WHERE id=$1 RETURNING *`,
     [id, state, JSON.stringify(failure)]))).rows[0];
+    if(state==='succeeded') await firstSync.completeSeoOnClient(client,finalFirstLane,result,finalObservation,options.actorUserId);
     if (state === 'running' && options.recoveryReview) await writeAuditEvent(client, {
       mutationContext: { actorUserId: options.actorUserId, requestId: options.mutationContext?.requestId },
       eventKey: 'magento_sync.recovery_continued', subjectType: 'magento_sync_recovery', subjectId: c.hash(options.recoveryReview),
@@ -224,7 +228,7 @@ async function applyJob(config, id, options) {
           await automatic.assertSnapshot(client, state, options); return job;
         });
       }
-      plan.replan(job, observation,{firstSyncNameProof:firstSync.nameProof(firstLane)});
+      plan.replan(job, observation,{firstSyncNameProof:firstSync.nameProof(firstLane),firstSyncSeoProof:firstSync.seoProof(firstLane)});
       if (observation.domainEvidence.failures?.length) plan.fail('MAGENTO_SYNC_READ_FAILED');
       plan.preflight(job, observation);
       for (let ordinal = 0; ordinal < job.intent.operations.length; ordinal++) {
@@ -287,6 +291,7 @@ async function applyJob(config, id, options) {
       firstLane=await firstSync.enforce(config,observation,state,options,{job,
         createLane:firstSync.isCreateLane(firstLane)?firstLane:null});
       finalFirstLane=firstLane;
+      finalObservation=observation;
       return await saveState('succeeded');
     } catch (cause) {
       local.log(cause, options, { jobId: id });

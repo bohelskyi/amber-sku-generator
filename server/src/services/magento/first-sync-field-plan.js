@@ -16,12 +16,12 @@
 // evaluation of prospective canonical inputs; this planner never reverses them.
 const MAX_FIELDS = 500;
 const MAX_REVERSE_CANDIDATES = 256;
-const KINDS = new Set(['scalar', 'name', 'option', 'derived']);
+const KINDS = new Set(['scalar', 'name', 'option', 'derived', 'seo']);
 const TYPES = new Set(['text', 'decimal', 'boolean', 'option']);
 const STATUSES = ['imported', 'equal', 'optional_empty', 'pending_outward_confirmation',
-  'conflict', 'unknown', 'review_required'];
+  'conflict', 'unknown', 'review_required', 'seo_pending_initial_readback'];
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/;
-const RECEIPTS = new Set(['imported', 'equal', 'optional_empty', 'outward_verified', 'name_received']);
+const RECEIPTS = new Set(['imported', 'equal', 'optional_empty', 'outward_verified', 'name_received', 'seo_received']);
 const CONTROL = /[\u0000-\u001f\u007f]/;
 function invalid() {
   throw Object.assign(new Error('Invalid bounded first-sync field evidence'),
@@ -71,7 +71,8 @@ function validateField(field) {
   if (typeof field.target !== 'string' || typeof field.scope !== 'string'
     || !IDENTIFIER.test(field.target) || !IDENTIFIER.test(field.scope)
     || !KINDS.has(field.kind) || !TYPES.has(field.type) || typeof field.required !== 'boolean'
-    || field.kind === 'name' && field.type !== 'text'
+    || ['name','seo'].includes(field.kind) && field.type !== 'text'
+    || field.kind === 'seo' && (!['meta_title','meta_description'].includes(field.target) || !['all','en'].includes(field.scope))
     || field.kind === 'option' && field.type !== 'option'
     || field.kind !== 'option' && field.type === 'option') invalid();
   if (field.unit != null && !boundedText(field.unit, 32)) invalid();
@@ -87,7 +88,8 @@ function validateField(field) {
       || field.receipt.received !== undefined && typeof field.receipt.received !== 'boolean'
       || field.receipt.state !== undefined && !RECEIPTS.has(field.receipt.state)
       || field.receipt.state !== undefined && field.receipt.received === false
-      || field.receipt.state === 'name_received' && field.kind !== 'name') invalid();
+      || field.receipt.state === 'name_received' && field.kind !== 'name'
+      || field.receipt.state === 'seo_received' && field.kind !== 'seo') invalid();
   }
   if (field.constraints !== undefined) {
     if (field.type !== 'decimal') invalid();
@@ -194,6 +196,8 @@ function planField(field) {
   }
   const remote = normalized(field, field.remote);
   if (remote.reason) return result('review_required', 'REMOTE_' + remote.reason);
+  if (field.kind === 'seo' && !remote.absent) return result('seo_pending_initial_readback', 'FIRST_REMOTE_SEO_AUTHORITATIVE',
+    { importValue: remote.value });
   let local;
   if (field.kind === 'derived') {
     if (!field.prospective?.verified || !Object.hasOwn(field.prospective, 'value')) {
@@ -267,6 +271,7 @@ function planFirstSyncFields(input) {
   const counts = Object.fromEntries(STATUSES.map(status => [status, fields.filter(field => field.status === status).length]));
   const receiptReady = field => ['imported', 'equal', 'optional_empty'].includes(field.status);
   const outwardReady = field => receiptReady(field) || field.status === 'pending_outward_confirmation'
+    || field.status === 'seo_pending_initial_readback'
     || field.ordinaryReconciliation === true;
   return { mode: 'plan_only', fields, progress: { total: fields.length, ...counts,
     received: fields.filter(field => field.received).length,
