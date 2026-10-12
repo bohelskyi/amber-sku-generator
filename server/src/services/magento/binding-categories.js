@@ -1,7 +1,7 @@
 const c = require('./binding-contract');
 const { normalizePath } = require('./sync-preview-categories');
 
-// Migration 041's bounded per-binding evidence JSON holds category decisions.
+// Bounded per-binding evidence JSON holds category decisions (migrations 041/077).
 // It belongs only to the category transport binding, never an EAV option domain.
 function normalizeCategories(rows) {
   return c.unique(c.list(rows, 100).map((r) => {

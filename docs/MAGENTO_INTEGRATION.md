@@ -2185,6 +2185,27 @@ Draft CAS and final local evidence revalidation protect preparation/review; remo
 GETs finish before mutation transactions. Publication and handoff use the separate
 H3b review below.
 
+Category transport attributes retain the complete union of freshly evaluated paths
+and unchanged reviewed paths. Their evidence allows up to **64 KiB of compact JSON**;
+forward migration **077** permits **80 KiB of PostgreSQL JSONB text** for only
+`target=categories` / `strategy=transport_control` attribute rows, leaving space
+for JSONB formatting. This replaces the generic 6500-byte limit that could reject
+a valid successor when, for example, 17 reviewed paths grew to 19 paths during carry.
+The bounded capacity accommodates the existing 100-path contract and ordinary full
+Unicode paths; unusually large or ambiguous evidence still fails the byte limit.
+Routes, other attributes, options and policies keep their 6500-byte application and
+8192-byte database evidence limits. The overall binding bound, 100 paths, 100
+candidates per path, path length, exact identity, unique path and review checks are
+unchanged. No path or candidate is truncated. A carried approval still requires its
+existing proof, and newly observed identities remain unapproved until explicit review.
+Installing this schema/code change does not update any draft or publication, approve
+categories or enqueue products; prepare and review a successor through the existing
+workflow after deployment.
+Schema and code must be deployed together. Once expanded evidence has been saved,
+an older runtime retaining the 6500-byte category limit cannot read that binding;
+an application rollback must retain the compatible reader. The byte bound remains
+independent of the count bound: 100 maximally long paths need not fit.
+
 Legacy fixed-column eager checks are compared by output ownership, including
 their transitive references and diagnostic fields. An SV size-only readiness
 change therefore leaves unrelated SV mapping, option, route and ownership
