@@ -176,7 +176,7 @@ async function apply(config,input,options={}) {
     } catch(cause) {await validation.query('ROLLBACK').catch(()=>{});throw cause;}
     finally {validation.release();}
     const selected=prepared.rows.find(row=>fieldKey(row)===fieldKey(decision));
-    if(!selected||!['pending_outward_confirmation','imported','name_received'].includes(selected.record.state)) fail('DECISION_NOT_AVAILABLE');
+    if(!selected||!['pending_outward_confirmation','imported','name_received','seo_pending_initial_readback'].includes(selected.record.state)) fail('DECISION_NOT_AVAILABLE');
     const inspection={...base,prepared,previewToken:c.hash({previewToken:base.previewToken,decision})};
     const result=await commit(config,inspection,state,{...options,firstSyncDecision:decision});
     return {sku:state.publicSku,...decision,receipt:{sessionId:result.sessionId,revision:result.revision,

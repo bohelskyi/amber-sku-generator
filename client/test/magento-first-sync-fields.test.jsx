@@ -28,6 +28,30 @@ const historyReceipt = () => ({ sku: 'SV1', scope: 'first_sync_review_only', doe
 const openHistory = () => fireEvent.click(screen.getByRole('button', { name: 'Переглянути допуск до полів' }));
 const confirmHistory = () => fireEvent.click(screen.getByRole('button', { name: 'Дозволити перегляд полів' }));
 
+it('saves the initial SEO receipt without editing its template or claiming delivery', async () => {
+  const seo=field({target:'meta_title',scope:'en',status:'seo_pending_initial_readback',reason:'FIRST_REMOTE_SEO_AUTHORITATIVE',
+    local:known('Active SEO template'),remote:known('Existing Magento SEO'),canKeepLocal:false});
+  api.post.mockResolvedValueOnce({data:plan([seo])}).mockResolvedValueOnce({data:receipt({target:'meta_title',scope:'en',
+    receipt:{sessionId:'edcd2e97-8708-4e06-9c2b-55bdbf61a3e2',revision:'1',state:'seo_pending_initial_readback',alreadyApplied:false}})});
+  render(shell());read();await screen.findByText(/Перше SEO/);
+  fireEvent.click(screen.getByRole('button',{name:'Отримати значення Magento: SEO заголовок · EN'}));
+  expect(within(screen.getByRole('dialog')).getByText(/Текст чинного шаблону/)).toBeTruthy();
+  expect(within(screen.getByRole('dialog')).getByText(/Наступні окремі синхронізації/)).toBeTruthy();confirm();
+  await screen.findByText(/SEO Magento збережено для першої доставки/);
+  expect(screen.getByText(/чинний шаблон не змінено/)).toBeTruthy();
+  expect(api.post).toHaveBeenLastCalledWith('/admin/magento-integration/first-sync/apply',
+    {sku:'SV1',bindingRevisionId,previewToken:token,target:'meta_title',scope:'en',choice:'accept_remote'},{signal:expect.any(AbortSignal)});
+  expect(api.post).toHaveBeenCalledTimes(2);
+});
+it('does not receive pending SEO twice and refuses a SEO receipt on a weight field',async()=>{
+  api.post.mockResolvedValueOnce({data:plan([field({target:'meta_description',status:'seo_pending_initial_readback',reason:'FIRST_REMOTE_SEO_AUTHORITATIVE',canAcceptRemote:false,canKeepLocal:false})])});
+  render(shell());read();await screen.findByRole('region',{name:'SEO опис · UA / основний магазин'});
+  expect(screen.getByRole('button',{name:'Отримати значення Magento: SEO опис · UA / основний магазин'}).disabled).toBe(true);
+  cleanup();api.post.mockResolvedValueOnce({data:plan()}).mockResolvedValueOnce({data:receipt({receipt:{sessionId:'edcd2e97-8708-4e06-9c2b-55bdbf61a3e2',revision:'1',state:'seo_pending_initial_readback',alreadyApplied:false}})});
+  render(shell());read();await screen.findByRole('region',{name:'Вага · UA / основний магазин'});accept();confirm();await screen.findByRole('alert');
+  expect(screen.queryByText(/SEO Magento збережено/)).toBeNull();
+});
+
 it('explains the legacy flag and confirms only the reviewed field-admission scope', async () => {
   const data=historyPlan({historyReviewAssessment:{status:'available',code:'FIRST_SYNC_LEGACY_SNAPSHOT_FLAG_REVIEW_AVAILABLE',legacySnapshotFlag:true}});
   data.historyReview.legacySnapshotFlag=true;api.post.mockResolvedValue({data});render(shell());read();

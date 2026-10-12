@@ -61,7 +61,9 @@ async function inspectInside(config, job, steps, state, options) {
     if (job.intent.mode === 'create' && !steps.some((s) => s.ordinal === 0) && observation.raw) fail('MAGENTO_SYNC_REMOTE_STATE_CHANGED');
     const nameProof=await require('./first-sync-runtime').readNameProof(options.databasePool,job,observation);
     if(job.baseline?.firstSyncNames && !nameProof) fail('MAGENTO_FIRST_SYNC_NAME_RECEIPT_CHANGED');
-    plan.replan(job, observation,{firstSyncNameProof:nameProof}); plan.preflight(job, observation);
+    const seoProof=await require('./first-sync-runtime').readSeoProof(options.databasePool,job,observation);
+    if(job.baseline?.firstSyncSeo && !seoProof) fail('MAGENTO_FIRST_SYNC_SEO_RECEIPT_CHANGED');
+    plan.replan(job, observation,{firstSyncNameProof:nameProof,firstSyncSeoProof:seoProof}); plan.preflight(job, observation);
     if (observation.domainEvidence.failures?.length) fail('MAGENTO_SYNC_READ_FAILED');
   } catch (cause) {
     blockers.push({ code: /^(MAGENTO|ADMIN|EXPORT)_[A-Z_]+$/.test(cause.code || '') ? cause.code : 'MAGENTO_SYNC_READ_FAILED' });
@@ -130,6 +132,7 @@ async function reconcile(config, id, input, options = {}) {
           failure=$4::jsonb,updated_at=CURRENT_TIMESTAMP,acknowledged_at=CASE WHEN $2='succeeded' THEN CURRENT_TIMESTAMP ELSE NULL END
           WHERE id=$1 RETURNING *`, [id, checked.review.complete ? 'succeeded' : 'uncertain', checked.observation.raw.id,
           checked.review.complete ? null : JSON.stringify({ code: 'MAGENTO_SYNC_REVIEWED_CONTINUATION_REQUIRED', reconciliationOnly: true })])).rows[0];
+        if(checked.review.complete) await require('./first-sync-runtime').completeSeoOnClient(client,firstLane,updated,checked.observation,options.actorUserId);
         const steps = (await client.query('SELECT * FROM magento_sync_steps WHERE job_id=$1 ORDER BY ordinal', [id])).rows;
         const result = { job: summary(updated, steps), remoteWrites: 0, reviewHash: input.reviewHash };
         await writeAuditEvent(client, { mutationContext: { actorUserId: options.actorUserId, requestId: options.mutationContext?.requestId },

@@ -58,6 +58,18 @@ async function withDependencies(operation) {
 }
 const rejection = code => ({ code: 'MAGENTO_FIRST_SYNC_' + code });
 
+test('SEO-marked job cannot acknowledge with an unrelated lane or inherit CREATE authority',async()=>{
+  await withDependencies(async ({options,client,calls})=>{
+    const f=fixture();f.job.baseline.firstSyncSeo={sessionId:'fixture'};
+    await assert.rejects(runtime.enforce({},f.observation,f.state,options,{job:f.job}),rejection('SEO_RECEIPT_CHANGED'));
+    assert.equal(calls.inspect.length,0);
+    await assert.rejects(runtime.completeSeoOnClient(client,{},f.job,f.observation,1),rejection('SEO_RECEIPT_CHANGED'));
+    const unmarked=structuredClone(f.job);delete unmarked.baseline.firstSyncSeo;
+    assert.equal(await runtime.completeSeoOnClient(client,{},unmarked,f.observation,1),null);
+    assert.equal(calls.read.length,0);
+  });
+});
+
 test('CREATE proof stays opaque and reusable only for the same absent-product job', async () => {
   await withDependencies(async ({ options, calls }) => {
     const f = fixture();

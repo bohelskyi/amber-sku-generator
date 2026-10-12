@@ -5,8 +5,8 @@ const { randomUUID } = require('node:crypto');
 const { hash } = require('./binding-contract');
 const { writeAuditEvent } = require('../../audit/audit-events');
 
-const TERMINAL = new Set(['imported', 'equal', 'optional_empty', 'outward_verified', 'name_received']);
-const STATES = new Set([...TERMINAL, 'conflict', 'unknown', 'pending_outward_confirmation', 'review_required']);
+const TERMINAL = new Set(['imported', 'equal', 'optional_empty', 'outward_verified', 'name_received', 'seo_received']);
+const STATES = new Set([...TERMINAL, 'conflict', 'unknown', 'pending_outward_confirmation', 'review_required', 'seo_pending_initial_readback']);
 const HEX = /^[a-f0-9]{64}$/;
 const UUID = /^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
 const LABEL = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/;
@@ -99,6 +99,12 @@ function validate(input) {
       || typeof provenance.definitionHash !== 'string' || !HEX.test(provenance.definitionHash)
       || typeof provenance.routeKey !== 'string' || !provenance.routeKey.length || provenance.routeKey.length > 512
       || provenance.routeKey.trim() !== provenance.routeKey || /[\u0000-\u001f\u007f]/.test(provenance.routeKey)) fail('INPUT', 422);
+    if(['seo_pending_initial_readback','seo_received'].includes(field.state)
+      && (!['meta_title','meta_description'].includes(field.target)||!['all','en'].includes(field.scope)
+        ||provenance.kind!=='seo_snapshot'||provenance.category!=='NM'||provenance.seoContract!=='nm-first-sync-seo-v1'
+        ||provenance.field!==field.target||field.remote?.known!==true||field.remote.present!==true
+        ||field.remote.value!==field.after||typeof field.after!=='string'||!field.after.trim()||field.after.length>4096
+        ||/[\u0000-\u001f\u007f]/.test(field.after))) fail('INPUT',422);
     seen.add(fieldKey(field));
   }
   command.complete = command.complete === true;
@@ -161,6 +167,12 @@ async function recordProgressOnClient(client, input) {
   const changed = [];
   for (const field of command.fields) {
     const previous = latest.get(fieldKey(field));
+    if(previous?.state==='seo_pending_initial_readback') {
+      const evidence={...previous};delete evidence.revision;delete evidence.recordedAt;
+      if(!['seo_pending_initial_readback','seo_received'].includes(field.state)
+        ||field.state==='seo_pending_initial_readback'&&hash(evidence)!==hash(field)) fail('SEO_RECEIPT');
+    }
+    if(field.state==='seo_received'&&!['seo_pending_initial_readback','seo_received'].includes(previous?.state)) fail('SEO_DELIVERY_REQUIRED');
     if (previous && TERMINAL.has(previous.state)) {
       const evidence = { ...previous }; delete evidence.revision; delete evidence.recordedAt;
       if (hash(evidence) !== hash(field)) fail('TERMINAL');

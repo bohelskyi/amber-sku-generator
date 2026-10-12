@@ -22,7 +22,7 @@ const CONTROLS = new Set(['weight', 'sku', 'store_view_code', 'attribute_set_cod
   'use_config_manage_stock', 'manage_stock', 'out_of_stock_qty', 'weight']);
 const PHOTOS = new Set(['base_image', 'small_image', 'thumbnail_image', 'additional_images',
   'base_image_label', 'small_image_label', 'thumbnail_image_label', 'additional_image_labels']);
-const RECEIPT_STATES = new Set(['imported', 'equal', 'optional_empty', 'outward_verified', 'name_received']);
+const RECEIPT_STATES = new Set(['imported', 'equal', 'optional_empty', 'outward_verified', 'name_received', 'seo_received']);
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/;
 const present = value => value !== null && value !== undefined
   && !(typeof value === 'string' && value.trim() === '');
@@ -60,7 +60,8 @@ function receiptsMap(receipts) {
     if (typeof target !== 'string' || typeof scope !== 'string'
       || !IDENTIFIER.test(target) || !IDENTIFIER.test(scope)) invalid('RECEIPT_IDENTITY_INVALID');
     shape(receipt, ['state'], [], 'RECEIPT_INVALID');
-    if (!RECEIPT_STATES.has(receipt.state) || receipt.state === 'name_received' && target !== 'name') {
+    if (!RECEIPT_STATES.has(receipt.state) || receipt.state === 'name_received' && target !== 'name'
+      || receipt.state === 'seo_received' && (!['meta_title','meta_description'].includes(target)||!['all','en'].includes(scope))) {
       invalid('RECEIPT_STATE_INVALID');
     }
     const key = scope + '/' + target;
@@ -455,6 +456,12 @@ function projectFirstSyncFields(input) {
     // Derived values are current forward observations, never reversible inputs.
     // Display the exact compared output without changing setter authority.
     if (kind === 'derived') local = prospective?.verified ? state(prospective.value, unit) : { known: false };
+    if (category === 'NM' && ['meta_title','meta_description'].includes(target)) {
+      if (!attr || !pinnedAttr || !['text','textarea'].includes(attr.frontend_input)
+        || attr.frontend_input !== pinnedAttr.frontend_input) reason ||= 'SEO_TEXT_ATTRIBUTE_UNSUPPORTED';
+      persistence = 'seo_snapshot'; kind = 'seo'; type = 'text';
+      descriptor = { kind:'seo_snapshot', field:target };
+    }
     if (unit && remote.known) remote.unit = unit;
     const receipt = receipts.get(scope + '/' + target);
     if (!receipt && importBlocker && local.known && !local.present && remote.known && remote.present) reason ||= importBlocker;
@@ -466,6 +473,7 @@ function projectFirstSyncFields(input) {
     const source = { kind: descriptor?.kind || 'derived', ...(descriptor?.key ? { key: descriptor.key } : {}),
       ...(descriptor?.field ? { field: descriptor.field } : {}), bindingRevisionId: revision.id,
       definitionHash: compiled.hash, routeKey: route.routeKey,
+      ...(persistence === 'seo_snapshot' ? { category:'NM', seoContract:'nm-first-sync-seo-v1' } : {}),
       ...(direct?.conditions ? { informationConditions: direct.conditions } : {}) };
     let required = target === 'name' || target === 'price' || persistence === 'price'
       || persistence === 'weight' || Boolean(direct?.required) || semanticRequired || attr?.is_required === true;

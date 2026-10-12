@@ -377,3 +377,16 @@ audit. Reviewed inverse receipts require the untouched original post-state.
 See [the canonical weight repair runbook](CANONICAL_WEIGHT_REPAIR.md) for preview,
 explicit selection, stale checks, retry, rollback and the separate production
 review boundary. This migration does not imply production application.
+
+## 075 — NM first-sync SEO delivery receipts
+
+[075_nm_first_sync_seo_receipts.sql](../server/migrations/075_nm_first_sync_seo_receipts.sql)
+adds bounded pending and received SEO states to the existing first-sync ledger.
+It preserves all prior evidence without backfill. Pending snapshots cannot be
+reset; terminal SEO requires its exact predecessor and an acknowledged successful
+job for the same identity, binding and field/scope whose first payload omitted
+that accepted SEO. Completion and audit remain atomic with job acknowledgment.
+No template, binding, product input, permission or runtime gate is published or
+changed by migration startup. See [the field contract](MAGENTO_FIRST_SYNC_FIELDS.md#nm-seo-received-for-the-first-verified-delivery)
+for the initial-phase and subsequent ordinary-template behavior. Existing applied
+migrations remain immutable; rollback follows the runner's transaction boundary.

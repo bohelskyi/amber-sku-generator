@@ -7,7 +7,8 @@ import { Button, ConfirmDialog, Notice, Pagination, StatusBadge, TechnicalDisclo
 const root = '/admin/magento-integration/first-sync';
 const bindingIdPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const identifier = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/;
-const statuses = new Set(['imported', 'equal', 'optional_empty', 'pending_outward_confirmation', 'conflict', 'unknown', 'review_required']);
+const statuses = new Set(['imported', 'equal', 'optional_empty', 'pending_outward_confirmation', 'conflict', 'unknown', 'review_required', 'seo_pending_initial_readback']);
+const seoField = field => ['meta_title','meta_description'].includes(field?.target) && ['all','en'].includes(field?.scope);
 const reasons = {
   FIRST_SYNC_FIELD_CONFLICT: 'Заповнені значення різняться. Потрібне рішення адміністратора для цього поля.',
   REMOTE_READ_UNKNOWN: 'Значення Magento не підтверджено. Повторіть читання перед рішенням.',
@@ -19,6 +20,8 @@ const reasons = {
   NORMALIZED_VALUES_EQUAL: 'Підтверджені значення збігаються після нормалізації.',
   EMPTY_LOCAL_VALID_REMOTE: 'Amber не має значення; підтверджене значення Magento можна отримати.',
   FIRST_REMOTE_NAME_AUTHORITATIVE: 'Під час першого отримання назва Magento має пріоритет окремо для кожної мови. Рішення діє один раз.',
+  FIRST_REMOTE_SEO_AUTHORITATIVE: 'Під час першого отримання SEO Magento зберігається окремо для кожної мови. Шаблон залишається чинним для наступних синхронізацій.',
+  FIRST_SYNC_ACCEPTED_SEO_CHANGED: 'Прийняте SEO або його відповідність змінилися. Потрібна перевірка першої доставки; попереднє отримання не скидається.',
   REQUIRED_FIELD_EMPTY: 'Обов’язкове поле порожнє.',
   SEMANTIC_REQUIREMENT_UNPROVEN: 'Обов’язковість цього поля не підтверджено за правилами товару. Потрібна окрема перевірка.',
   BOTH_EMPTY_OPTIONAL: 'Необов’язкове поле порожнє в обох системах.',
@@ -86,8 +89,8 @@ const invalidKinds = {
   OPTION_INVALID: 'Варіант характеристики має непідтримуваний формат',
   TEXT_INVALID: 'Текст має непідтримуваний формат',
 };
-const labels = { kolir: 'Колір', name: 'Назва', nameUA: 'Назва UA', description: 'Опис', weight: 'Вага', decor_weight: 'Вага вставки', vaha_vyrobu: 'Вага виробу', price: 'Ціна', rozmir_suveniriv: 'Розмір сувеніру', kamin_obrobka: 'Обробка каменю' };
-const statusLabels = { imported: 'Готове до отримання', equal: 'Значення збігаються', optional_empty: 'Необов’язкове, порожнє', pending_outward_confirmation: 'Потрібне підтвердження передачі', conflict: 'Потрібне рішення', unknown: 'Дані не підтверджено', review_required: 'Потрібна перевірка' };
+const labels = { kolir: 'Колір', name: 'Назва', nameUA: 'Назва UA', description: 'Опис', meta_title: 'SEO заголовок', meta_description: 'SEO опис', weight: 'Вага', decor_weight: 'Вага вставки', vaha_vyrobu: 'Вага виробу', price: 'Ціна', rozmir_suveniriv: 'Розмір сувеніру', kamin_obrobka: 'Обробка каменю' };
+const statusLabels = { imported: 'Готове до отримання', equal: 'Значення збігаються', optional_empty: 'Необов’язкове, порожнє', pending_outward_confirmation: 'Потрібне підтвердження передачі', conflict: 'Потрібне рішення', unknown: 'Дані не підтверджено', review_required: 'Потрібна перевірка', seo_pending_initial_readback: 'Перше SEO · очікує підтвердження доставки' };
 const fieldLabel = (field) => `${labels[field.target] || field.target} · ${field.scope === 'all' ? 'UA / основний магазин' : field.scope === 'en' ? 'EN' : field.scope}`;
 function reasonText(code) {
   if (Object.hasOwn(reasons, code)) return reasons[code];
@@ -127,6 +130,7 @@ function checkedPreview(data, sku) {
       || !boundedText(field.status) || !boundedText(field.reason) || !validValue(field.local) || !validValue(field.remote)
       || typeof field.canAcceptRemote !== 'boolean' || typeof field.canKeepLocal !== 'boolean'
       || field.received !== undefined && typeof field.received !== 'boolean') throw new Error('Відповідь містить непідтверджені значення полів. Повторіть перевірку.');
+    if(field.status==='seo_pending_initial_readback'&&!seoField(field)) throw new Error('Стан SEO не підтверджує поле. Повторіть перевірку.');
     const key = JSON.stringify([field.target, field.scope]);
     if (seen.has(key)) throw new Error('Перевірка повторює те саме поле. Повторіть перевірку.');
     seen.add(key);
@@ -149,7 +153,7 @@ function checkedReceipt(data, request) {
     || typeof receipt.sessionId !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(receipt.sessionId)
     || typeof receipt.revision !== 'string' || !/^[1-9][0-9]{0,18}$/.test(receipt.revision)
     || typeof receipt.alreadyApplied !== 'boolean'
-    || !(request.choice === 'keep_local' ? ['pending_outward_confirmation'] : ['imported', 'name_received']).includes(receipt.state)) throw new Error('Збереження поля не підтверджено квитанцією. Перевірте актуальний стан перед повторною дією.');
+    || !(request.choice === 'keep_local' ? ['pending_outward_confirmation'] : ['imported', 'name_received', ...(seoField(request)?['seo_pending_initial_readback']:[])]).includes(receipt.state)) throw new Error('Збереження поля не підтверджено квитанцією. Перевірте актуальний стан перед повторною дією.');
   return data;
 }
 
@@ -237,7 +241,7 @@ function FieldPanel({ sku, onChange, principalLifetime, canRecount }) {
     {currentError && <Notice tone="error">{currentError}</Notice>}
     {savedHistory && <Notice tone="success">{savedHistory.receipt.alreadyApplied ? 'Цю перевірку історії вже збережено.' : 'Перевірку історії збережено.'} Тепер повторіть перевірку актуальних полів. Значення полів, історичні лічильники та доставка не змінювалися.</Notice>}
     {saved && <Notice tone="success"><p>{saved.receipt.alreadyApplied ? 'Це рішення вже було збережено.' : 'Рішення для поля збережено.'} {fieldLabel(saved)}</p>
-      <p>{saved.choice === 'keep_local' ? 'Значення Amber залишено. Передачу в Magento ще потрібно виконати звичайною захищеною синхронізацією та підтвердити читанням.' : saved.receipt.state === 'name_received' ? 'Назву цією мовою отримано один раз. Подальші зміни обробляються за звичайними правилами назв.' : 'Значення Magento отримано в Amber для цього поля.'}</p>
+      <p>{saved.choice === 'keep_local' ? 'Значення Amber залишено. Передачу в Magento ще потрібно виконати звичайною захищеною синхронізацією та підтвердити читанням.' : saved.receipt.state === 'seo_pending_initial_readback' ? 'SEO Magento збережено для першої доставки. Його збереження ще потрібно підтвердити читанням; чинний шаблон не змінено.' : saved.receipt.state === 'name_received' ? 'Назву цією мовою отримано один раз. Подальші зміни обробляються за звичайними правилами назв.' : 'Значення Magento отримано в Amber для цього поля.'}</p>
       <p>Ця квитанція підтверджує локальне рішення. Стан доставки товару не підтверджено.</p>
       <TechnicalDisclosure summary="Квитанція рішення">{() => <pre className="overflow-auto text-xs">{JSON.stringify(saved.receipt, null, 2)}</pre>}</TechnicalDisclosure>
     </Notice>}
@@ -265,8 +269,8 @@ function FieldPanel({ sku, onChange, principalLifetime, canRecount }) {
     {plan?.fields.length > 50 && <Pagination label="Сторінки полів першого отримання" busy={busy} hasPrevious={page > 0} hasNext={(page + 1) * 50 < plan.fields.length} onPrevious={() => setPage(page - 1)} onNext={() => setPage(page + 1)} summary={`Сторінка ${page + 1} · полів ${plan.fields.length}`} />}
     {plan && <TechnicalDisclosure summary="Межі перевірки й технічні причини">{() => <pre className="overflow-auto text-xs">{JSON.stringify({ mode: plan.mode, blockers: plan.blockers, coverage: plan.coverage }, null, 2)}</pre>}</TechnicalDisclosure>}
     <ConfirmDialog open={Boolean(selected)} title={selected ? `Підтвердити поле: ${fieldLabel(selected.field)}` : 'Підтвердити поле'} confirmLabel="Зберегти рішення цього поля" busy={busy} onClose={() => setDecision(null)} onConfirm={apply}>
-      {selected && <div className="space-y-3"><p className="text-sm">Артикул: <strong>{sku}</strong></p><p>Значення Amber перед рішенням: <strong className="whitespace-pre-wrap break-words">{valueText(selected.field.local)}</strong></p><p>Значення Amber після рішення: <strong className="whitespace-pre-wrap break-words">{valueText(selected.choice === 'accept_remote' ? selected.field.remote : selected.field.local)}</strong></p>
-        <p>{selected.choice === 'keep_local' ? 'Дані Amber зберігаються. Це рішення очікуватиме окремої захищеної передачі та підтвердження Magento.' : 'Обране рішення отримує підтверджене значення Magento в Amber для зазначеного поля й мови.'}</p><p className="text-sm">Порожні підтверджені поля та перші назви також обробляються за погодженими правилами отримання. Інші заповнені конфлікти потребують власного рішення.</p></div>}
+      {selected && <div className="space-y-3"><p className="text-sm">Артикул: <strong>{sku}</strong></p><p>{seoField(selected.field)?'Текст чинного шаблону':'Значення Amber перед рішенням'}: <strong className="whitespace-pre-wrap break-words">{valueText(selected.field.local)}</strong></p><p>{seoField(selected.field)?'SEO Magento для першої доставки':'Значення Amber після рішення'}: <strong className="whitespace-pre-wrap break-words">{valueText(selected.choice === 'accept_remote' ? selected.field.remote : selected.field.local)}</strong></p>
+        <p>{selected.choice === 'keep_local' ? 'Дані Amber зберігаються. Це рішення очікуватиме окремої захищеної передачі та підтвердження Magento.' : seoField(selected.field) ? 'SEO Magento буде зафіксовано один раз і збережено під час першої доставки. Наступні окремі синхронізації використовують чинний шаблон.' : 'Обране рішення отримує підтверджене значення Magento в Amber для зазначеного поля й мови.'}</p><p className="text-sm">Порожні підтверджені поля, перші назви та SEO NM також обробляються за погодженими правилами отримання. Інші заповнені конфлікти потребують власного рішення.</p></div>}
     </ConfirmDialog>
     <ConfirmDialog open={Boolean(selectedHistory)} title="Підтвердити перегляд перших полів" confirmLabel="Дозволити перегляд полів" busy={busy} onClose={() => setHistoryDecision(null)} onConfirm={admitHistory}>
       <p>Артикул: <strong>{sku}</strong> · Magento ID <strong>{plan?.historyReview?.remoteProductId}</strong>.</p><p>Підтвердження зберігає лише перевірку історії й дозволяє новий перегляд полів за чинними правилами. Воно не отримує значення, не змінює історичні лічильники, не підтверджує експорт і не запускає передачу.</p>
