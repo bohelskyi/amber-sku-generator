@@ -60,13 +60,13 @@ function scopeInput(field) {
 function validate(input) {
   // Strip only the explicitly allowed callback before traversing all data.
   plain(input, ['key', 'identity', 'expectedRevision', 'previewHash', 'fields', 'actorUserId'],
-    ['applyLocal', 'captureAdmissionState', 'historyAdmissionEventId', 'complete', 'requiredScopes', 'readyForOutbound']);
+    ['applyLocal', 'captureAdmissionState', 'historyAdmissionEventId', 'complete', 'requiredScopes', 'readyForOutbound','seoAuthorityProof']);
   const descriptors = Object.getOwnPropertyDescriptors(input);
   for (const d of Object.values(descriptors)) if (!Object.hasOwn(d, 'value')) fail('INPUT', 422);
   if (input.applyLocal !== undefined && typeof input.applyLocal !== 'function') fail('INPUT', 422);
   if (input.captureAdmissionState !== undefined && typeof input.captureAdmissionState !== 'function') fail('INPUT', 422);
   if ((input.historyAdmissionEventId !== undefined) !== (input.captureAdmissionState !== undefined)) fail('INPUT', 422);
-  const raw = { ...input }; delete raw.applyLocal; delete raw.captureAdmissionState;
+  const raw = { ...input }; delete raw.applyLocal; delete raw.captureAdmissionState;delete raw.seoAuthorityProof;
   data(raw);
   const command = JSON.parse(JSON.stringify(raw)); keyInput(command.key);
   if (command.historyAdmissionEventId !== undefined) counter(command.historyAdmissionEventId);
@@ -164,13 +164,14 @@ async function recordProgressOnClient(client, input) {
   }
   if ((current?.session.revision || '0') !== command.expectedRevision) fail('STALE');
   const latest = new Map((current?.fields || []).map(field => [fieldKey(field), field]));
+  const localSeo=await require('./first-sync-local-authority').validate(client,input.seoAuthorityProof,command,current);
   const changed = [];
   for (const field of command.fields) {
     const previous = latest.get(fieldKey(field));
     if(previous?.state==='seo_pending_initial_readback') {
       const evidence={...previous};delete evidence.revision;delete evidence.recordedAt;
-      if(!['seo_pending_initial_readback','seo_received'].includes(field.state)
-        ||field.state==='seo_pending_initial_readback'&&hash(evidence)!==hash(field)) fail('SEO_RECEIPT');
+      if(!localSeo.has(field.scope+'/'+field.target) && (!['seo_pending_initial_readback','seo_received'].includes(field.state)
+        ||field.state==='seo_pending_initial_readback'&&hash(evidence)!==hash(field))) fail('SEO_RECEIPT');
     }
     if(field.state==='seo_received'&&!['seo_pending_initial_readback','seo_received'].includes(previous?.state)) fail('SEO_DELIVERY_REQUIRED');
     if (previous && TERMINAL.has(previous.state)) {

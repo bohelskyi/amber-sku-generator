@@ -92,6 +92,8 @@ for(const [path,operation] of [['preview','review'],['apply','apply']]) {
   router.post(`${root}/first-sync/${path}`,requirePermission('export_templates.manage'),requirePermission('export_templates.publish'),requirePermission('exports.view'),
     handle((req)=>require('../../services/magento/first-sync.service')[operation](config,req.body,{mutationContext:getRequestMutationContext(req)})));
 }
+router.post(`${root}/first-sync/batch-preview`,requirePermission('export_templates.manage'),requirePermission('export_templates.publish'),requirePermission('exports.view'),
+  handle(req=>require('../../services/magento/first-sync-batch-preflight').preflight(config,req.body,{mutationContext:getRequestMutationContext(req)})));
 router.post(`${root}/first-sync/history-apply`,requirePermission('export_templates.manage'),requirePermission('export_templates.publish'),requirePermission('exports.view'),
   handle(req=>require('../../services/magento/first-sync-cutover-admission').apply(config,req.body,{mutationContext:getRequestMutationContext(req)})));
 for(const [path,operation] of [['preview','review'],['apply','apply']]) {

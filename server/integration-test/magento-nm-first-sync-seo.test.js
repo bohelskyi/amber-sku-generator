@@ -108,7 +108,10 @@ const request=(f,p)=>({sku:p.sku,bindingRevisionId:f.binding.id});
 const currentFields=async(f,p)=>ledger.readOnClient(f.db,{originHash:c.originHash(f.config.baseUrl),publicIdentityId:String(p.publicIdentityId)});
 async function kept(f,p){
   const result=await service.review(f.config,request(f,p),f.run),weight=result.fields.find(x=>x.target==='decor_weight');
-  if(weight.status==='conflict')return service.apply(f.config,{...request(f,p),previewToken:result.previewToken,target:'decor_weight',scope:'all',choice:'keep_local'},f.run);
+  const choices=result.fields.filter(x=>targets.includes(x.target)&&x.canAcceptRemote)
+    .map(({target,scope})=>({target,scope,choice:'accept_remote'}));
+  if(weight.status==='conflict')choices.push({target:'decor_weight',scope:'all',choice:'keep_local'});
+  if(choices.length)return service.apply(f.config,{...request(f,p),previewToken:result.previewToken,choices},f.run);
   return result;
 }
 const cleanField=f=>Object.fromEntries(['target','scope','state','before','remote','after','source','mappingHash'].map(k=>[k,f[k]]));
@@ -142,7 +145,7 @@ test('observed NM10 SEO adoption is a receipt-backed first delivery with ordinar
       for(const p of f.products){const r=await service.review(f.config,request(f,p),f.run);assert.equal(r.mode,'first');
         const weight=r.fields.find(x=>x.target==='decor_weight');assert.equal(weight.local.value,p.localWeight);
         if(weight.status==='conflict'){conflicts++;assert.equal(weight.canKeepLocal,true);assert.equal(weight.canAcceptRemote,false);}
-        assert.equal(r.fields.filter(x=>x.status===seo.PENDING).length,4);assert.equal(r.complete,false);
+        assert.equal(r.fields.filter(x=>targets.includes(x.target)&&x.status==='conflict').length,p.baseSeoEqual?2:4);assert.equal(r.complete,false);
       }
       assert.equal(conflicts,9);assert.equal(await f.fingerprint(),before);assert.ok(f.calls.every(x=>x.method==='GET'));
     });

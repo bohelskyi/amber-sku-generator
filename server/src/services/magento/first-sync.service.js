@@ -23,6 +23,19 @@ async function validatePrepared(client,config,observation,projection,prepared,op
   blockImports(prepared,price.blockedFields);
   deferAfterCanonicalImports(prepared,projection);
 }
+async function prepareDecision(config,base,decision,options) {
+  const prepared=prepareProgress(base.projection,base.first.progress,decision);
+  for(const row of prepared.rows.filter(field=>!field.received))row.record={...cleanRecord(row.record),
+    source:{...row.record.source,productId:base.observation.amber.product.id}};
+  const validation=await options.databasePool.connect();
+  try {
+    await validation.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    await validatePrepared(validation,config,base.observation,base.projection,prepared,options,base.currencyEvidence,base.rateObservation);
+    await validation.query('COMMIT');
+  }catch(cause){await validation.query('ROLLBACK').catch(()=>{});throw cause;}
+  finally{validation.release();}
+  return {...base,prepared};
+}
 
 async function inspect(config, observation, options, {jobId=null,decision=null}={}) {
   const reviewedRecovery=require('./first-sync-runtime').recoveryIsReviewed(options.firstSyncRecoveryProof,jobId,observation);
@@ -62,6 +75,7 @@ async function inspect(config, observation, options, {jobId=null,decision=null}=
   finally {validation.release();}
   const product=observation.amber.product;
   const previewToken=c.hash({origin:first.key.originHash,identity:first.key.publicIdentityId,sku:product.public_sku,
+    productSource:require('./first-sync-source-snapshot').source(product),
     remoteId:observation.raw.id,bindingId:observation.amber.revision.id,definitionHash:observation.amber.compiled.hash,
     eligibility:first.evidenceHash,manifestHash:prepared.manifestHash,rows:prepared.rows,canonicalHash:prepared.canonicalHash,
     currencyEvidence,rateEvidence:rateObservation?.rateInfo ? Object.fromEntries(['rate','rateDate','source','stale']
@@ -100,6 +114,8 @@ async function commit(config, inspection, state, options, {jobId=null}={}) {
       ...(admissionRoot ? {historyAdmissionEventId:admissionRoot,
         captureAdmissionState:tx=>cutover.captureState(tx,product.id)} : {}),
       fields:prepared.rows.map(row=>cleanRecord(row.record)),actorUserId:options.actorUserId,
+      ...(options.firstSyncDecision ? {seoAuthorityProof:require('./first-sync-local-authority').mint(inspection,
+        Array.isArray(options.firstSyncDecision)?options.firstSyncDecision:[options.firstSyncDecision])} : {}),
       requiredScopes:prepared.manifest,complete:prepared.complete,readyForOutbound:prepared.readyForOutbound,
       applyLocal:async(tx,acceptedFields)=>{
         const kind=field=>projection.projection.find(meta=>fieldKey(meta)===fieldKey(field))?.persistence;
@@ -121,12 +137,26 @@ async function commit(config, inspection, state, options, {jobId=null}={}) {
 }
 
 function command(input,applying=false) {
-  c.command(input,['sku','bindingRevisionId'],applying?['previewToken','target','scope','choice']:[]);
+  c.command(input,['sku','bindingRevisionId'],applying?['previewToken','target','scope','choice','choices']:[]);
   c.identity(input.bindingRevisionId);
   if(typeof input.sku!=='string'||!input.sku.trim()||input.sku.length>256||/[\u0000-\u001f\u007f]/.test(input.sku)) c.invalid();
   if(applying && (typeof input.previewToken!=='string'||!/^[a-f0-9]{64}$/.test(input.previewToken)
-    || !['keep_local','accept_remote'].includes(input.choice)
-    || !['target','scope'].every(key=>typeof input[key]==='string'&&/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(input[key])))) c.invalid();
+    )) c.invalid();
+  if(applying) decisions(input);
+}
+function decisions(input) {
+  const batch=Object.hasOwn(input,'choices');
+  if(batch && ['target','scope','choice'].some(k=>Object.hasOwn(input,k)))c.invalid();
+  const list=batch?input.choices:[{target:input.target,scope:input.scope,choice:input.choice}];
+  if(!Array.isArray(list)||!list.length||list.length>500
+    || Array.from({length:list.length},(_,i)=>i).some(i=>!Object.hasOwn(list,i)))c.invalid();
+  for(const d of list) {
+    c.command(d,['target','scope','choice']);
+    if(!['keep_local','accept_remote'].includes(d.choice) || !['target','scope'].every(k=>typeof d[k]==='string'
+      && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(d[k])))c.invalid();
+  }
+  if(new Set(list.map(fieldKey)).size!==list.length)c.invalid();
+  return list.map(d=>({...d})).sort((a,b)=>fieldKey(a).localeCompare(fieldKey(b),'en'));
 }
 const response=inspection=>({mode:inspection.mode,sku:inspection.observation.amber.product.public_sku,
   ...(inspection.previewToken?{previewToken:inspection.previewToken}:{}),fields:inspection.fields,
@@ -148,40 +178,33 @@ async function apply(config,input,options={}) {
   return boundary.guard(config,input,options,async state=>{
     const authority=await options.databasePool.connect();
     try{await require('./binding-publication').administrator(authority,options.actorUserId);}finally{authority.release();}
-    const decision={target:input.target,scope:input.scope,choice:input.choice};
-    const receiptHash=c.hash({previewToken:input.previewToken,decision});
+    const choices=decisions(input),decision=Object.hasOwn(input,'choices')?choices:choices[0];
+    const intent=Object.hasOwn(input,'choices')?{previewToken:input.previewToken,choices}:{previewToken:input.previewToken,decision};
+    const receiptHash=c.hash(intent);
     const prior=(await options.databasePool.query(`SELECT p.command,p.result,s.public_sku,s.installation_key
       FROM magento_first_sync_progress p JOIN magento_first_sync_sessions s ON s.id=p.session_id
       WHERE s.origin_hash=$1 AND s.public_product_identity_id=$2 AND p.preview_hash=$3`,
     [c.originHash(config.baseUrl),state.publicIdentityId,receiptHash])).rows[0];
     if(prior) {
-      const field=prior.command.fields.find(item=>fieldKey(item)===fieldKey(decision));
+      const fields=choices.map(d=>prior.command.fields.find(item=>fieldKey(item)===fieldKey(d)));
       if(prior.public_sku!==state.publicSku || prior.installation_key!==state.revision.installationKey
-        || field?.source?.decision!==decision.choice) fail('RECEIPT_CONFLICT');
-      return {sku:state.publicSku,...decision,receipt:{sessionId:prior.result.sessionId,revision:prior.result.revision,
-        state:field.state,alreadyApplied:true},complete:prior.result.completed,
+        || fields.some((f,i)=>f?.source?.decision!==choices[i].choice)) fail('RECEIPT_CONFLICT');
+      return {sku:state.publicSku,...(Array.isArray(decision)?{choices}:decision),receipt:{sessionId:prior.result.sessionId,revision:prior.result.revision,
+        ...(Array.isArray(decision)?{fields:fields.map(f=>({target:f.target,scope:f.scope,state:f.state}))}:{state:fields[0].state}),alreadyApplied:true},complete:prior.result.completed,
         readyForOutbound:prior.result.readyForOutbound===true};
     }
     const {observation}=await boundary.observe(config,{sku:state.publicSku,bindingRevisionId:input.bindingRevisionId},options);
     const base=await inspect(config,observation,options);
     if(base.mode!=='first'||base.previewToken!==input.previewToken) fail('PREVIEW_STALE');
     // Reuse the fresh observation and captured external evidence for this exact decision.
-    const prepared=prepareProgress(base.projection,base.first.progress,decision);
-    for(const row of prepared.rows.filter(field=>!field.received)) row.record={...cleanRecord(row.record),source:{...row.record.source,productId:observation.amber.product.id}};
-    const validation=await options.databasePool.connect();
-    try {
-      await validation.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
-      await validatePrepared(validation,config,observation,base.projection,prepared,options,base.currencyEvidence,base.rateObservation);
-      await validation.query('COMMIT');
-    } catch(cause) {await validation.query('ROLLBACK').catch(()=>{});throw cause;}
-    finally {validation.release();}
-    const selected=prepared.rows.find(row=>fieldKey(row)===fieldKey(decision));
-    if(!selected||!['pending_outward_confirmation','imported','name_received','seo_pending_initial_readback'].includes(selected.record.state)) fail('DECISION_NOT_AVAILABLE');
-    const inspection={...base,prepared,previewToken:c.hash({previewToken:base.previewToken,decision})};
+    const {prepared}=await prepareDecision(config,base,decision,options);
+    const selected=choices.map(d=>prepared.rows.find(row=>fieldKey(row)===fieldKey(d)));
+    if(selected.some(row=>!row||row.received||!['pending_outward_confirmation','imported','name_received','seo_pending_initial_readback'].includes(row.record.state))) fail('DECISION_NOT_AVAILABLE');
+    const inspection={...base,prepared,previewToken:receiptHash};
     const result=await commit(config,inspection,state,{...options,firstSyncDecision:decision});
-    return {sku:state.publicSku,...decision,receipt:{sessionId:result.sessionId,revision:result.revision,
-      state:selected.record.state,alreadyApplied:result.alreadyApplied},
+    return {sku:state.publicSku,...(Array.isArray(decision)?{choices}:decision),receipt:{sessionId:result.sessionId,revision:result.revision,
+      ...(Array.isArray(decision)?{fields:selected.map(row=>({target:row.target,scope:row.scope,state:row.record.state}))}:{state:selected[0].record.state}),alreadyApplied:result.alreadyApplied},
       readyForOutbound:result.readyForOutbound,complete:result.complete};
   });
 }
-module.exports={inspect,commit,review,apply,response};
+module.exports={inspect,commit,review,apply,response,decisions,prepareDecision};

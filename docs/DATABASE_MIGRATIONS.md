@@ -390,3 +390,16 @@ No template, binding, product input, permission or runtime gate is published or
 changed by migration startup. See [the field contract](MAGENTO_FIRST_SYNC_FIELDS.md#nm-seo-received-for-the-first-verified-delivery)
 for the initial-phase and subsequent ordinary-template behavior. Existing applied
 migrations remain immutable; rollback follows the runner's transaction boundary.
+
+
+## 076 — explicit local SEO authority before first delivery
+
+[076_first_sync_local_seo_authority.sql](../server/migrations/076_first_sync_local_seo_authority.sql)
+adds one checked append-only transition from unfinished NM remote-pending SEO to
+local outward-pending SEO. It requires an active actual administrator, exact prior
+revision/evidence, fresh valid local/remote text, unchanged approved mapping,
+current publication and normal active identity without protected catalog/media/
+visibility work. Existing terminal receipts, completed sessions and all previous
+checksums remain immutable. Startup performs no enrollment, data repair, job
+creation, template/binding publication or remote write. The ordinary delivery
+readback and atomic audit/ACK rules remain in force. See [the field contract](MAGENTO_FIRST_SYNC_FIELDS.md#explicit-local-authority-and-bounded-catalog-packets).

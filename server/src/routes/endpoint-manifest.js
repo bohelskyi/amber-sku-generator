@@ -45,7 +45,7 @@ const ENDPOINT_MANIFEST = Object.freeze([
   endpoint('GET', '/admin/magento-integration/bindings/:id/handoffs', 'export_templates.view'),
   endpoint('GET', '/admin/magento-integration/bindings/:id/controlled-products', 'export_templates.view'),
   endpoint('POST', '/admin/magento-integration/bindings/:id/controlled-products/resolve', 'export_templates.view'),
-  ...['first-sync/preview','first-sync/apply','first-sync/history-apply'].map((path)=>Object.freeze({
+  ...['first-sync/preview','first-sync/apply','first-sync/history-apply','first-sync/batch-preview'].map((path)=>Object.freeze({
     ...endpoint('POST', `/admin/magento-integration/${path}`, 'export_templates.manage'), additionalPermissions: Object.freeze(['export_templates.publish','exports.view']) })),
   ...['preview','apply'].map((action)=>Object.freeze({
     ...endpoint('POST', `/admin/magento-integration/first-sync/legacy-inputs/${action}`, 'export_templates.manage'), additionalPermissions: Object.freeze(['export_templates.publish','exports.view','products.recount']) })),
