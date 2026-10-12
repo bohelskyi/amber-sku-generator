@@ -10,7 +10,7 @@ Checksums canonicalize CRLF and lone CR to LF before hashing, so Windows and Lin
 
 ## Forward-only rule
 
-Checked-in migrations now span `000`–`058`. Migrations `000`–`057` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
+Checked-in migrations now span `000`–`077`. Migrations `000`–`076` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
 
 - never edit, reorder, rename, or replace an applied migration;
 - add the next lexically ordered forward migration;
@@ -403,3 +403,23 @@ visibility work. Existing terminal receipts, completed sessions and all previous
 checksums remain immutable. Startup performs no enrollment, data repair, job
 creation, template/binding publication or remote write. The ordinary delivery
 readback and atomic audit/ACK rules remain in force. See [the field contract](MAGENTO_FIRST_SYNC_FIELDS.md#explicit-local-authority-and-bounded-catalog-packets).
+
+## 077 — bounded complete category binding evidence
+
+`077_magento_category_binding_evidence.sql` changes only the evidence-size check on
+`magento_binding_attributes`. Category transport attributes (`target='categories'`
+and `strategy='transport_control'`) allow at most 81920 bytes of JSONB text; all
+other attribute evidence retains 8192 bytes. The JSON-object requirement and all
+route/option/policy evidence checks remain unchanged. Runtime normalization admits
+65536 compact JSON bytes for those category attributes, preserving formatting
+headroom and the existing overall, path-count, candidate-count, identity and review
+guards. This retains complete category paths when a successor unites new candidates
+with reviewed source paths instead of truncating or implicitly approving them.
+
+The migration performs no data rewrite, publication, audit backfill, permission
+change, enrollment or remote operation. Existing published binding immutability
+and previous checksums remain intact. Coverage includes checkpoint 076 upgrade,
+transaction rollback, repeated startup, fresh installation, database bounds and
+canonical successor persistence with proposed new identities. Deploy the matching
+schema and code through normal startup; no runtime DDL or standalone production
+data repair is required.

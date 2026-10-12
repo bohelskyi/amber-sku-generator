@@ -7,6 +7,8 @@ const { isIntegrationCategoryCode } = require('../export-templates/version-contr
 const STATES = ['proposed','review_required','approved','blocked'];
 const STRATEGIES = ['scalar','semantic_option','dynamic_exact_label_option','numeric_band_option','constant_option','transport_control'];
 const POLICIES = ['authoritative_create_update','initialize_create_only','magento_managed','blocked'];
+const MAX_EVIDENCE_BYTES = 6500;
+const MAX_CATEGORY_EVIDENCE_BYTES = 64 * 1024;
 const bindingKey = (routeKey, rowId, target) => hash({ routeKey, rowId, target });
 const predicateKey = (p) => `${p.questionKey}${p.equal ? '=' : '!='}value_id:${p.valueId}`;
 function stableRoute(plan) {
@@ -113,12 +115,14 @@ function requirements(definition, schema) {
   unique(result, (r) => r.routeKey);
   return result;
 }
-function evidence(v, policy = false) {
+function evidence(v, policy = false, maxBytes = MAX_EVIDENCE_BYTES) {
   if (v === undefined) return {};
   command(v, [], ['note','diagnosticCodes','artifactHash','sampleCount','candidateIds','categories', ...(policy ? ['createValue'] : [])]);
   if (v.categories !== undefined) v.categories = require('./binding-categories').normalizeCategories(v.categories);
-  // Leave room for PostgreSQL JSONB whitespace within migration 041's 8192-byte limit.
-  if (Buffer.byteLength(JSON.stringify(v)) > 6500) invalid();
+  // Leave JSONB whitespace headroom below the corresponding database cap.
+  // Migration 077 expands only category transport attributes: their complete
+  // path evidence grows when fresh candidates are united with reviewed paths.
+  if (Buffer.byteLength(JSON.stringify(v)) > maxBytes) invalid();
   if (v.note !== undefined && (typeof v.note !== 'string' || v.note.length > 2000)) invalid();
   if (v.artifactHash !== undefined && !/^[a-f0-9]{64}$/.test(v.artifactHash)) invalid();
   if (v.sampleCount !== undefined && (!Number.isSafeInteger(v.sampleCount) || v.sampleCount < 0)) invalid();
@@ -126,7 +130,9 @@ function evidence(v, policy = false) {
     (!Array.isArray(v[k]) || v[k].length > 100 || v[k].some((s) => typeof s !== 'string' || s.length > 160))) invalid();
   return v;
 }
-function review(row, policy = false) { if (!STATES.includes(row.reviewState)) invalid(); return evidence(row.evidence, policy); }
+function review(row, policy = false, maxBytes = MAX_EVIDENCE_BYTES) {
+  if (!STATES.includes(row.reviewState)) invalid(); return evidence(row.evidence, policy, maxBytes);
+}
 function normalizeBindings(input) {
   input = safeData(input);
   command(input, ['routes','attributes','options','policies']);
@@ -145,7 +151,9 @@ function normalizeBindings(input) {
       || (a.unknownOutputPolicy !== undefined && a.unknownOutputPolicy !== 'block')) invalid();
     if (a.bindingKey !== undefined && a.bindingKey !== bindingKey(a.routeKey, a.rowId, a.target)) invalid();
     if (a.evidence?.categories && (a.target !== 'categories' || a.strategy !== 'transport_control')) invalid();
-    return { ...a, bindingKey: bindingKey(a.routeKey, a.rowId, a.target), unknownOutputPolicy: 'block', evidence: review(a) };
+    const evidenceLimit = a.target === 'categories' && a.strategy === 'transport_control'
+      ? MAX_CATEGORY_EVIDENCE_BYTES : MAX_EVIDENCE_BYTES;
+    return { ...a, bindingKey: bindingKey(a.routeKey, a.rowId, a.target), unknownOutputPolicy: 'block', evidence: review(a, false, evidenceLimit) };
   });
   const options = list(input.options).map((o) => {
     command(o, ['bindingKey','sourceKind','evaluatedOutput','optionId','reviewState'],
@@ -265,4 +273,5 @@ function validateBindings(bindings, definition, schema, { publish = false } = {}
   return { valid: diagnostics.length === 0, diagnostics, requirements: required };
 }
 
-module.exports = { stableRoute, bindingKey, requirements, normalizeBindings, validateBindings };
+module.exports = { stableRoute, bindingKey, requirements, normalizeBindings, validateBindings,
+  MAX_EVIDENCE_BYTES, MAX_CATEGORY_EVIDENCE_BYTES };
