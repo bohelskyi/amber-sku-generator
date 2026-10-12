@@ -102,7 +102,8 @@ async function prepareOnClient(client,{config,observation,state,input,options,lo
     ||String(frozenOptions[0].sku_code)!==String(rawOptions[0].sku_code ?? rawOptions[0].value_id))fail('SEMANTIC_IDENTITY_CHANGED');
   const patch={stone_processing:value},prospective={...previous,...patch};
   if(inspectNonSkuAnswer(target,prospective,product.details?.isCalibrated,{previousAnswers:previous}).issue)fail('TARGET_UNAVAILABLE');
-  const projection=projectFirstSyncFields({observation});
+  const projection=projectFirstSyncFields({observation:{amber:observation.amber,raw:observation.raw,
+    schema:observation.schema,domainEvidence:observation.domainEvidence}});
   const processing=projection.projection.find(m=>m.scope==='all'&&m.source.key==='stone_processing');
   const field=projection.fields.find(f=>f.target===processing?.target&&f.scope==='all');
   if(!processing||processing.persistence!=='characteristic'||processing.reason||processing.readReason
@@ -192,7 +193,8 @@ async function apply(config,input,options={}){
       const fullRevision=names.fullRevision || (await lifecycle.advanceFullProductRevision(client,product.id,prepared.evidence.full.revision)).revision;
       let progress=null;
       if(prepared.first.mode==='first'){
-        const projected=projectFirstSyncFields({observation:{...observation,amber:post},receipts:(prepared.first.progress?.fields || [])
+        const projected=projectFirstSyncFields({observation:{amber:post,raw:observation.raw,
+          schema:observation.schema,domainEvidence:observation.domainEvidence},receipts:(prepared.first.progress?.fields || [])
           .filter(f=>TERMINAL.has(f.state)).map(({target,scope,state})=>({target,scope,state}))});
         if(!projected.plan)fail('POST_STATE_UNPROVEN');
         const plan=prepareProgress(projected,prepared.first.progress);
