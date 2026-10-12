@@ -319,6 +319,186 @@ test('canonical local authority and atomic batch decisions',async t=>{
    before=await f.fingerprint();out=await batch.preflight(f.config,input,f.run);assert.equal(out.counts.readyForApply,0);
    assert.ok(out.results[0].blockers.some(b=>b.code==='BATCH_FIELD_CHANGED'));assert.equal(await f.fingerprint(),before);assert.equal(await currentFields(f,p),null);
   });
+  await t.test('standalone discovery uses canonical ordinary preview and read-only PostgreSQL without adoption',async()=>{
+   const discovery=require('../scripts/first-sync-local-discovery'),batch=require('../src/services/magento/first-sync-batch-preflight');
+   const dir=await fs.mkdtemp(path.join(os.tmpdir(),'amber-discovery-integration-'));
+   const readonly=new Pool({connectionString:f.url,max:1,options:'-c default_transaction_read_only=on'});
+   try{
+    const p=await f.create({sku:'NM99004001',localWeight:'132.300',remoteWeight:132,price:1700,remoteId:99401,baseSeoEqual:false});
+    const blocked=await f.create({sku:'NM99004002',localWeight:'132.300',remoteWeight:140,price:1700,remoteId:99402,baseSeoEqual:false});
+    const runtime=discovery.createRuntime(path.resolve(__dirname,'..'));
+    // Keep the real ordinary preview, exact GET identity lookup, local reader and first-sync services.
+    // Only schema/category network responses and Magento transport are synthetic.
+    runtime.preview=(config,options)=>preview.previewProduct(config,{...options,
+      discover:async()=>f.binding.schema,categoryObservation:{trees:[],categoryFailures:[]}});
+    const first=runtime.first;
+    runtime.first={...first,inspect:(config,observation,options)=>first.inspect(config,observation,{...options,observeRate:f.run.observeRate})};
+    const calls=[];
+    const fetchImpl=async(url,init)=>{
+     const u=new URL(url);assert.equal(init.method,'GET');calls.push(u.pathname);
+     if(u.pathname.endsWith('/V1/products')){
+      const sku=u.searchParams.get('searchCriteria[filter_groups][0][filters][0][value]');
+      const r=structuredClone(f.remotes.get(sku));assert.ok(r);
+      if(u.pathname.includes('/rest/en/')){r.name=r.en.name;r.custom_attributes=targets.map(target=>({attribute_code:target,value:r.en[target]}));}
+      delete r.en;return new Response(JSON.stringify({items:[r],total_count:1}),{headers:{'content-type':'application/json'}});
+     }
+     return f.run.fetchImpl(url,init);
+    };
+    const item=product=>({sku:product.sku,productId:product.id,category:'NM',remoteProductId:null,
+     fields:[{target:'decor_weight',scope:'all',local:'132.300',remote:product.remoteWeight,policy:'manager_weight_rounding'},
+      ...['all','en'].flatMap(scope=>targets.map(target=>({target,scope,local:template(target,scope),remote:product.values[scope][target],policy:'amber_seo'})))]});
+    const input={items:[item(p),item(blocked)]};await fs.writeFile(path.join(dir,'input.json'),JSON.stringify(input));
+    const before=await f.fingerprint(),messages=[];
+    const args=['--input',path.join(dir,'input.json'),'--output-dir',path.join(dir,'out'),'--expected-database',name,
+     '--actor-id',String(f.actor),'--installation-key',f.binding.installationKey];
+    assert.equal(await discovery.main(args,{runtime,config:f.config,pool:readonly,env:{},fetchImpl,
+     print:s=>messages.push(JSON.parse(s)),printError:s=>messages.push(JSON.parse(s))}),2,JSON.stringify(messages));
+    const manifest=JSON.parse(await fs.readFile(path.join(dir,'out/manifest.json'),'utf8'));
+    const lines=(await fs.readFile(path.join(dir,'out/results.jsonl'),'utf8')).trim().split('\n').map(JSON.parse);
+    assert.equal(manifest.complete,true,JSON.stringify(lines));assert.equal(manifest.candidates,1,JSON.stringify(lines));assert.equal(manifest.blocked,1);
+    assert.ok(lines.find(r=>r.sku===blocked.sku).blockers.some(b=>b.code==='DISCOVERY_WEIGHT_NOT_ROUNDING_ONLY'));
+    const packet=JSON.parse(await fs.readFile(path.join(dir,'out/packet-0001.json'),'utf8'));batch.command(packet);
+    assert.equal(packet.items[0].remoteProductId,p.remoteId);assert.equal(packet.items[0].fields.length,5);
+    assert.equal(packet.items[0].expectedProduct.weight_numeric,'132.300');
+    assert.equal(await f.fingerprint(),before);assert.equal(await currentFields(f,p),null);
+    assert.ok(calls.includes('/rest/all/V1/products'));assert.ok(calls.includes('/rest/en/V1/products'));
+    // The generated packet is directly consumable by the already deployed preview.
+    const checked=await batch.preflight(f.config,packet,f.run);assert.equal(checked.counts.readyForApply,1,JSON.stringify(checked));
+    assert.equal(await f.fingerprint(),before);
+    // Exercise the aggregate file contract with this real discovery journal and canonical PostgreSQL preflight.
+    const aggregate=require('../scripts/first-sync-campaign-preview');
+    const aggregateRuntime=aggregate.createRuntime(path.resolve(__dirname,'..'));
+    aggregateRuntime.batch={...aggregateRuntime.batch,preflight:(config,request,options)=>batch.preflight(config,request,
+     {...options,preview:f.run.preview,observeRate:f.run.observeRate,refresh:f.run.refresh})};
+    const digest=bytes=>require('node:crypto').createHash('sha256').update(bytes).digest('hex');
+    const scopeHash=digest(await fs.readFile(path.join(dir,'input.json'))),output=path.join(dir,'campaign'),aggregateMessages=[];
+    const aggregateArgs=['--input',path.join(dir,'input.json'),'--scope-sha256',scopeHash,
+     '--discovery-manifest',path.join(dir,'out/manifest.json'),'--output-dir',output,'--expected-database',name,
+     '--actor-id',String(f.actor),'--installation-key',f.binding.installationKey];
+    const callsBefore=f.calls.length;
+    assert.equal(await aggregate.main(aggregateArgs,{runtime:aggregateRuntime,config:f.config,pool:f.db,env:{},fetchImpl,
+     print:s=>aggregateMessages.push(JSON.parse(s)),printError:s=>aggregateMessages.push(JSON.parse(s))}),2,JSON.stringify(aggregateMessages));
+    const reviewBytes=await fs.readFile(path.join(output,'review.json')),review=JSON.parse(reviewBytes);
+    assert.equal(review.complete,true,JSON.stringify(review));assert.equal(review.globalFailure,null);
+    assert.equal(review.counts.total,2);assert.equal(review.counts.candidates,1);assert.equal(review.counts.checked,1);
+    assert.equal(review.counts.selected,0);assert.equal(review.counts.excluded,1);assert.equal(review.counts.discoveryBlocked,1);
+    assert.deepEqual(review.exceptions.find(row=>row.code==='CAMPAIGN_NAME_IMPORTS_SEPARATE_PREVIEW')?.skus,[p.sku]);
+    assert.deepEqual(review.exceptions.find(row=>row.code==='DISCOVERY_WEIGHT_NOT_ROUNDING_ONLY')?.skus,[blocked.sku]);
+    assert.equal(review.directRemoteWrites,0);assert.equal(review.directlyEnqueuedJobs,0);
+    const cli={actor:f.actor,database:name,installation:f.binding.installationKey,scopeHash};
+    const loaded=await aggregate.loadReview(output,digest(reviewBytes),aggregateRuntime,cli);
+    assert.deepEqual(loaded.review,review);assert.equal(loaded.plans.length,1);assert.deepEqual(loaded.plans[0].selections,[]);
+    assert.ok(loaded.plans[0].report.results[0].initialImports.length>0);
+    assert.deepEqual(review.nameOnlyPreview,[{sku:p.sku,productId:p.id,remoteProductId:packet.items[0].remoteProductId,
+     planFile:review.plans[0].file,initialImports:loaded.plans[0].report.results[0].initialImports}]);
+    const planPath=path.join(output,review.plans[0].file),planBytes=await fs.readFile(planPath),tampered=JSON.parse(planBytes);
+    tampered.request.items[0].remoteProductId+=100;
+    await fs.writeFile(planPath,JSON.stringify(tampered));
+    await assert.rejects(aggregate.loadReview(output,digest(reviewBytes),aggregateRuntime,cli),{code:'CAMPAIGN_PLAN_CHANGED'});
+    await fs.writeFile(planPath,planBytes);
+    assert.equal(await f.fingerprint(),before);assert.equal(await currentFields(f,p),null);
+    assert.ok(f.calls.slice(callsBefore).every(call=>call.method==='GET'));
+   }finally{await readonly.end();await fs.rm(dir,{recursive:true,force:true});}
+  });
+  const campaign=require('../scripts/first-sync-campaign'),campaignBatch=require('../src/services/magento/first-sync-batch-preflight');
+  const campaignRuntime={c,batch:campaignBatch,first:service};
+  const campaignRun={...f.run,installation:f.binding.installationKey,
+   fetchImpl:require('../scripts/first-sync-local-discovery').getOnly(f.run.fetchImpl)};
+  const forbidLiveFetch=subtest=>subtest.mock.method(globalThis,'fetch',async()=>assert.fail('Campaign integration must not use live fetch'));
+  async function campaignSelection(p){
+   const {observation}=await jobs.recoveryBoundary.observe(f.config,request(f,p),campaignRun);
+   const base=await service.inspect(f.config,observation,campaignRun);
+   const fields=base.fields.filter(row=>row.canKeepLocal&&[...targets,'price','decor_weight'].includes(row.target))
+    .map(({target,scope,local,remote})=>({target,scope,local:local.value,remote:remote.value}));
+   const input={bindingRevisionId:f.binding.id,expectedDefinitionHash:observation.amber.compiled.hash,
+    items:[{sku:p.sku,expectedProduct:campaignBatch.source(observation.amber.product),remoteProductId:p.remoteId,fields}]};
+   const command={...request(f,p),previewToken:base.previewToken,
+    choices:service.decisions({choices:fields.map(({target,scope})=>({target,scope,choice:'keep_local'}))})};
+   return {request:input,item:input.items[0],command,commandSha256:c.hash(command)};
+  }
+  async function nonCampaignState(){
+   const allowed=new Set(['audit_events','magento_first_sync_sessions','magento_first_sync_fields','magento_first_sync_progress']),data={};
+   for(const {tablename}of(await f.db.query("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename")).rows){
+    assert.match(tablename,/^[a-z_]+$/);if(allowed.has(tablename))continue;
+    data[tablename]=(await f.db.query(`SELECT COALESCE(jsonb_agg(j ORDER BY j::text),'[]'::jsonb) rows FROM (SELECT to_jsonb(t) j FROM public."${tablename}" t) entries`)).rows[0].rows;
+   }
+   return data;
+  }
+  await t.test('campaign canonical callback rejects initial imports outside its write scope with no database changes',async subtest=>{
+   forbidLiveFetch(subtest);
+   const p=await f.create({sku:'NM99005001',localWeight:'132.300',remoteWeight:132.3,price:1700,remoteId:99501,baseSeoEqual:false});
+   const selected=await campaignSelection(p),before=await f.fingerprint(),callsBefore=f.calls.length;
+   const checked=await campaignBatch.preflight(f.config,selected.request,campaignRun);
+   assert.equal(checked.counts.readyForApply,1,JSON.stringify(checked));
+   assert.ok(checked.results[0].initialImports.length>0);assert.deepEqual(checked.results[0].applyInput,selected.command);
+   const journal=[];
+   const result=await campaign.runItem(campaignRuntime,f.config,selected,campaignRun,
+    {append:async value=>journal.push(value),authority:async()=>{}});
+   assert.equal(result.status,'blocked',JSON.stringify(result));assert.equal(result.code,'CAMPAIGN_UNAPPROVED_INITIAL_IMPORT');
+   assert.deepEqual(journal,[{type:'prepared',sku:p.sku,commandSha256:selected.commandSha256,command:selected.command}]);
+   assert.equal(await currentFields(f,p),null);assert.equal(await f.fingerprint(),before);
+   assert.ok(f.calls.slice(callsBefore).every(call=>call.method==='GET'));
+  });
+  await t.test('campaign records only reviewed SEO choices, verifies its receipt read-only and does not blindly replay',async subtest=>{
+   forbidLiveFetch(subtest);
+   const p=await f.create({sku:'NM99005002',localWeight:'132.300',remoteWeight:132.3,price:1700,remoteId:99502,baseSeoEqual:false});
+   await seedRemote(f,p);
+   const selected=await campaignSelection(p),checked=await campaignBatch.preflight(f.config,selected.request,campaignRun);
+   assert.equal(checked.counts.readyForApply,1,JSON.stringify(checked));assert.deepEqual(checked.results[0].initialImports,[]);
+   assert.deepEqual(checked.results[0].applyInput,selected.command);assert.equal(selected.command.choices.length,4);
+   assert.ok(selected.command.choices.every(choice=>targets.includes(choice.target)&&choice.choice==='keep_local'));
+   const prior=await currentFields(f,p),before=await nonCampaignState(),callsBefore=f.calls.length,journal=[];
+   let validated=0;
+   const guardedRuntime={...campaignRuntime,first:{...service,prepareDecision:async(...args)=>{
+    validated+=1;return service.prepareDecision(...args);
+   }}};
+   const result=await campaign.runItem(guardedRuntime,f.config,selected,campaignRun,
+    {append:async value=>journal.push(value),authority:async()=>{}});
+   assert.equal(result.status,'recorded',JSON.stringify(result));assert.equal(validated,1);
+   assert.equal(result.result.receipt.alreadyApplied,false);assert.equal(result.result.readyForOutbound,true);
+   assert.deepEqual(await nonCampaignState(),before);assert.equal(journal.length,1);
+   const current=await currentFields(f,p);
+   assert.equal(BigInt(current.session.revision),BigInt(prior.session.revision)+1n);
+   assert.ok(current.fields.filter(row=>targets.includes(row.target)).every(row=>row.state==='pending_outward_confirmation'));
+   const readonly=new Pool({connectionString:f.url,max:1,options:'-c default_transaction_read_only=on'});
+   const recorded=await f.fingerprint();
+   try{
+    assert.equal((await readonly.query('SHOW default_transaction_read_only')).rows[0].default_transaction_read_only,'on');
+    await campaign.verifyRecorded(campaignRuntime,f.config,selected,result,{...campaignRun,databasePool:readonly});
+    assert.equal(await f.fingerprint(),recorded);
+   }finally{await readonly.end();}
+   validated=0;
+   const replay=await campaign.runItem(guardedRuntime,f.config,selected,campaignRun,
+    {append:async value=>journal.push(value),authority:async()=>{}});
+   assert.equal(replay.status,'unconfirmed',JSON.stringify(replay));assert.equal(validated,0);
+   assert.equal(await f.fingerprint(),recorded);assert.equal(journal.length,2);
+   assert.ok(f.calls.slice(callsBefore).every(call=>call.method==='GET'));
+  });
+  await t.test('campaign denies actual source and remote identity drift without a new receipt',async subtest=>{
+   forbidLiveFetch(subtest);
+   for(const [index,kind]of ['source','identity'].entries()){
+    const p=await f.create({sku:'NM9900500'+(3+index),localWeight:'132.300',remoteWeight:132.3,price:1700,remoteId:99503+index,baseSeoEqual:false});
+    await seedRemote(f,p);const selected=await campaignSelection(p);
+    if(kind==='source')await f.db.query("UPDATE products SET details=jsonb_set(details,'{answers}','{\"campaign_drift\":true}'::jsonb) WHERE id=$1",[p.id]);
+    else f.remotes.get(p.sku).id+=100;
+    const before=await f.fingerprint(),callsBefore=f.calls.length;
+    const result=await campaign.runItem(campaignRuntime,f.config,selected,campaignRun,{append:async()=>{},authority:async()=>{}});
+    assert.equal(result.status,'blocked',kind+': '+JSON.stringify(result));
+    assert.match(result.code,/^(MAGENTO_|BATCH_|CAMPAIGN_)/);assert.equal(await f.fingerprint(),before);
+    assert.ok(f.calls.slice(callsBefore).every(call=>call.method==='GET'));
+   }
+  });
+  await t.test('campaign refuses nonrounding physical weight in the canonical apply callback',async subtest=>{
+   forbidLiveFetch(subtest);
+   const p=await f.create({sku:'NM99005005',localWeight:'132.300',remoteWeight:140,price:1700,remoteId:99505,baseSeoEqual:false});
+   const selected=await campaignSelection(p),before=await f.fingerprint(),callsBefore=f.calls.length;
+   const checked=await campaignBatch.preflight(f.config,selected.request,campaignRun);
+   assert.equal(checked.counts.readyForApply,0);assert.ok(checked.results[0].blockers.some(row=>row.code==='BATCH_WEIGHT_NOT_ROUNDING_ONLY'));
+   const result=await campaign.runItem(campaignRuntime,f.config,selected,campaignRun,{append:async()=>{},authority:async()=>{}});
+   assert.equal(result.status,'blocked',JSON.stringify(result));assert.equal(result.code,'BATCH_PLAN_CHANGED');
+   assert.equal(await currentFields(f,p),null);assert.equal(await f.fingerprint(),before);
+   assert.ok(f.calls.slice(callsBefore).every(call=>call.method==='GET'));
+  });
   await t.test('real current-published rotation denies stale binding before any local authority mutation',async()=>{
    const {p,prior,field,old,progress}=f.bindingFixture,before=await currentFields(f,p),bindings=require('../src/services/magento/binding.service'),options={databasePool:f.db,actorUserId:f.actor,mutationContext:{actorUserId:f.actor}};
    const draft=await bindings.clonePublished(f.binding.id,{expectedRevision:f.binding.revision},options);
