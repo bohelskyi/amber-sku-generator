@@ -8,6 +8,12 @@ const fail = code => { throw Object.assign(new Error(code), {code:'MAGENTO_FIRST
 
 // Receipts belong to the complete server-derived projection, never a UI subset.
 function prepareProgress(projection, progress, decision = null) {
+  const decisions=decision==null?[]:Array.isArray(decision)?decision:[decision];
+  if(decisions.length>500 || Object.keys(decisions).length!==decisions.length
+    || Array.from({length:decisions.length},(_,i)=>i).some(i=>!Object.hasOwn(decisions,i))
+    || decisions.some(d=>!d || !['keep_local','accept_remote'].includes(d.choice))
+    || new Set(decisions.map(fieldKey)).size!==decisions.length) fail('DECISION_INVALID');
+  const selections=new Map(decisions.map(d=>[fieldKey(d),d]));
   const previous = new Map((progress?.fields || []).map(field => [fieldKey(field),field]));
   const inputs = new Map(projection.fields.map(field => [fieldKey(field),field]));
   const metadata = new Map(projection.projection.map(field => [fieldKey(field),field]));
@@ -24,22 +30,25 @@ function prepareProgress(projection, progress, decision = null) {
     const reverseValues = field.kind==='option' ? [...new Set((field.reverseCandidates || [])
       .filter(candidate=>candidate.optionId===String(field.remote.value)).map(candidate=>String(candidate.value)))] : null;
     const seo=meta.persistence==='seo_snapshot' && field.kind==='seo';
-    const canAcceptRemote=seo ? result.status==='seo_pending_initial_readback' && prior?.state!=='seo_pending_initial_readback'
+    const canAcceptRemote=seo ? result.status==='conflict' && prior?.state!=='seo_pending_initial_readback'
       : result.status==='conflict' && supported && field.mapping.proven
       && (!reverseValues || reverseValues.length===1);
-    const canKeepLocal=result.status==='conflict' && field.mapping.proven
-      && meta.outwardPolicy==='authoritative_create_update';
+    const derivedLocal=require('./first-sync-local-authority').selectable(field,meta,result);
+    const canKeepLocal=(result.status==='conflict' || derivedLocal
+      || seo && prior?.state==='seo_pending_initial_readback') && field.mapping.proven
+      && meta.outwardPolicy==='authoritative_create_update'
+      && (!seo || require('./first-sync-local-authority').validSeoLocal(field));
     const priorKeep=prior?.state==='pending_outward_confirmation'
       && prior.source?.decision==='keep_local' && prior.mappingHash===meta.mappingHash
       && hash(prior.before)===hash(field.local) && hash(prior.remote)===hash(field.remote);
-    const selected=decision && fieldKey(decision)===key;
-    if (selected && !['keep_local','accept_remote'].includes(decision.choice)) fail('DECISION_INVALID');
-    if (selected && decision.choice==='keep_local' && !canKeepLocal) fail('DECISION_NOT_AVAILABLE');
-    if (selected && decision.choice==='accept_remote' && !canAcceptRemote) fail('DECISION_NOT_AVAILABLE');
-    if (priorKeep || selected && decision.choice==='keep_local') {
+    const selected=selections.get(key);
+    if (selected && selected.choice==='keep_local' && !canKeepLocal) fail('DECISION_NOT_AVAILABLE');
+    if (selected && selected.choice==='accept_remote' && !canAcceptRemote) fail('DECISION_NOT_AVAILABLE');
+    if (priorKeep || selected && selected.choice==='keep_local') {
       status='pending_outward_confirmation';reason='ADMINISTRATOR_KEPT_LOCAL_AWAITING_READBACK';
-    } else if (selected && decision.choice==='accept_remote' && !seo) {
-      status='imported';after=reverseValues ? reverseValues[0] : field.remote.value;reason='ADMINISTRATOR_ACCEPTED_REMOTE';
+    } else if (selected && selected.choice==='accept_remote') {
+      status=seo?'seo_pending_initial_readback':'imported';after=reverseValues ? reverseValues[0] : field.remote.value;
+      reason=seo?'ADMINISTRATOR_ACCEPTED_REMOTE_SEO':'ADMINISTRATOR_ACCEPTED_REMOTE';
     } else if (status==='imported') after=result.importValue;
     if (status==='imported' && !supported) {
       status='review_required';reason=meta.importBlocker || 'CANONICAL_' + meta.persistence.toUpperCase() + '_SETTER_UNSUPPORTED';
@@ -59,22 +68,26 @@ function prepareProgress(projection, progress, decision = null) {
     else if (field.kind==='name' && ['imported','equal'].includes(status)) state='name_received';
     const source={...meta.source,
       ...(!meta.source.key && !meta.source.field ? {field:field.target}:{}),manifestHash,
-      ...(priorKeep || selected && decision.choice==='keep_local' ? {decision:'keep_local'}:{}),
-      ...(selected && decision.choice==='accept_remote' ? {decision:'accept_remote'}:{})};
+      ...(priorKeep || selected?.choice==='keep_local' ? {decision:'keep_local'}:{}),
+      ...(selected?.choice==='accept_remote' ? {decision:'accept_remote'}:{}),
+      ...(seo && prior?.state==='seo_pending_initial_readback' && selected?.choice==='keep_local'
+        ? {seoAuthorityChange:{revision:prior.revision,evidence:Object.fromEntries(['target','scope','state','before','remote','after','source','mappingHash'].map(k=>[k,prior[k]]))}} : {})};
     const record={target:field.target,scope:field.scope,state,before:field.local,remote:field.remote,
       after,source,mappingHash:meta.mappingHash};
-    if (seo && prior?.state==='seo_pending_initial_readback') {
+    if (seo && prior?.state==='seo_pending_initial_readback' && selected?.choice!=='keep_local') {
       Object.assign(record,Object.fromEntries(['target','scope','state','before','remote','after','source','mappingHash'].map(k=>[k,prior[k]])));
       if(!['unknown','review_required'].includes(status) && (prior.mappingHash!==meta.mappingHash || hash(prior.remote)!==hash(field.remote))) {
         status='review_required';reason='FIRST_SYNC_ACCEPTED_SEO_CHANGED';
+      } else if(!['unknown','review_required'].includes(status)) {
+        status='seo_pending_initial_readback';reason='EXPLICIT_REMOTE_SEO_PENDING_READBACK';
       }
     } else if (seo && status==='seo_pending_initial_readback') {
       record.after=result.importValue;
     }
     return {...result,status,reason,local:field.local,remote:field.remote,record,
-      canAcceptRemote,canKeepLocal,terminal:TERMINAL.has(state)};
+      canAcceptRemote,canKeepLocal,terminal:TERMINAL.has(record.state)};
   });
-  if (decision && !rows.some(row=>fieldKey(row)===fieldKey(decision))) fail('FIELD_NOT_MAPPED');
+  if (decisions.some(d=>!rows.some(row=>fieldKey(row)===fieldKey(d)))) fail('FIELD_NOT_MAPPED');
   const blockers=[...projection.blockers,
     ...rows.filter(row=>!row.ordinaryReconciliation && ['conflict','unknown','review_required'].includes(row.status))
       .map(row=>({code:'FIRST_SYNC_FIELD_' + row.status.toUpperCase(),target:row.target,scope:row.scope,reason:row.reason}))];

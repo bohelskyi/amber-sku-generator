@@ -181,8 +181,9 @@ manual names while reanchoring them to the resulting generated pair.
 Migration [075](../server/migrations/075_nm_first_sync_seo_receipts.sql) adds the
 closed `nm-first-sync-seo-v1` receipt contract for category `NM`, targets
 `meta_title` and `meta_description`, and scopes `all` and `en`. Valid populated
-Magento text is authoritative for this initial phase, even when the active
-template has a different output. Exact identity, approved mapping, pinned/current
+Magento text can be explicitly accepted for this initial phase when the active
+template has a different output. Different populated SEO now requires an explicit
+field decision; selecting weight or price never selects Magento SEO implicitly. Exact identity, approved mapping, pinned/current
 text metadata, scope and successful fresh reads remain required. Confirmed empty
 remote fields keep the existing guarded outward policy; malformed or unavailable
 reads remain blockers.
@@ -190,8 +191,12 @@ reads remain blockers.
 Adoption stores the exact text and provenance in the existing first-sync ledger
 as `seo_pending_initial_readback`. It never writes product inputs, weights,
 prices, names or template definitions. Old `review_required` SEO rows can receive
-this snapshot; existing equal terminal receipts remain unchanged. Pending SEO
-is permanent and cannot be reset or replaced after remote/mapping changes.
+this snapshot; existing equal terminal receipts remain unchanged. The accepted snapshot and every prior receipt remain permanent. Migration 076
+allows a narrowly audited explicit `keep_local` choice for an unfinished NM SEO
+receipt before any protected work, with current binding, administrator, exact prior
+evidence and fresh valid local/remote proof. It appends an outward-pending receipt;
+it never resets history or a completed session. Remote/mapping changes do not
+authorize replacement automatically.
 Preview is read-only and cannot complete this receipt, including when every
 other field is equal.
 
@@ -211,6 +216,39 @@ create no duplicate terminal receipts. After completion, a distinct ordinary
 generation applies the unchanged active template rules. No new publication,
 history admission, automatic production enrollment or delivery acceptance is
 implied by installing this migration.
+
+## Explicit local authority and bounded catalog packets
+
+Confirmed Manager physical weight can be retained through the existing outward
+choice. A fresh proven canonical UAH price can be retained in every category,
+including a derived painting price, only when the exact forward output equals the
+stored `total_price_uah`. Positive scale-two currency proof and the authoritative
+outward policy remain required. A mismatching/rounded expression requires a
+separate binding review; this workflow does not override evaluator output.
+
+Valid derived Amber `meta_title` and `meta_description` in `all`/`en` now offer an
+explicit local choice. Fresh and pinned text metadata, store scope, exact identity,
+forward evidence, valid local/remote text and outward policy are required. Unknown,
+malformed and inherited/unproven values stay blocked. Local choices create
+`pending_outward_confirmation`; existing catalog delivery must prove verified fresh readback before
+`outward_verified` and session completion. Verify the job acknowledgment separately;
+local outward completion follows the existing weight/field path and can precede
+the final job-state transaction. Remote-preservation `seo_received` retains its
+stronger atomic ACK boundary.
+
+`POST /api/admin/magento-integration/first-sync/batch-preview` is an authenticated
+Administrator command using the existing publish/manage/exports permissions and
+CSRF boundary. It checks 1–10 exact products against reviewed source snapshots,
+remote IDs, current binding/definition and requested local/remote field values.
+Only price, proven custom physical weight with integer-rounding-only difference,
+and the two SEO fields are selectable. It never admits historical products,
+changes lifecycle/receipts, imports data, enqueues or writes Magento. It rechecks
+packet authority after the final product and invalidates earlier commands when
+authority/publication changes. Returned readiness distinguishes a recordable
+choice from a fully sendable product and exposes remaining blockers/imports.
+
+See [the bounded packet runbook](FIRST_SYNC_LOCAL_BATCH.md) for the exact normalized
+input, preview, reviewed local apply and separate delivery/acceptance steps.
 
 ## Canonical setters and unsupported coverage
 
@@ -284,7 +322,7 @@ changed origin/identity or a stale session revision fails closed.
 The first-sync routes are:
 
 - `POST /api/admin/magento-integration/first-sync/preview`: exact SKU and published binding revision;
-- `POST /api/admin/magento-integration/first-sync/apply`: the same identity, current preview token, exact target/scope and `keep_local` or `accept_remote`.
+- `POST /api/admin/magento-integration/first-sync/apply`: the same identity, current preview token, exact target/scope and `keep_local` or `accept_remote`, or one strict `choices[]` from the same preview. Array choices commit atomically for one product; singular requests and historical receipt hashes remain compatible.
 - `POST /api/admin/magento-integration/first-sync/history-apply`: an actual administrator explicitly confirms the scoped history review token offered by a fresh preview for a singleton normal legacy product with only its approved cutover baseline. It records one immutable `first_sync_review_only` audit; it does not import fields, change counters, enqueue work or acknowledge delivery. The administrator must then request a new field preview.
 
 The cutover-only review requires the exact canonical approval, applied batch and linked baseline receipt; the baseline must explicitly say delivery was not proven. Recounts, exclusions, identity changes, snapshots (including parsed unindexed legacy CSV membership), actual external delivery and protected work remain outside this lane. Apply rechecks current publication, administrator authority, local state and the fresh remote observation before its short local transaction.

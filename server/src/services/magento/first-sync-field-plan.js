@@ -196,8 +196,6 @@ function planField(field) {
   }
   const remote = normalized(field, field.remote);
   if (remote.reason) return result('review_required', 'REMOTE_' + remote.reason);
-  if (field.kind === 'seo' && !remote.absent) return result('seo_pending_initial_readback', 'FIRST_REMOTE_SEO_AUTHORITATIVE',
-    { importValue: remote.value });
   let local;
   if (field.kind === 'derived') {
     if (!field.prospective?.verified || !Object.hasOwn(field.prospective, 'value')) {
@@ -207,6 +205,13 @@ function planField(field) {
     local = normalized(field, { present: field.prospective.value !== ''
       && field.prospective.value != null, value: field.prospective.value, unit: field.unit });
   } else local = normalized(field, field.local);
+  // Populated SEO requires an explicit authority decision. An unrelated
+  // canonical-field choice must never adopt Magento SEO as a side effect.
+  if (field.kind === 'seo' && !remote.absent) {
+    if (local.reason) return result('review_required', 'LOCAL_' + local.reason);
+    return !local.absent && local.value === remote.value ? result('equal', 'NORMALIZED_VALUES_EQUAL')
+      : result('conflict', 'SEO_AUTHORITY_DECISION_REQUIRED', { importValue: remote.value });
+  }
   if (field.kind === 'name' && !remote.absent) {
     if (!local.reason && !local.absent && local.value === remote.value) {
       return result('equal', 'NORMALIZED_VALUES_EQUAL');

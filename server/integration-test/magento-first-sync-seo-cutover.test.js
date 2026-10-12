@@ -149,9 +149,12 @@ test('native NM SEO completion preserves the real cutover admission root and cap
     assert.match(admissionRoot, /^[1-9][0-9]*$/); assert.equal(await admissionCount(), 1);
     assert.equal((await admission.apply(config, admissionCommand, runtimeOptions)).receipt.alreadyApplied, true);
     const reviewed = await service.review(config, selection, runtimeOptions);
-    assert.equal(reviewed.mode, 'first'); assert.equal(reviewed.fields.filter(field => field.status === seo.PENDING).length, 4);
+    assert.equal(reviewed.mode, 'first'); assert.equal(reviewed.fields.filter(field => targets.includes(field.target) && field.status === 'conflict').length, 4);
     const weight = reviewed.fields.find(field => field.target === 'decor_weight'); assert.equal(weight.status, 'conflict'); assert.equal(weight.canKeepLocal, true);
-    const choice = { ...selection, previewToken: reviewed.previewToken, target: 'decor_weight', scope: 'all', choice: 'keep_local' };
+    const choice = { ...selection, previewToken: reviewed.previewToken, choices: [
+      {target:'decor_weight',scope:'all',choice:'keep_local'},
+      ...reviewed.fields.filter(field=>targets.includes(field.target)&&field.canAcceptRemote)
+        .map(({target,scope})=>({target,scope,choice:'accept_remote'}))] };
     const kept = await service.apply(config, choice, runtimeOptions); assert.equal(kept.complete, false); assert.equal(kept.readyForOutbound, true);
     assert.equal((await service.apply(config, choice, runtimeOptions)).receipt.alreadyApplied, true);
     const pending = await current(); assert.equal(pending.historyAdmissionEventId, admissionRoot); assert.equal(pending.session.completed_at, null);

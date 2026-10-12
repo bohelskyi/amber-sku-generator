@@ -233,16 +233,17 @@ function projected(f) {
     persistence: 'seo_snapshot', outwardPolicy: 'authoritative_create_update' })) };
 }
 
-test('populated equal or differing SEO remains pending after unchanged reread without claiming canonical import', () => {
+test('explicit remote SEO remains pending on reread and equal SEO needs no authority change', () => {
   const f = fixture(), projection = projected(f);
   projection.fields[0].local = structuredClone(projection.fields[0].remote);
   projection.plan = planFirstSyncFields({ fields: projection.fields });
-  const first = prepareProgress(projection, null), progress = { fields: first.rows.map(row => structuredClone(row.record)) };
-  assert.ok(first.rows.every(row => row.record.state === seo.PENDING));
+  const choices=projection.plan.fields.filter(f=>f.status==='conflict').map(({target,scope})=>({target,scope,choice:'accept_remote'}));
+  const first = prepareProgress(projection, null,choices), progress = { fields: first.rows.map(row => structuredClone(row.record)) };
+  assert.equal(first.rows[0].record.state,'equal');assert.ok(first.rows.slice(1).every(row => row.record.state === seo.PENDING));
   assert.equal(first.complete, false); assert.equal(first.readyForOutbound, true);
   const reread = prepareProgress(projection, progress);
   assert.equal(reread.complete, false); assert.equal(reread.readyForOutbound, true);
-  assert.ok(reread.rows.every(row => !row.canAcceptRemote && !row.terminal));
+  assert.ok(reread.rows.every(row => !row.canAcceptRemote));assert.ok(reread.rows.slice(1).every(row=>!row.terminal));
   assert.deepEqual(reread.rows.map(row => row.record), progress.fields, 'fresh preview never resets the adopted SEO evidence');
 });
 
@@ -253,7 +254,8 @@ for (const [label, change] of [
   ['changed mapping', p => { p.projection[0].mappingHash = 'f'.repeat(64); }],
   ['unproven mapping', p => { p.fields[0].mapping = { proven: false, reason: 'FIELD_BINDING_NOT_APPROVED' }; }],
 ]) test('pending SEO evidence stays permanent while ' + label + ' blocks delivery', () => {
-  const f = fixture(), projection = projected(f), first = prepareProgress(projection, null);
+  const f = fixture(), projection = projected(f), first = prepareProgress(projection, null,
+    projection.fields.map(({target,scope})=>({target,scope,choice:'accept_remote'})));
   const progress = { fields: first.rows.map(row => structuredClone(row.record)) }, before = structuredClone(progress);
   change(projection); projection.plan = planFirstSyncFields({ fields: projection.fields });
   const result = prepareProgress(projection, progress);

@@ -43,6 +43,20 @@ it('saves the initial SEO receipt without editing its template or claiming deliv
     {sku:'SV1',bindingRevisionId,previewToken:token,target:'meta_title',scope:'en',choice:'accept_remote'},{signal:expect.any(AbortSignal)});
   expect(api.post).toHaveBeenCalledTimes(2);
 });
+it('offers an explicit local SEO decision and keeps its receipt pending separate delivery',async()=>{
+  const seo=field({target:'meta_title',scope:'en',reason:'SEO_AUTHORITY_DECISION_REQUIRED',
+    local:known('Amber current SEO'),remote:known('Magento existing SEO')});
+  api.post.mockResolvedValueOnce({data:plan([seo])}).mockResolvedValueOnce({data:receipt({target:'meta_title',scope:'en',choice:'keep_local',
+    receipt:{sessionId:'edcd2e97-8708-4e06-9c2b-55bdbf61a3e2',revision:'1',state:'pending_outward_confirmation',alreadyApplied:false}})});
+  render(shell());read();await screen.findByRole('region',{name:'SEO заголовок · EN'});expect(api.post).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole('button',{name:'Залишити значення Amber: SEO заголовок · EN'}));
+  expect(within(screen.getByRole('dialog')).getByText(/SEO Amber до передавання/)).toBeTruthy();
+  expect(within(screen.getByRole('dialog')).getByText(/Прийняття SEO Magento потребує явного вибору/)).toBeTruthy();confirm();
+  await screen.findByText(/Передачу в Magento ще потрібно виконати/);
+  expect(api.post).toHaveBeenLastCalledWith('/admin/magento-integration/first-sync/apply',
+    {sku:'SV1',bindingRevisionId,previewToken:token,target:'meta_title',scope:'en',choice:'keep_local'},{signal:expect.any(AbortSignal)});
+  expect(screen.queryByText(/SEO Magento збережено/)).toBeNull();
+});
 it('does not receive pending SEO twice and refuses a SEO receipt on a weight field',async()=>{
   api.post.mockResolvedValueOnce({data:plan([field({target:'meta_description',status:'seo_pending_initial_readback',reason:'FIRST_REMOTE_SEO_AUTHORITATIVE',canAcceptRemote:false,canKeepLocal:false})])});
   render(shell());read();await screen.findByRole('region',{name:'SEO опис · UA / основний магазин'});

@@ -428,17 +428,6 @@ function projectFirstSyncFields(input) {
       }
     }
     if (kind === 'derived' && target === 'price' && scope === 'all') {
-      // Native price has a proven base-currency contract. This only compares
-      // the published forward output; it cannot reconstruct a canonical price.
-      if (attr?.frontend_input !== 'price' || pinnedAttr?.frontend_input !== 'price') {
-        reason ||= 'PRICE_NATIVE_DECIMAL_CONTRACT_NOT_PROVEN';
-      } else if (input.currencyEvidence?.verified !== true || input.currencyEvidence.currency !== 'UAH') {
-        reason ||= 'PRICE_CURRENCY_UAH_NOT_PROVEN';
-      } else {
-        type = 'decimal'; unit = 'UAH'; scale = 2; constraints = { min: '0', minInclusive: false };
-      }
-    }
-    if (kind === 'derived' && target === 'price' && scope === 'all') {
       // The native price target carries the proven store base currency. Its
       // forward output can be compared exactly without recovering its inputs.
       if (attr?.frontend_input !== 'price' || pinnedAttr?.frontend_input !== 'price') {
@@ -456,9 +445,12 @@ function projectFirstSyncFields(input) {
     // Derived values are current forward observations, never reversible inputs.
     // Display the exact compared output without changing setter authority.
     if (kind === 'derived') local = prospective?.verified ? state(prospective.value, unit) : { known: false };
-    if (category === 'NM' && ['meta_title','meta_description'].includes(target)) {
+    if (['meta_title','meta_description'].includes(target)) {
       if (!attr || !pinnedAttr || !['text','textarea'].includes(attr.frontend_input)
         || attr.frontend_input !== pinnedAttr.frontend_input) reason ||= 'SEO_TEXT_ATTRIBUTE_UNSUPPORTED';
+      if(scope==='en' && (attr?.scope!=='store'||pinnedAttr?.scope!=='store'))reason ||= 'SEO_STORE_SCOPE_UNPROVEN';
+    }
+    if (category === 'NM' && ['meta_title','meta_description'].includes(target)) {
       persistence = 'seo_snapshot'; kind = 'seo'; type = 'text';
       descriptor = { kind:'seo_snapshot', field:target };
     }
@@ -493,6 +485,9 @@ function projectFirstSyncFields(input) {
         binding: binding || null, policy: policy || null, attributeRequired: pinnedAttr?.is_required ?? null,
         options: bindings.options.filter(option => option.bindingKey === expected?.bindingKey) }),
       outwardPolicy: policy?.policy || null,
+      ...(kind==='derived'&&target==='price'&&scope==='all'?{canonicalLocalPriceProven:output.verified
+        && normalizeDecimal(output.value,2)!==null
+        && normalizeDecimal(output.value,2)===normalizeDecimal(product.total_price_uah,2)}:{}),
       storagePath: persistence === 'information' || persistence === 'characteristic'
         ? 'details.answers.' + descriptor?.key : persistence === 'weight' ? 'weight'
           : persistence === 'price' ? 'total_price_uah' : descriptor?.field || null,

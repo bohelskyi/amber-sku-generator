@@ -892,6 +892,23 @@ test('derived native price literal compares exact REST numeric UAH without canon
   assert.equal(Object.hasOwn(field(result, 'price'), 'importValue'), false);
   assert.equal(Object.hasOwn(input.observation.amber.product, 'total_price_uah'), false);
 });
+test('all-category derived local price choices require exact current canonical total, including painting expressions',()=>{
+  for(const category of ['BR','NM','KL','CH','AR','SV']) {
+    const input=fixture({category,changeDefinition:d=>{d.groups.find(g=>g.route===category).rows[0].cells.price={op:'numberText',
+      input:{op:'firstPresent',items:[text('price'),literal('42')],policy:'answer-v1'},
+      format:'js-number-positive-v1',error:{op:'error',field:'price',message:literal('Invalid price')}};}});
+    input.observation.raw.price=43;
+    let projected=projectFirstSyncFields(input);let row=prepareProgress(projected,null).rows.find(f=>f.target==='price'&&f.scope==='all');
+    assert.equal(row.canKeepLocal,true,category);assert.equal(row.canAcceptRemote,false,category);
+    assert.equal(metadata(projected,'price').canonicalLocalPriceProven,true);
+    input.observation.amber.product.total_price_uah='42.001';projected=projectFirstSyncFields(input);
+    row=prepareProgress(projected,null).rows.find(f=>f.target==='price'&&f.scope==='all');assert.equal(row.canKeepLocal,false,category);
+  }
+  const input=fixture({category:'AR',changeDefinition:d=>{d.groups.find(g=>g.route==='AR').rows[0].cells.price=literal('43');}});
+  input.observation.raw.price=44;const projected=projectFirstSyncFields(input);
+  assert.equal(metadata(projected,'price').canonicalLocalPriceProven,false);
+  assert.equal(prepareProgress(projected,null).rows.find(f=>f.target==='price').canKeepLocal,false);
+});
 test('derived numberText and decimalText price wrappers validate forward decimals without inverse guesses', () => {
   for (const cell of [
     { op: 'numberText', input: literal('42'), format: 'js-number-positive-v1',

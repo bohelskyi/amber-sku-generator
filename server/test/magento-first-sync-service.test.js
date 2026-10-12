@@ -95,6 +95,39 @@ async function inputFor(h) {
     target: 'dovzhyna_brasletu_diuimiv', scope: 'all', choice: 'accept_remote' };
 }
 
+test('choices apply once per product, retry order is canonical and one invalid last choice writes nothing',async t=>{
+  const h=harness(t);h.observed.raw.custom_attributes.find(a=>a.attribute_code==='kolir').value='blue-id';
+  const single=await inputFor(h),base={sku:single.sku,bindingRevisionId:single.bindingRevisionId,previewToken:single.previewToken};
+  const one={target:single.target,scope:single.scope,choice:single.choice};
+  const two={target:'kolir',scope:'all',choice:'keep_local'};
+  const invalid={...base,choices:[one,{target:'unmapped',scope:'all',choice:'keep_local'}]};
+  await assert.rejects(service.apply(h.config,invalid,h.options),{code:'MAGENTO_FIRST_SYNC_FIELD_NOT_MAPPED'});
+  assert.equal(h.calls.ledger,0);assert.equal(h.calls.local,0);
+  const committed=await service.apply(h.config,{...base,choices:[two,one]},h.options);
+  assert.equal(h.calls.ledger,1);assert.equal(h.calls.local,1);assert.equal(committed.receipt.fields.length,2);
+  const calls={...h.calls};h.failObservation=true;
+  const replay=await service.apply(h.config,{...base,choices:[one,two]},h.options);
+  assert.equal(replay.receipt.alreadyApplied,true);assert.equal(h.calls.ledger,calls.ledger);assert.equal(h.calls.local,calls.local);
+});
+
+test('fresh decision rejects raw source drift even when projected output stays equal; exact committed retry remains available',async t=>{
+  const h=harness(t),input=await inputFor(h);
+  h.observed.amber.product.details.answers.unmappedSource='changed';
+  await assert.rejects(service.apply(h.config,input,h.options),{code:'MAGENTO_FIRST_SYNC_PREVIEW_STALE'});
+  assert.equal(h.calls.ledger,0);assert.equal(h.calls.local,0);
+  const fresh=await inputFor(h);await service.apply(h.config,fresh,h.options);
+  h.observed.amber.product.details.answers.unmappedSource='changed again';h.failObservation=true;
+  const retry=await service.apply(h.config,fresh,h.options);assert.equal(retry.receipt.alreadyApplied,true);assert.equal(h.calls.ledger,1);
+});
+test('internal packet validation runs before any write, and exact receipt replay precedes fresh validation',async t=>{
+  const h=harness(t),input=await inputFor(h);let checks=0;
+  const denied={...h.options,validateFirstSyncDecision:()=>{checks++;throw c.error(409,'BATCH_PLAN_CHANGED','Changed packet');}};
+  await assert.rejects(service.apply(h.config,input,denied),{code:'BATCH_PLAN_CHANGED'});assert.equal(checks,1);assert.equal(h.calls.ledger,0);
+  const accepted={...h.options,validateFirstSyncDecision:()=>{checks++;}};await service.apply(h.config,input,accepted);
+  assert.equal(checks,2);assert.equal(h.calls.ledger,1);h.failObservation=true;
+  const retry=await service.apply(h.config,input,denied);assert.equal(retry.receipt.alreadyApplied,true);assert.equal(checks,2);assert.equal(h.calls.ledger,1);
+});
+
 test('public apply recovers a lost response exactly and retains blocked whole-product readiness', async t => {
   const h = harness(t), input = await inputFor(h);
   const originalAmber = h.observed.amber;
