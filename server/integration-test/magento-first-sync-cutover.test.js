@@ -157,14 +157,14 @@ test('explicit cutover-only first-sync admission preserves history and field dec
       (SELECT jsonb_agg(a ORDER BY id) FROM audit_events a) audits`)).rows[0]);
 
     const products=[];
-    for(let n=0;n<16;n++) products.push(await product());
+    for(let n=0;n<18;n++) products.push(await product());
     const svAcceptance=(await insertProductFixture(db,`INSERT INTO products(id,full_sku,category,weight,total_price_uah,details,
       magento_name_subject_ua,magento_name_subject_en)
       VALUES(1488,'SV11500004','SV',132.300,2950,'{"answers":{"weight":"132,3"},"manualPriceUah":2950}',
         'Existing Amber UA','Existing Amber EN') RETURNING id,full_sku,category,public_product_identity_id`)).rows[0];
     products.push(svAcceptance);
     await db.query('INSERT INTO product_export_revisions(product_id,has_product_snapshot) SELECT unnest($1::int[]),TRUE',
-      [[products[0].id,products[1].id,products[3].id,products[8].id,products[10].id,products[11].id,products[12].id,products[13].id,products[14].id,products[15].id,svAcceptance.id]]);
+      [[products[0].id,products[1].id,products[3].id,products[8].id,products[10].id,products[11].id,products[12].id,products[13].id,products[14].id,products[15].id,products[16].id,products[17].id,svAcceptance.id]]);
     await db.query(`UPDATE product_full_export_state SET evidence='{"origin":"migration_039","coverage":"unresolved_historical"}',
       business_exclusion_state='none',delivery_version=delivery_version+1`);
     await db.query('UPDATE export_state SET exported_to_product_id=$1',[products.at(-1).id]);
@@ -227,6 +227,62 @@ test('explicit cutover-only first-sync admission preserves history and field dec
       assert.equal(added[0].details.remoteWrites,0);assert.equal(added[0].details.enqueued,false);
       assert.equal(added[0].details.admission.identity.productId,p.id);
       assert.deepEqual({...after,audit_events:after.audit_events.filter(row=>oldIds.has(row.id))},before);
+    });
+    await t.test('locked admission assertion captures once per invocation and never reuses the earlier opaque proof',async subtest=>{
+      const p=products[16];await admit(p);
+      const inspected=await service.inspect(config,await observation(p,remote),options);
+      assert.equal(inspected.mode,'first');assert.ok(inspected.first.historyAdmission);
+      const before=await publicState(),read=repair.readRepairInput,requests=calls.length;let captures=0;
+      subtest.mock.method(repair,'readRepairInput',async client=>{captures++;return read(client);});
+      let previous=inspected.first.historyAdmission;
+      for(let invocation=1;invocation<=2;invocation++){
+        const result=await write(tx=>admission.assertOnClient(tx,config,inspected.observation,previous));
+        assert.equal(captures,invocation);assert.notEqual(result.admission,previous);
+        assert.equal(admission.allows(inspected.observation,result.admission),true);
+        assert.equal(admission.rootId(result.admission),admission.rootId(previous));
+        assert.equal(result.evidenceHash,inspected.first.historyAdmissionHash);previous=result.admission;
+      }
+      assert.equal(calls.length,requests);assert.deepEqual(await publicState(),before);
+    });
+    await t.test('a separate lifecycle writer invalidates a previously asserted proof on the next invocation',async()=>{
+      const p=products[16],inspected=await service.inspect(config,await observation(p,remote),options);
+      const proof=await write(tx=>admission.assertOnClient(tx,config,inspected.observation,inspected.first.historyAdmission));
+      const writer=new Client({connectionString:target.toString()});await writer.connect();
+      try{
+        await gate.begin(writer,'BEGIN');
+        await require('../src/services/full-product-export.service').advanceFullProductRevision(writer,p.id,(await counter(p)).revision);
+        await gate.commit(writer);await gate.release(writer);
+        const after=await publicState();
+        await assert.rejects(write(tx=>admission.assertOnClient(tx,config,inspected.observation,proof.admission)),
+          {code:'MAGENTO_FIRST_SYNC_HISTORY_ADMISSION_CHANGED'});
+        assert.deepEqual(await publicState(),after);
+      }finally{await gate.rollback(writer).catch(()=>{});await gate.release(writer);await writer.end();}
+    });
+    await t.test('locked assertion rejects a newer receipt committed during its fresh retained capture',async subtest=>{
+      const p=products[17];await admit(p);
+      const inspected=await service.inspect(config,await observation(p,remote),options);
+      assert.equal(inspected.mode,'first');assert.ok(inspected.first.historyAdmission);
+      const read=repair.readRepairInput,captured=deferred(),resume=deferred(),pids=[];
+      const writer=new Client({connectionString:target.toString()});await writer.connect();let asserting,paused=false;
+      subtest.mock.method(repair,'readRepairInput',async client=>{
+        const input=await read(client);pids.push((await client.query('SELECT pg_backend_pid() pid')).rows[0].pid);
+        if(!paused){paused=true;captured.resolve();await resume.promise;}return input;
+      });
+      try{
+        asserting=write(tx=>admission.assertOnClient(tx,config,inspected.observation,inspected.first.historyAdmission))
+          .then(result=>({result}),error=>({error}));await reached(captured.promise);
+        const writerPid=(await writer.query('SELECT pg_backend_pid() pid')).rows[0].pid;
+        const prior=(await writer.query(`SELECT details FROM audit_events WHERE event_key='product.magento_first_sync_cutover_reviewed'
+          AND details->'admission'->'identity'->>'publicIdentityId'=$1 ORDER BY id DESC LIMIT 1`,[String(p.public_product_identity_id)])).rows[0];
+        const details=structuredClone(prior.details);details.admission.retainedHash='0'.repeat(64);
+        await gate.begin(writer,'BEGIN');await require('../src/audit/audit-events').writeAuditEvent(writer,{
+          mutationContext:{actorUserId:actor},eventKey:'product.magento_first_sync_cutover_reviewed',
+          subjectType:'magento_first_sync_cutover_admission',subjectId:c.hash('newer receipt during locked assertion'),details});
+        await gate.commit(writer);await gate.release(writer);const after=await publicState();resume.resolve();
+        const outcome=await asserting;assert.equal(outcome.error?.code,'MAGENTO_FIRST_SYNC_HISTORY_ADMISSION_CHANGED');
+        assert.ok(pids.length>0);assert.ok(pids.every(pid=>pid!==writerPid));assert.deepEqual(await publicState(),after);
+      }finally{resume.resolve();if(asserting)await asserting;await gate.rollback(writer).catch(()=>{});
+        await gate.release(writer);await writer.end();}
     });
     await t.test('an exact receipt appearing during capture is read again under READ COMMITTED instead of reusing the earlier receipt',async subtest=>{
       const p=products[13],observed=await observation(p,remote),read=repair.readRepairInput,captured=deferred(),resume=deferred();
@@ -350,7 +406,7 @@ test('explicit cutover-only first-sync admission preserves history and field dec
       assert.equal(results[0].receipt.auditEventId,results[1].receipt.auditEventId);
       assert.deepEqual(results.map(r=>r.receipt.alreadyApplied).sort(),[false,true]);assert.equal(await auditCount(),count+1);
     });
-    await t.test('CSV-disabled local import retains immutable root admission through progress, dispatch and completion',async()=>{
+    await t.test('CSV-disabled local import retains immutable root admission through progress, dispatch and completion',async subtest=>{
       const p=products[3];await admit(p);
       const event=(await db.query(`INSERT INTO audit_events(event_key,actor_user_id,actor_snapshot,subject_type,subject_id,request_id)
         VALUES('magento_delivery.cutover',$1,'{"displayName":"Fixture","preferredUsername":null}','fixture','csv-disabled',$2) RETURNING id`,[actor,randomUUID()])).rows[0].id;
@@ -358,15 +414,25 @@ test('explicit cutover-only first-sync admission preserves history and field dec
         await tx.query(`UPDATE magento_auto_sync_activation SET enabled=TRUE,installation_key=$1,actor_user_id=$2,
           legacy_product_csv_enabled=FALSE,cutover_at=CURRENT_TIMESTAMP,cutover_by_user_id=$2,cutover_event_id=$3 WHERE singleton`,[binding.installationKey,actor,event]);});
       const prepared=await reviewed(p,{size:'18',en:'Remote EN'},{target:'dovzhyna_brasletu_diuimiv',scope:'all',choice:'keep_local'});
+      const read=repair.readRepairInput;let captures=0;
+      const commitRead=subtest.mock.method(repair,'readRepairInput',async client=>{captures++;return read(client);});
       const result=await commit(prepared);assert.equal(result.localChanged,true);
+      assert.equal(captures,2,'commit keeps its separate fresh eligibility after the one-capture admission assertion');
+      commitRead.mock.restore();
       const f=await counter(p);assert.equal(f.csv_retired_revision,f.revision);assert.ok(BigInt(f.revision)>1n);
       const pending=await service.inspect(config,await observation(p,{size:'18',ua:'Remote UA',en:'Remote EN'}),options);
       assert.equal(pending.mode,'first',JSON.stringify(pending.blockers));assert.ok(pending.first.historyAdmission);
       assert.ok(pending.first.progress.historyAdmissionEventId);
+      captures=0;
+      const readMock=subtest.mock.method(repair,'readRepairInput',async client=>{captures++;return read(client);});
       await write(tx=>require('../src/services/magento/first-sync-history-admission').assertOnClient(tx,config,pending.observation,pending.first.historyAdmission));
+      assert.equal(captures,1,'pending progress assertion reuses its own fresh eligibility proof');
+      readMock.mock.restore();
       const done=await reviewed(p,{size:'17',ua:'Remote UA',en:'Remote EN'});assert.equal(done.inspection.complete,true);
       await commit(done);
+      captures=0;subtest.mock.method(repair,'readRepairInput',async client=>{captures++;return read(client);});
       await write(tx=>require('../src/services/magento/first-sync-history-admission').assertOnClient(tx,config,done.inspection.observation,done.inspection.first.historyAdmission));
+      assert.equal(captures,1,'completed eligibility still uses the fresh admission fallback');
       assert.equal((await service.inspect(config,await observation(p,{size:'17'}),options)).mode,'ordinary');
     });
     await t.test('an incomplete session cannot bypass admission after unrelated revision/CSV drift',async()=>{

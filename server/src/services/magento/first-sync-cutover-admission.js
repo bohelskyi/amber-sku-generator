@@ -187,7 +187,12 @@ async function assertOnClient(client,config,observation,admission,{jobId=null,re
   await require('./first-sync-history-admission').lockOnClient(client,{productIds:[p.envelope.identity.productId],skus:[p.envelope.identity.sku]});
   const eligibility=await require('./first-sync-eligibility').readFirstSyncEligibility(client,config,observation,{jobId,reviewedRecovery});
   if(!['first','ordinary'].includes(eligibility.mode) || eligibility.admissionGuards.protectedWork || eligibility.admissionGuards.otherOrigin) throw changed();
-  const fresh=await readOnClient(client,config,observation);
+  // Eligibility just captured history under these locks, including the latest
+  // receipt after capture. Reuse only its private proof for this observation;
+  // completed/ordinary sessions without that proof still need a fresh read.
+  const fresh=allows(observation,eligibility.historyAdmission)
+    ? {admission:eligibility.historyAdmission,evidenceHash:eligibility.historyAdmissionHash}
+    : await readOnClient(client,config,observation);
   if(!fresh.admission || fresh.evidenceHash!==p.evidenceHash) throw changed();
   return fresh;
 }
