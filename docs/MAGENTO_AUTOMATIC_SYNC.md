@@ -143,6 +143,12 @@ coalesced changes can move it. Immutable audit/dispatch timestamps remain author
 These logs are non-durable container stdout. Capture them before rebuilding/recreating
 containers; a later DB receipt cannot reconstruct individual GET/dispatch latency.
 
+For cutover-admitted first-sync work, the locked admission assertion reuses the
+opaque cutover proof just produced by its own fresh eligibility read, avoiding a
+second retained-inventory capture in that assertion. Exact identity and receipt
+hash checks remain; completed sessions and other proof types retain the fresh-read
+fallback. No evidence is cached across assertions, transactions, products or jobs.
+
 The gate stores an installation key and an active local actor with
 `export_templates.publish`. The worker looks up that installation's highest
 **published** binding version for the configured origin on each attempt. Drafts

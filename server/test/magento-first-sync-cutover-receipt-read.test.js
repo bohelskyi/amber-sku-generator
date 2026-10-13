@@ -68,6 +68,118 @@ function harness(t) {
   return f;
 }
 
+function assertionHarness(t) {
+  const f = harness(t), read = f.client.query;
+  f.locks = [];
+  f.client.query = async (sql, params) => {
+    if (/FOR (UPDATE|SHARE) NOWAIT$/.test(sql) || sql.startsWith('LOCK TABLE ')) {
+      f.locks.push(sql);
+      if (sql.startsWith('LOCK TABLE ')) {
+        assert.equal(sql, 'LOCK TABLE product_corrections,export_snapshots,magento_export_artifacts,export_snapshot_products,export_events,export_state IN SHARE MODE NOWAIT');
+        return { rows: [] };
+      }
+      assert.deepEqual(params, sql.includes('WHERE public_sku=') ? [['SV7']] : [[7]]);
+      return { rows: [{ id: 7, product_id: 7, full_sku: 'SV7' }] };
+    }
+    return read(sql, params);
+  };
+  f.assert = (proof, options) => admission.assertOnClient(f.client, f.config, f.observation, proof, options);
+  return f;
+}
+
+test('locked assertion reuses only its freshly captured eligibility proof, once on every call', async t => {
+  const f = assertionHarness(t); await f.issue(); const old = await f.read(); f.reset();
+  const read = eligibility.readFirstSyncEligibility; let eligible;
+  t.mock.method(eligibility, 'readFirstSyncEligibility', async (client, config, observation, options) => {
+    assert.equal(f.locks.length % 6, 0); assert.ok(f.locks.length > 0);
+    assert.deepEqual(options, { jobId: 'exact-job', reviewedRecovery: true });
+    eligible = await read(client, config, observation, options); return eligible;
+  });
+  const first = await f.assert(old.admission, { jobId: 'exact-job', reviewedRecovery: true });
+  assert.equal(first.admission, eligible.historyAdmission); assert.notEqual(first.admission, old.admission);
+  assert.equal(first.evidenceHash, old.evidenceHash); assert.equal(admission.rootId(first.admission), '4');
+  assert.equal(f.calls.retained, 1); assert.equal(f.calls.captures, 1); assert.equal(f.locks.length, 6);
+  assert.deepEqual(f.calls.order, ['lookup', 'capture', 'retained', 'lookup']);
+  const second = await f.assert(first.admission, { jobId: 'exact-job', reviewedRecovery: true });
+  assert.equal(second.admission, eligible.historyAdmission); assert.notEqual(second.admission, first.admission);
+  assert.equal(f.calls.retained, 2); assert.equal(f.calls.captures, 2); assert.equal(f.locks.length, 12);
+  f.retained.revisions[0].has_product_snapshot = false;
+  await assert.rejects(f.assert(second.admission, { jobId: 'exact-job', reviewedRecovery: true }),
+    { code: 'MAGENTO_FIRST_SYNC_HISTORY_ADMISSION_CHANGED' });
+  assert.ok(f.calls.retained > 2, 'A later call must freshly observe changed retained evidence');
+});
+
+test('ordinary or unsupported eligibility proofs retain the original full assertion reread', async t => {
+  for (const kind of ['ordinary without proof', 'first without proof', 'forged proof', 'foreign observation proof']) {
+    await t.test(kind, async sub => {
+      const f = assertionHarness(sub); await f.issue(); const old = await f.read();
+      const foreign = await admission.readOnClient(f.client, f.config, structuredClone(f.observation), f.options);
+      const proof = kind === 'foreign observation proof' ? foreign.admission : kind === 'forged proof' ? Object.freeze({}) : null;
+      f.reset();
+      sub.mock.method(eligibility, 'readFirstSyncEligibility', async () => ({
+        mode: kind.startsWith('ordinary') ? 'ordinary' : 'first',
+        admissionGuards: { protectedWork: false, otherOrigin: false }, historyAdmission: proof,
+        historyAdmissionHash: old.evidenceHash,
+      }));
+      const fresh = await f.assert(old.admission);
+      assert.equal(admission.allows(f.observation, fresh.admission), true);
+      assert.notEqual(fresh.admission, proof); assert.equal(fresh.evidenceHash, old.evidenceHash);
+      assert.equal(f.calls.retained, 1); assert.equal(f.locks.length, 6);
+      assert.deepEqual(f.calls.order, ['lookup', 'capture', 'retained', 'lookup']);
+    });
+  }
+});
+
+test('fresh eligibility cannot replace the exact reviewed receipt even with an otherwise matching envelope', async t => {
+  const f = assertionHarness(t); await f.issue(); const old = await f.read(); f.reset();
+  const next = structuredClone(f.receipts[0]); next.id = '5'; f.receipts.push(next);
+  await assert.rejects(f.assert(old.admission), { code: 'MAGENTO_FIRST_SYNC_HISTORY_ADMISSION_CHANGED' });
+  assert.equal(f.calls.retained, 1); assert.equal(f.calls.lookups.length, 2);
+});
+
+test('assertion observes the latest receipt after retained capture instead of reusing the initial receipt', async t => {
+  for (const kind of ['malformed latest', 'new matching latest', 'disappeared']) await t.test(kind, async sub => {
+    const f = assertionHarness(sub); await f.issue(); const old = await f.read(); f.reset();
+    f.beforeLookup = number => {
+      if (number !== 2) return;
+      if (kind === 'disappeared') f.receipts.length = 0;
+      else {
+        const next = structuredClone(f.receipts[0]); next.id = '5';
+        if (kind === 'malformed latest') next.details.admission.retainedHash = 'b'.repeat(64);
+        f.receipts.push(next);
+      }
+    };
+    await assert.rejects(f.assert(old.admission), { code: 'MAGENTO_FIRST_SYNC_HISTORY_ADMISSION_CHANGED' });
+    assert.deepEqual(f.calls.order.slice(0, 4), ['lookup', 'capture', 'retained', 'lookup']);
+  });
+});
+
+test('locked eligibility still rejects lifecycle, protected work and other-origin changes', async t => {
+  for (const [kind, mutate] of [
+    ['retired', f => { f.observation.amber.product.status = 'retired'; }],
+    ['protected', f => { f.facts.protected_work = true; }],
+    ['other origin', f => { f.facts.other_origin = true; }],
+  ]) await t.test(kind, async sub => {
+    const f = assertionHarness(sub); await f.issue(); const old = await f.read(); f.reset(); mutate(f);
+    await assert.rejects(f.assert(old.admission), { code: 'MAGENTO_FIRST_SYNC_HISTORY_ADMISSION_CHANGED' });
+    assert.equal(f.locks.length, 6); assert.equal(f.calls.retained, 1);
+  });
+});
+
+test('assertion cannot reuse an input proof with a cloned product or changed identity or publication', async t => {
+  for (const [kind, mutate] of [
+    ['cloned product', f => { f.observation.amber.product = structuredClone(f.observation.amber.product); }],
+    ['remote ID', f => { f.observation.raw.id++; }],
+    ['binding', f => { f.observation.amber.revision.id = '22222222-2222-4222-8222-222222222222'; }],
+    ['public identity', f => { f.observation.amber.product.public_product_identity_id = '18'; }],
+    ['SKU', f => { f.observation.amber.product.public_sku = 'SV8'; f.observation.raw.sku = 'SV8'; }],
+  ]) await t.test(kind, async sub => {
+    const f = assertionHarness(sub); await f.issue(); const old = await f.read(); f.reset(); mutate(f);
+    await assert.rejects(f.assert(old.admission), { code: 'MAGENTO_FIRST_SYNC_HISTORY_ADMISSION_CHANGED' });
+    assert.equal(f.locks.length, 0); assert.equal(f.calls.retained, 0);
+  });
+});
+
 test('absent no-session receipt uses one exact lookup and skips capture without creating an admission', async t => {
   const f = harness(t);
   assert.deepEqual(await f.read(), empty);
