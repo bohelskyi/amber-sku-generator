@@ -348,4 +348,4 @@ async function main(args = process.argv.slice(2), dependencies = {}) {
 }
 if (require.main === module) main().then(code => { process.exitCode = code; });
 module.exports = { argumentsFor, createRuntime, selectedNames, validateNames, runItem, expectedReceipt, readJournal,
-  verifyRecorded, main, durableWrite, implementationHash, deliveryEffect };
+  verifyRecorded, main, durableWrite, implementationHash, deliveryEffect, commitProof };
