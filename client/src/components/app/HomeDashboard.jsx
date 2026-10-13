@@ -35,6 +35,7 @@ import {
 import { numericQuestionPolicy, physicalWeightPolicy, validateNumericInput } from '../../lib/product-numeric-input.js';
 import { ProductMagentoState } from './ProductMagentoState.jsx';
 import { RecountNameFields } from './RecountNameFields.jsx';
+import { ExchangeRateNotice } from '../ExchangeRateNotice';
 
 function getPricingSourceLabel(source) {
   return source === 'stored' ? 'Збережена в базі' : 'Перерахована зараз';
@@ -955,6 +956,10 @@ function RecountPanel({
                 </span>
               </div>
             </div>
+
+            {isRecountPreviewCurrent && <ExchangeRateNotice rate={correctedPricing?.uahRate}
+              rateDate={correctedPricing?.uahRateDate} fetchedAt={correctedPricing?.uahRateFetchedAt}
+              stale={correctedPricing?.uahRateStale} />}
 
             <div className="builder-summary-group">
               <p className="builder-summary-section-title">Змінені атрибути</p>

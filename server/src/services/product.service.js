@@ -289,7 +289,7 @@ async function buildProductPreview(
       && (!pricingDecision || pricingDecision.mode === 'system_auto')
     ? getPricingContextFingerprint(pricingContext) : null;
   const pricing = usesCustomUsdBasis
-    ? await calculateDecisionPricing(pricingDecision, normalizedWeight, null, rateObservation)
+    ? await calculateDecisionPricing(pricingDecision, normalizedWeight, null, rateObservation, queryable)
     : await calculatePricing(
       normalizedCategoryCode,
       normalizedAnswers,
@@ -445,7 +445,7 @@ async function buildNativeProductPreview({ categoryCode, answers, weight, isCali
     && !(pricingDecision.mode === 'manual_uah' && previousAnswers !== undefined);
   const context = customPricing ? null : await loadPricingContext(categoryCode, queryable);
   const pricing = customPricing
-    ? await calculateDecisionPricing(pricingDecision, normalizedWeight, null, rateObservation)
+    ? await calculateDecisionPricing(pricingDecision, normalizedWeight, null, rateObservation, queryable)
     : await calculatePricing(categoryCode, normalizedAnswers, normalizedWeight, isCalibrated, { queryable, context, rateObservation });
   const result = { mode: 'public_identity', identityMode: 'public_identity',
     fullProposedSku: null, baseSku: null, nextSeq: null, internalSku: null,
@@ -660,6 +660,9 @@ async function buildRecountPreview({
       manualPriceUah: previewManualPrice,
       ...(pricingDecision ? { pricingDecision } : {}),
       uahRateDate: correctedPreview.uahRateDate ?? null,
+      uahRateSource: correctedPreview.uahRateSource ?? null,
+      uahRateFetchedAt: correctedPreview.uahRateFetchedAt ?? null,
+      uahRateStale: Boolean(correctedPreview.uahRateStale),
     },
     changes,
     priceDeltaUah: newPriceUah > 0 ? newPriceUah - oldPriceUah : null,

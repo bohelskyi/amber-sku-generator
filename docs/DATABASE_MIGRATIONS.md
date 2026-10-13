@@ -10,7 +10,7 @@ Checksums canonicalize CRLF and lone CR to LF before hashing, so Windows and Lin
 
 ## Forward-only rule
 
-Checked-in migrations now span `000`–`077`. Migrations `000`–`076` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
+Checked-in migrations now span `000`–`078`. Migrations `000`–`077` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
 
 - never edit, reorder, rename, or replace an applied migration;
 - add the next lexically ordered forward migration;
@@ -423,3 +423,17 @@ transaction rollback, repeated startup, fresh installation, database bounds and
 canonical successor persistence with proposed new identities. Deploy the matching
 schema and code through normal startup; no runtime DDL or standalone production
 data repair is required.
+
+## 078 — daily persisted exchange-rate refresh
+
+`078_daily_exchange_rate_refresh.sql` adds the small
+`exchange_rate_refresh_state` table for the USD/UAH background updater's last
+attempt, next allowed retry and bounded failure code. Installation creates no
+rate, product, job, draft, pricing decision or setting. Existing cache rows and
+all earlier migration checksums remain unchanged. An empty cache is populated
+only by the background runtime after startup; business readers fail closed for
+rate-dependent work until a usable snapshot exists. The runtime holds a shared
+PostgreSQL advisory lock across its bounded HTTP attempt without opening a
+transaction, then commits successful cache/state changes atomically. See
+[pricing](PRICING.md#nbu-exchange-rate-behavior) and [operations](OPERATIONS.md#health-logs-and-shutdown)
+for the 04:00 Kyiv schedule, seven-day age limit, replica transition and recovery.

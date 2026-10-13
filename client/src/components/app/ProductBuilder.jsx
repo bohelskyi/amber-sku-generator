@@ -13,6 +13,7 @@ import { ProductPhotos } from './ProductPhotos.jsx';
 import { TestProductNotice } from './TestProductNotice.jsx';
 import { numericQuestionPolicy, physicalWeightPolicy, validateNumericInput } from '../../lib/product-numeric-input.js';
 import { createRequirements, isCreateQuestionRequired } from '../../lib/product-create-readiness';
+import { ExchangeRateNotice } from '../ExchangeRateNotice';
 
 const hasAnswer = (value) =>
   value !== undefined && value !== null && String(value).trim() !== '';
@@ -434,6 +435,8 @@ export function ProductBuilder({
               pricePerGramUsd={displayedPricing?.pricePerGram}
               showPerGram={displayedPricing?.priceMode === 'per_gram_usd'}
             />
+            <ExchangeRateNotice rate={displayedPricing?.uahRate} rateDate={displayedPricing?.uahRateDate}
+              fetchedAt={displayedPricing?.uahRateFetchedAt} stale={displayedPricing?.uahRateStale} />
 
             {requiresPriceAttention && (
               <div className="builder-blockers" role="alert">

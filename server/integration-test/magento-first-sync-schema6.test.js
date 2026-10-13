@@ -44,7 +44,8 @@ test('actual schema6 first-sync size adoption uses the published conditional rou
       return (await require('./product-fixture').insertProductFixture(db,`INSERT INTO products(id,full_sku,base_sku,sequence_number,category,weight,sku_schema_version_id,total_price,total_price_uah,price_per_gram,uah_rate,details,legacy_uah_price_unset,created_at)
       VALUES($1,$2,$3,$4,'SV',$5,6,$6,$7,$8,$9,$10::jsonb,$11,$12) RETURNING *`,[x.id,x.full_sku,x.base_sku,x.sequence_number,x.weight,x.total_price,x.total_price_uah,x.price_per_gram,x.uah_rate,JSON.stringify(x.details),x.legacy_uah_price_unset,variant===null?new Date().toISOString():'2000-01-01T00:00:00Z'])).rows[0];}
     const actual=async id=>(await db.query('SELECT * FROM products WHERE id=$1',[id])).rows[0];
-    const rateObservation=await require('../src/services/currency.service').observeUsdRate({databasePool:db,fetchLive:async()=>({rate:40,rateDate:new Date().toLocaleDateString('en-CA',{timeZone:'Europe/Kyiv'}),fetchedAt:new Date().toISOString()})});
+    const rateObservation={rateInfo:{rate:40,rateDate:new Date().toLocaleDateString('en-CA',{timeZone:'Europe/Kyiv'}),
+      fetchedAt:new Date().toISOString(),source:'fixture',stale:false,ageMs:0,error:null},rateError:null};
     async function prepare(x,value='12/5/3',targetField='rozmir_suveniriv'){
       const amber=await previews.readPreviewProduct(db,{productId:x.id,bindingRevisionId:binding.id});
       const raw={id:10000+x.id,sku:amber.product.public_sku,attribute_set_id:151,name:'Fixture remote UA',price:String(x.total_price_uah),custom_attributes:[{attribute_code:targetField,value}]};

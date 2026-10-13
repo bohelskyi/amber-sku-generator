@@ -10,6 +10,8 @@ async function start() {
   await runMigrations();
   await seedDefaultData();
   await ensureLegacySkuSchemas();
+  const currencyRefresh = require('./src/services/currency-refresh-runtime')
+    .startCurrencyRefresh(require('./src/config/env'), logger);
   const automaticSync = require('./src/services/magento/automatic-sync-runtime')
     .startAutomaticSync(require('./src/config/env'), logger);
   const media = require('./src/services/magento/product-media-delivery')
@@ -25,7 +27,7 @@ async function start() {
   const shutdown = async (signal) => {
     if (shuttingDown) return;
     shuttingDown = true;
-    const workerStopped = Promise.all([automaticSync.stop(), media.stop(), productLifecycle.stop(), historicalReactivation.stop()]);
+    const workerStopped = Promise.all([currencyRefresh.stop(), automaticSync.stop(), media.stop(), productLifecycle.stop(), historicalReactivation.stop()]);
     logger.info('server.shutdown.started', { signal });
     const forceTimer = setTimeout(() => {
       logger.error('server.shutdown.timeout', { timeoutMs: 10000 });

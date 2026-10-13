@@ -67,7 +67,7 @@ function decisionFromRequest(row) {
   return null;
 }
 
-async function calculateDecisionPricing(decision, weight, providedRateInfo = null, rateObservation) {
+async function calculateDecisionPricing(decision, weight, providedRateInfo = null, rateObservation, queryable) {
   if (decision.mode === 'manual_uah') {
     return {
       weightVal: Number(weight || 0),
@@ -96,7 +96,7 @@ async function calculateDecisionPricing(decision, weight, providedRateInfo = nul
       assertUsdRateObservationCurrent(rateObservation);
       if (rateObservation.rateError) throw new Error(rateObservation.rateError);
       rateInfo = rateObservation.rateInfo;
-    } else rateInfo = providedRateInfo || await getUsdUahRateInfo();
+    } else rateInfo = providedRateInfo || await getUsdUahRateInfo({ databasePool: queryable });
   } catch {
     throw invalidDecision('Авторитетний курс USD/UAH недоступний для ціни USD/г.');
   }

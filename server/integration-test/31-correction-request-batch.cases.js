@@ -321,22 +321,31 @@ test('correction bulk processor: reviewed primitives, unique receipts and crash 
       assert.equal((await apply(plan)).counts.completed,1);
     }
   });
-  await t.test('observed rate HTTP finishes outside transactions and preflight never writes the cache',async()=>{
+  await t.test('observed persisted rate uses SELECT only and preflight never fetches or writes the cache',async subtest=>{
     const r=await pricing(),observedPool=new Pool({connectionString:TEST_DATABASE_URL,max:2,application_name:'amber_batch_rate_proof'});
-    const {observeUsdRate}=require('../src/services/currency.service');let fetches=0;
-    const observeRate=()=>observeUsdRate({databasePool:observedPool,fetchLive:async()=>{
-      fetches++;
-      const active=(await pool.query("SELECT count(*)::int n FROM pg_stat_activity WHERE application_name='amber_batch_rate_proof' AND state LIKE '%transaction%'")).rows[0].n;
-      assert.equal(active,0,'HTTP must finish before BEGIN');return observation.rateInfo;
-    }});
+    const {observeUsdRate}=require('../src/services/currency.service');let reads=0;
+    const readOnly={query:async(sql,values)=>{assert.match(sql,/^\s*SELECT\b/i);reads++;return observedPool.query(sql,values);}};
+    const observeRate=()=>observeUsdRate({databasePool:readOnly,rateOverride:null,now:()=>new Date(observation.rateInfo.fetchedAt)});
     const cache=async()=>(await pool.query('SELECT * FROM exchange_rate_cache ORDER BY currency_pair')).rows;
-    const savedFetch=globalThis.fetch;globalThis.fetch=()=>assert.fail('batch must never dispatch Magento or another HTTP call');
+    const original=await cache();
+    await pool.query(`INSERT INTO exchange_rate_cache(currency_pair,rate,rate_date,fetched_at) VALUES('USD_UAH',$1,$2,$3)
+      ON CONFLICT(currency_pair) DO UPDATE SET rate=EXCLUDED.rate,rate_date=EXCLUDED.rate_date,fetched_at=EXCLUDED.fetched_at`,
+    [observation.rateInfo.rate,observation.rateInfo.rateDate,observation.rateInfo.fetchedAt]);
+    const http=subtest.mock.method(require('node:https'),'request',()=>assert.fail('batch must never fetch an exchange rate'));
+    const remote=subtest.mock.method(globalThis,'fetch',()=>assert.fail('batch must never dispatch Magento or another HTTP call'));
     try{
       const before=await cache(),plan=await service.preflight({...base,databasePool:observedPool,observeRate,requestIds:[r.id]});
-      assert.deepEqual(await cache(),before);assert.deepEqual(e.stableResult(plan.rateObservation.rateInfo),e.stableResult(observation.rateInfo));
+      assert.deepEqual(await cache(),before);assert.equal(plan.rateObservation.rateInfo.rate,40);
+      assert.equal(plan.rateObservation.rateInfo.rateDate,observation.rateInfo.rateDate);assert.equal(plan.rateObservation.rateInfo.stale,false);
       assert.equal((await apply(plan,undefined,{databasePool:observedPool,observeRate})).counts.completed,1);
-      assert.equal(fetches,2);assert.deepEqual(await cache(),before);
-    }finally{globalThis.fetch=savedFetch;await observedPool.end();}
+      assert.ok(reads>=2);assert.deepEqual(await cache(),before);
+      assert.equal(http.mock.callCount(),0);assert.equal(remote.mock.callCount(),0);
+    }finally{
+      await pool.query('DELETE FROM exchange_rate_cache');
+      for(const row of original)await pool.query('INSERT INTO exchange_rate_cache(currency_pair,rate,rate_date,fetched_at) VALUES($1,$2,$3,$4)',
+        [row.currency_pair,row.rate,row.rate_date,row.fetched_at]);
+      await observedPool.end();
+    }
   });
   await t.test('CLI preflight/select/apply use exact files, read-only connection and resumable persistent summaries',async()=>{
     const r=await pricing(),planPath=path.join(directory,'cli-plan.json'),idsPath=path.join(directory,'cli-ids.json'),selectionPath=path.join(directory,'cli-selection.json');

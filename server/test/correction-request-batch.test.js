@@ -103,18 +103,22 @@ test('CLI rejects implicit/ambiguous/unbounded scope and strips credentials from
   assert.equal(a,cli.connectionTarget('postgresql://different:secret@127.0.0.1:55432/amber_test'));
   assert.throws(()=>cli.connectionTarget(''));
 });
-test('read-only rate provider uses exact live evidence with no cache writes', async () => {
+test('read-only rate observation uses exact stored daily evidence with no HTTP or cache writes', async t => {
   const queries=[];
-  const rate=await observeUsdRate({databasePool:{query:async sql=>{queries.push(sql);return{rows:[]};}},
-    fetchLive:async()=>({rate:40,rateDate:'2026-10-03',fetchedAt:'2026-10-03T10:00:00Z'}),now:()=>new Date('2026-10-03T10:00:00Z')});
-  assert.equal(rate.rateInfo.rate,40);assert.equal(rate.rateInfo.source,'nbu');assert.deepEqual(queries,[]);
+  const request=t.mock.method(require('node:https'),'request',()=>assert.fail('Batch observation must not call NBU'));
+  const rate=await observeUsdRate({databasePool:{query:async sql=>{queries.push(sql);return{rows:[
+    {rate:40,rate_date:'2026-10-03',fetched_at:'2026-10-03T01:00:00Z',last_error:null},
+  ]};}},rateOverride:null,now:()=>new Date('2026-10-03T10:00:00Z')});
+  assert.equal(rate.rateInfo.rate,40);assert.equal(rate.rateInfo.source,'nbu');assert.equal(rate.rateInfo.stale,false);
+  assert.equal(queries.length,1);assert.ok(queries.every(sql=>sql.startsWith('SELECT')));assert.equal(request.mock.callCount(),0);
 });
-test('read-only rate fallback enforces normal maximum stale age and never persists', async () => {
+test('read-only stored fallback enforces normal maximum stale age and never fetches or persists', async t => {
   const queries=[],databasePool={query:async sql=>{queries.push(sql);return{rows:[{rate:39,rate_date:'2026-10-02',fetched_at:'2026-10-02T10:00:00Z'}]};}};
-  const options={databasePool,fetchLive:async()=>{throw Error('offline');},now:()=>new Date('2026-10-03T10:00:00Z')};
+  const request=t.mock.method(require('node:https'),'request',()=>assert.fail('An overdue stored rate must not trigger HTTP'));
+  const options={databasePool,rateOverride:null,now:()=>new Date('2026-10-03T10:00:00Z')};
   const rate=await observeUsdRate(options);assert.equal(rate.rateInfo.stale,true);assert.equal(rate.rateInfo.rate,39);
   const tooOld=await observeUsdRate({...options,now:()=>new Date('2026-10-12T10:00:00Z')});assert.equal(tooOld.rateInfo,null);
-  assert.ok(queries.every(sql=>sql.startsWith('SELECT')));
+  assert.equal(queries.length,2);assert.ok(queries.every(sql=>sql.startsWith('SELECT')));assert.equal(request.mock.callCount(),0);
 });
 
 test('fallback that expires during a lock wait is rejected again before pricing',()=>{

@@ -4,7 +4,7 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const {Client,Pool}=require('pg'),{execFile}=require('node:child_process'),{promisify}=require('node:util');
 const path=require('node:path'),{randomUUID}=require('node:crypto');
 const fixture=require('../test/fixtures/legacy-sv-schema6');
-test('SV11500004 canonical cutover flag-only admission reaches guarded2950 delivery and verified first-sync completion',async t=>{
+test('SV11500004 canonical cutover preserves guarded2950 delivery across a later daily rate and completes first sync',async t=>{
   const source=new URL(process.env.TEST_DATABASE_URL||'');assert.equal(source.hostname,'127.0.0.1');assert.equal(source.port,'55432');assert.ok(source.pathname.endsWith('_test'));
   const name='amber_cutover_sv_flow_'+process.pid+'_test',control=new Client({connectionString:source.toString()});await control.connect();let created=false,db;
   try{
@@ -107,8 +107,11 @@ test('SV11500004 canonical cutover flag-only admission reaches guarded2950 deliv
         remote={...remote,...body,custom_attributes:[...attributes.values()]};}
       return response(true);
     };
-    let lastReport;
-    const runtimeOptions={...options,actorUserId:actor,fetchImpl,observeRate:async()=>({rateInfo:{rate:40,rateDate:'2026-10-11',source:'fixture',stale:false}}),
+    let lastReport,currentRate=40;const observedRates=[];
+    const runtimeOptions={...options,actorUserId:actor,fetchImpl,observeRate:async()=>{
+      observedRates.push(currentRate);return {rateInfo:{rate:currentRate,
+        rateDate:new Date().toLocaleDateString('en-CA',{timeZone:'Europe/Kyiv'}),fetchedAt:new Date().toISOString(),
+        source:'fixture',stale:false,ageMs:0,error:null},rateError:null};},
       preview:async(cfg,input)=>{lastReport=await require('../src/services/magento/sync-preview').previewProduct(cfg,{...input,discover:async()=>binding.schema});return lastReport;}};
     const selection={sku:'SV11500004',bindingRevisionId:binding.id};
     const snapshot=async()=>c.hash((await db.query(`SELECT
@@ -141,10 +144,25 @@ test('SV11500004 canonical cutover flag-only admission reaches guarded2950 deliv
     let queued;try{queued=await jobs.enqueue(runtimeConfig,selection,automaticOptions);}catch(e){e.message+=' '+JSON.stringify(lastReport?.blockers);throw e;}
     assert.equal(queued.state,'queued');assert.equal(writes.length,0);
     const retry=await jobs.enqueue(runtimeConfig,selection,automaticOptions);assert.equal(retry.id,queued.id);
+    // A later daily rate must not reprice a committed local decision or rewrite
+    // the durable payload while its automatic delivery is still queued.
+    const sealed=(await db.query('SELECT intent,plan_hash FROM magento_sync_jobs WHERE id=$1',[queued.id])).rows[0];
+    const pricingState=async()=>(await db.query(`SELECT total_price,total_price_uah,price_per_gram,uah_rate,
+      details->'manualPriceUah' AS manual_price,details->'autoPriceUah' AS auto_price,
+      details->'calculatedPriceUah' AS calculated_price FROM products WHERE id=1488`)).rows[0];
+    const committedPricing=await pricingState(),observationsBeforeDelivery=observedRates.length;
+    assert.ok(observedRates.length>0);assert.ok(observedRates.every(rate=>rate===40));
+    assert.equal(Number(sealed.intent.operations.find(operation=>operation.domain==='coreProduct').payload.product.price),2950);
+    currentRate=45;
     const worker=require('../src/services/magento/automatic-sync-worker').createAutomaticSyncWorker(runtimeConfig,{databasePool:db,jobOptions:runtimeOptions});
     allowWrites=true;await worker.runProduct(product.public_product_identity_id);
     const delivered=(await db.query('SELECT * FROM magento_sync_jobs WHERE id=$1',[queued.id])).rows[0];
     assert.equal(delivered.state,'succeeded',JSON.stringify(delivered.failure));assert.equal(String(delivered.remote_product_id),'3732');assert.ok(delivered.acknowledged_at);
+    assert.ok(observedRates.length>observationsBeforeDelivery);
+    assert.ok(observedRates.slice(observationsBeforeDelivery).every(rate=>rate===45));
+    assert.deepEqual({intent:delivered.intent,plan_hash:delivered.plan_hash},sealed);
+    assert.deepEqual(writes,sealed.intent.operations.map(operation=>operation.payload.product).filter(Boolean));
+    assert.deepEqual(await pricingState(),committedPricing);
     assert.ok(writes.some(w=>Number(w.price)===2950));assert.equal(remote.price,2950);
     const steps=(await db.query('SELECT * FROM magento_sync_steps WHERE job_id=$1 ORDER BY ordinal',[queued.id])).rows;
     assert.ok(steps.length>0);assert.ok(steps.every(s=>s.state==='verified'&&s.dispatched_at&&s.verified_at));

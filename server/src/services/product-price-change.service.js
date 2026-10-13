@@ -122,7 +122,7 @@ async function calculatePriceChange(product, decision, queryable, rateObservatio
       { queryable, context, rateObservation }
     );
   } else {
-    pricing = await calculateDecisionPricing(decision, product.weight, null, rateObservation);
+    pricing = await calculateDecisionPricing(decision, product.weight, null, rateObservation, queryable);
   }
 
   const calculatedPriceUah = toUahNumber(pricing.currencyPayload.calculatedPriceUah);

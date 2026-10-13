@@ -67,6 +67,48 @@ The USD/UAH provider uses the official NBU JSON endpoint with:
 - two retries after the initial attempt with bounded backoff;
 - `NBU_RATE_OVERRIDE` for deterministic tests or controlled environments.
 
-Successful rates are cached for the current Kyiv date. Concurrent retrieval is deduplicated inside one Node process. Last-known-good data persists in `exchange_rate_cache`, where conditional upsert ensures an older replica cannot overwrite a newer fetch.
+Business calculation and first-sync readers use only the persisted
+`exchange_rate_cache` snapshot. They never call NBU or write the cache. The
+background currency runtime refreshes once per period beginning at **04:00
+Europe/Kyiv**, with a one-minute scheduling tolerance and startup catch-up. The
+period follows Kyiv civil time, including DST; it is not a fixed UTC interval.
+Before 04:00, the preceding period remains current. A successful weekend read
+can retain an older official `rate_date`; refresh scheduling uses `fetched_at`,
+not equality between the quote date and today's date. Requests explicitly name
+the Kyiv calendar date. Malformed dates and future quote dates are rejected.
 
-When live retrieval fails, a cached/persisted rate may be returned with explicit stale source, age, and error metadata. The default maximum stale age is seven days and is configurable through `NBU_MAX_STALE_MS`; older fallback fails closed.
+Migration `078_daily_exchange_rate_refresh.sql` adds only durable attempt/retry
+metadata. One updater holds a PostgreSQL session advisory lock, rechecks due
+state, and records the next permitted attempt before HTTP. Failed or interrupted
+attempts are retried no earlier than 15 minutes later, including across restarts
+and replicas. No transaction spans the NBU call. A short transaction publishes
+the successful cache value and clears failure state together. Failure never
+changes the last successful rate or its `fetched_at`. The normal older-fetch
+overwrite guard remains in place. `NBU_RATE_OVERRIDE` retains deterministic
+controlled-environment behavior and disables background refresh; it is not a
+production default.
+
+An overdue snapshot returns `source: last_known_good`, `stale: true`, its actual
+age and a bounded failure/pending reason. Current snapshots retain `source: nbu`
+for compatibility with existing price evidence. Pricing, recount, price-change
+and repricing previews show a warning tied to the rate used by that preview.
+The existing maximum age is unchanged: seven days by default, configurable via
+`NBU_MAX_STALE_MS`. Missing, invalid or expired snapshots fail closed for
+rate-dependent calculations without a foreground HTTP fallback. Independent
+fixed/manual UAH paths retain their existing availability. A configured maximum
+shorter than the daily interval can deliberately make rate-dependent pricing
+unavailable until the next refresh; it does not increase polling frequency.
+
+Each operation receives its own captured observation, and expiry is rechecked
+when that observation is used, even if it was fresh when captured. Initial age
+and future checks use the PostgreSQL read clock. Private process-local evidence
+binds the exact returned snapshot; later checks add the greater of monotonic or
+host-wall elapsed time from before the read. A fixed DB/host clock offset cannot
+reject a valid snapshot, and a clock rollback cannot extend its lifetime.
+Previously consumed age remains a private lower bound and keeps advancing.
+Mutations invalidate that evidence; clones/public clock fields cannot carry it.
+Background refresh changes no product, draft, price, audit receipt or Magento job. Committed
+prices and pending delivery payloads keep their existing economic evidence.
+Unapplied previews/drafts still use ordinary stale-token validation: a changed
+rate can require a new review. This is not permission to pin an old rate through
+a later unreviewed price change or to reprice products during delivery.

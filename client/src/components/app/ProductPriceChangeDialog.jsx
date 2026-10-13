@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import { formatUah } from '../../lib/formatters';
 import { Dialog } from '../ui';
+import { ExchangeRateNotice } from '../ExchangeRateNotice';
 
 const MODES = [
   { value: 'system_auto', label: 'Автоматична' },
@@ -170,6 +171,11 @@ export function ProductPriceChangeDialog({
               </div>
             </div>
           </div>
+
+          {!isLoading && <ExchangeRateNotice rate={preview?.resultingPricing?.uahRate}
+            rateDate={preview?.resultingPricing?.rateMetadata?.date}
+            fetchedAt={preview?.resultingPricing?.rateMetadata?.fetchedAt}
+            stale={preview?.resultingPricing?.rateMetadata?.stale} />}
 
           {preview?.unchanged && (
             <div className="danger-panel p-4 text-sm" role="alert">

@@ -1,6 +1,8 @@
 import { formatDecimal } from '../../lib/formatters';
+import { ExchangeRateNotice } from '../ExchangeRateNotice';
 export function RepricingSummary({ controller, config }) {
   const { effectiveSummary: summary, currentCalculationRate } = controller;
+  const currency = controller.preview?.currency;
   return <div className="space-y-3 border-b border-slate-200 p-5">
     <h2 className="text-lg font-semibold">Буде змінено {summary.changedCount} товарів</h2>
     {(summary.categories || []).map(({ code, count }) => <p key={code}>{config?.categories?.[code]?.name || code} — {count}</p>)}
@@ -10,5 +12,7 @@ export function RepricingSummary({ controller, config }) {
       <span>Потребують вирішення: {summary.errorCount}</span>
     </div>
     {currentCalculationRate !== null && <p className="text-xs text-slate-500">Курс нового розрахунку: {formatDecimal(currentCalculationRate)} ₴/$</p>}
+    <ExchangeRateNotice rate={currentCalculationRate} rateDate={currency?.rateDate}
+      fetchedAt={currency?.fetchedAt} stale={currency?.stale} />
   </div>;
 }
