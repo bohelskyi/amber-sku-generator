@@ -153,16 +153,24 @@ async function rootMatches(client,root,envelope) {
     && sameIdentity({...e.identity,bindingRevisionId:envelope.identity.bindingRevisionId},envelope.identity)
     && sameIdentity(e.baseline,envelope.baseline) && e.historyHash===envelope.historyHash && e.retainedHash===envelope.retainedHash;
 }
-async function readOnClient(client,config,observation,{history,progress}={}) {
-  history=history || await require('./recovery-history').read(client,observation.amber.product.id);
-  progress=progress===undefined ? await ledger.readOnClient(client,{originHash:c.originHash(config.baseUrl),publicIdentityId:String(observation.amber.product.public_product_identity_id)}) : progress;
-  const envelope=await capture(client,observation,history,progress);
-  if(!envelope || progress && !await rootMatches(client,progress.historyAdmissionEventId,envelope)) return {admission:null,evidenceHash:null};
+async function latestReceipt(client,i) {
   const rows=(await client.query(`SELECT id,details FROM audit_events WHERE event_key=$1 AND subject_type='magento_first_sync_cutover_admission'
     AND details->'admission'->'identity'->>'publicIdentityId'=$2 AND details->'admission'->'identity'->>'originHash'=$3
     AND details->'admission'->'identity'->>'bindingRevisionId'=$4 ORDER BY id DESC LIMIT 1`,
-  [EVENT,envelope.identity.publicIdentityId,envelope.identity.originHash,envelope.identity.bindingRevisionId])).rows;
-  const receipt=rows[0], stored=receipt?.details?.admission;
+  [EVENT,i.publicIdentityId,i.originHash,i.bindingRevisionId])).rows;
+  return rows[0];
+}
+async function readOnClient(client,config,observation,{history,progress}={}) {
+  history=history || await require('./recovery-history').read(client,observation.amber.product.id);
+  progress=progress===undefined ? await ledger.readOnClient(client,{originHash:c.originHash(config.baseUrl),publicIdentityId:String(observation.amber.product.public_product_identity_id)}) : progress;
+  // Before a session starts, an absent receipt means no admission to verify.
+  // Eligibility still captures retained inventory freshly for a proposal. This
+  // probe only rejects: re-read the latest receipt after capture so even an
+  // unlocked READ COMMITTED caller cannot reuse an older receipt. Cache nothing.
+  if(!progress && !await latestReceipt(client,identity(observation))) return {admission:null,evidenceHash:null};
+  const envelope=await capture(client,observation,history,progress);
+  if(!envelope || progress && !await rootMatches(client,progress.historyAdmissionEventId,envelope)) return {admission:null,evidenceHash:null};
+  const receipt=await latestReceipt(client,envelope.identity), stored=receipt?.details?.admission;
   // The first session records the root receipt; later publications may renew it.
   if(!stored || !sameIdentity({...stored,rootAdmissionEventId:envelope.rootAdmissionEventId,
     ...(progress ? {reviewState:envelope.reviewState} : {})},envelope)
