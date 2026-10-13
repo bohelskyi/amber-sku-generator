@@ -24,6 +24,7 @@ const PHOTOS = new Set(['base_image', 'small_image', 'thumbnail_image', 'additio
   'base_image_label', 'small_image_label', 'thumbnail_image_label', 'additional_image_labels']);
 const RECEIPT_STATES = new Set(['imported', 'equal', 'optional_empty', 'outward_verified', 'name_received', 'seo_received']);
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/;
+const NM_EXACT_LENGTH_COMPARISON = 'nm-exact-length-cm-v1';
 const present = value => value !== null && value !== undefined
   && !(typeof value === 'string' && value.trim() === '');
 const scalar = value => value === null || typeof value === 'boolean'
@@ -352,7 +353,7 @@ function projectFirstSyncFields(input) {
       && INFORMATION[category]?.includes(descriptor.key) && !descriptor.aliases.length && scope === 'all'
       && direct.wrappers.every(wrapper => wrapper === 'text'))) descriptor = null;
     let persistence = 'derived', local = { known: true, present: false }, kind = 'derived', type = 'text';
-    let unit, scale, constraints, prospective, reverseCandidates, importBlocker = null, semanticRequired = false;
+    let unit, scale, constraints, prospective, reverseCandidates, comparison, importBlocker = null, semanticRequired = false;
     if (target === 'name') {
       persistence = 'name'; kind = 'name'; local = effectiveLocalName(product, evaluated, scope);
       descriptor = { kind: 'name', field: scope === 'all' ? 'magento_name_override.values.all' : 'magento_name_override.values.en' };
@@ -414,8 +415,26 @@ function projectFirstSyncFields(input) {
       persistence = 'information'; kind = 'scalar'; type = 'text';
       local = sourceState(descriptor, product);
       if (local.known && local.present) local.value = String(local.value);
+      const exactLength = category === 'NM' && scope === 'all' && target === 'dovzhyna_namysta_tochna'
+        && descriptor.key === 'neckle_size' && direct.wrappers.every(wrapper => wrapper === 'text');
+      if (exactLength) {
+        if (expected?.strategy !== 'scalar' || !attr || !pinnedAttr
+          || attr.backend_type !== 'varchar' || attr.frontend_input !== 'text'
+          || !['global', 'store'].includes(attr.scope) || hash(attr) !== hash(pinnedAttr)
+          || !currentSet?.attributeCodes.includes(target) || !pinnedSet?.attributeCodes.includes(target)) {
+          reason ||= 'NM_EXACT_LENGTH_TEXT_CONTRACT_NOT_PROVEN';
+        }
+        const numericLocal = local.known && local.present ? normalizeDecimal(local.value) : null;
+        if (local.known && local.present && (!output.verified
+          || numericLocal !== null && normalizeDecimal(output.value) !== numericLocal)) {
+          reason ||= 'NM_EXACT_LENGTH_FORWARD_NOT_PROVEN';
+        }
+        if (!reason) comparison = NM_EXACT_LENGTH_COMPARISON;
+      }
+      const exactNumericPair = comparison && local.known && local.present && remote.known && remote.present
+        && normalizeDecimal(local.value) !== null && normalizeDecimal(remote.value) !== null;
       if (direct?.trimmed && remote.known && remote.present && (typeof remote.value !== 'string'
-        || remote.value.trim() !== remote.value)) reason ||= 'CANONICAL_INFORMATION_VALUE_NORMALIZED';
+        || remote.value.trim() !== remote.value) && !exactNumericPair) reason ||= 'CANONICAL_INFORMATION_VALUE_NORMALIZED';
     } else {
       if (direct) reason ||= 'CANONICAL_SOURCE_SETTER_UNSUPPORTED';
       prospective = output;
@@ -477,6 +496,7 @@ function projectFirstSyncFields(input) {
     }
     const field = { target, scope, kind, type, required, mapping: { proven: !reason, ...(reason ? { reason } : {}) },
     local, remote, ...(unit ? { unit } : {}), ...(scale !== undefined ? { scale, constraints } : {}),
+    ...(comparison && !reason ? { comparison } : {}),
     ...(receipt ? { receipt } : {}), ...(reverseCandidates ? { reverseCandidates } : {}),
     ...(kind === 'derived' ? { prospective: prospective || { verified: false } } : {}) };
     fields.push(field);
@@ -508,4 +528,14 @@ function projectFirstSyncFields(input) {
       photos: 'unsupported_without_url_import' }, blockers, plan,
     readyForOutbound: blockers.length === 0 && plan.readyForOutbound, complete: plan.complete };
 }
-module.exports = { projectFirstSyncFields };
+// Reuse the same server-owned proof for ordinary preview and guarded readback.
+// This is pure: it cannot refresh source/schema, persist progress or write data.
+function getExactLengthComparison(observation) {
+  if (observation?.amber?.product?.category !== 'NM' || !observation.raw) return null;
+  try {
+    const projected = projectFirstSyncFields({ observation: { amber: observation.amber,
+      raw: observation.raw, schema: observation.schema, domainEvidence: observation.domainEvidence } });
+    return projected.fields.find(field => field.comparison === NM_EXACT_LENGTH_COMPARISON && field.mapping.proven) || null;
+  } catch { return null; }
+}
+module.exports = { projectFirstSyncFields, getExactLengthComparison };

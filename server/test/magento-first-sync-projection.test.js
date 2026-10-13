@@ -983,6 +983,220 @@ test('plain numeric information keeps text review without a proved numeric unit 
   assert.equal(field(result, 'dovzhyna_brasletu_diuimiv').reason, 'REMOTE_TEXT_INVALID');
 });
 
+const necklaceTarget = 'dovzhyna_namysta_tochna';
+const necklaceComparison = 'nm-exact-length-cm-v1';
+function necklaceLengthFixture(options = {}) {
+  const target = options.target || necklaceTarget, scope = options.scope || 'all';
+  const input = fixture({ category: 'NM', changeDefinition: definition => {
+    definition.sources.necklaceLength = { kind: 'information', category: 'NM', key: 'neckle_size',
+      type: 'scalar', provenance: 'supplied-stored-answers-v1', aliases: [], ...options.source };
+    const row = definition.groups.find(group => group.route === 'NM').rows[scope === 'all' ? 0 : 1];
+    row.cells[target] = options.cell || { op: 'when',
+      if: { op: 'present', input: source('necklaceLength'), policy: 'answer-v1' },
+      then: { ...text('necklaceLength'), trim: true },
+      else: { op: 'error', field: 'neckle_size', message: literal('Required necklace length') } };
+    options.changeDefinition?.(definition);
+  }, changeSchema: schema => {
+    schema.attributes.push({ attribute_id: 990, attribute_code: target, frontend_input: 'text',
+      backend_type: 'varchar', scope: 'global', options: [] });
+    schema.attributeSets[0].attributeCodes.push(target);
+    options.changeSchema?.(schema);
+  } });
+  const { product } = input.observation.amber;
+  product.full_sku = 'NM-fixture';
+  product.details.answers.neckle_size = Object.hasOwn(options, 'local') ? options.local : '32';
+  input.observation.raw.sku = product.full_sku;
+  input.observation.domainEvidence.english.sku = product.full_sku;
+  const value = Object.hasOwn(options, 'remote') ? options.remote : '32.00';
+  if (scope === 'all') input.observation.raw.custom_attributes.push({ attribute_code: target, value });
+  else input.observation.domainEvidence.english.fields[target] = value;
+  return input;
+}
+test('proved NM exact centimetres compare numeric representations without changing raw evidence or mapping identity', () => {
+  // Frozen before this comparison contract: the new rule must not reset receipt mapping identity.
+  const mappingHash = 'eebc02d969d070f43e62a8b7827c5dfb050b05e7f07051d00e3ed0805754313f';
+  for (const [local, remoteValue] of [['32', '32.00'], ['34', '34.0'], ['35,25', '35.2500'],
+    [' 035,2500 ', '35.25'], [32, '32.00'], ['32.00', 32], ['0', '-0.000'], ['-32,5', '-32.500']]) {
+    const input = necklaceLengthFixture({ local, remote: remoteValue }), before = JSON.stringify(input);
+    const result = projectFirstSyncFields(input), selected = field(result, necklaceTarget);
+    const projected = result.fields.find(row => row.target === necklaceTarget && row.scope === 'all');
+    const meta = metadata(result, necklaceTarget);
+    assert.equal(selected.status, 'equal', JSON.stringify([local, remoteValue]));
+    assert.equal(selected.reason, 'NM_EXACT_LENGTH_CM_EQUAL');
+    assert.equal(projected.comparison, necklaceComparison);
+    assert.equal(projected.type, 'text'); assert.equal(projected.kind, 'scalar');
+    assert.equal(Object.hasOwn(projected, 'unit'), false);
+    assert.equal(projected.mapping.proven, true); assert.equal(meta.persistence, 'information');
+    assert.equal(meta.source.key, 'neckle_size'); assert.equal(meta.source.routeKey, 'NM:all');
+    assert.equal(projected.local.value, String(local)); assert.equal(projected.remote.value, remoteValue);
+    const row = prepareProgress(result, null).rows.find(value => value.target === necklaceTarget);
+    assert.equal(row.record.state, 'equal'); assert.equal(row.record.before.value, String(local));
+    assert.equal(row.record.remote.value, remoteValue); assert.equal(row.record.after, String(local));
+    assert.equal(row.canAcceptRemote, false); assert.equal(row.canKeepLocal, false);
+    assert.equal(Object.hasOwn(selected, 'importValue'), false);
+    assert.equal(meta.mappingHash, mappingHash);
+    assert.equal(JSON.stringify(input), before);
+  }
+});
+test('NM centimetre equality never rounds genuine differences or chooses either populated value', () => {
+  for (const [local, remoteValue] of [['32', '33.00'], ['32,001', '32.002'],
+    ['32', '32.000000000000000001'], ['9007199254740993', '9007199254740994']]) {
+    const input = necklaceLengthFixture({ local, remote: remoteValue }), before = JSON.stringify(input);
+    const result = projectFirstSyncFields(input), selected = field(result, necklaceTarget);
+    assert.equal(selected.status, 'conflict', JSON.stringify([local, remoteValue]));
+    assert.equal(Object.hasOwn(selected, 'importValue'), false);
+    const row = prepareProgress(result, null).rows.find(value => value.target === necklaceTarget);
+    assert.equal(row.record.state, 'conflict'); assert.equal(row.record.after, local);
+    assert.equal(JSON.stringify(input), before);
+  }
+});
+test('NM exact comparison follows direct text references while preserving untrimmed source evidence', () => {
+  for (const cell of [text('necklaceLength'), { op: 'ref', id: 'fixture.necklaceLength' }]) {
+    const input = necklaceLengthFixture({ local: '032,50', remote: '32.500', cell, changeDefinition: definition => {
+      definition.bindings.push({ id: 'fixture.necklaceLength', group: 'NM', value: text('necklaceLength') });
+    } });
+    const result = projectFirstSyncFields(input);
+    assert.equal(field(result, necklaceTarget).reason, 'NM_EXACT_LENGTH_CM_EQUAL');
+    assert.equal(result.fields.find(row => row.target === necklaceTarget).local.value, '032,50');
+  }
+});
+test('NM exact length rejects unit-bearing, range and malformed populated equality', () => {
+  for (const value of ['32 cm', '32 см', '32-34', '32–34', '3.2e1', '1,234.5', '32..0',
+    'NaN', 'Infinity', '32\n', '\t32', '32.0000000000000000001', '3'.repeat(129)]) {
+    const input = necklaceLengthFixture({ local: value, remote: value }), before = JSON.stringify(input);
+    const result = projectFirstSyncFields(input), selected = field(result, necklaceTarget);
+    assert.equal(selected.status, 'review_required', value);
+    assert.notEqual(prepareProgress(result, null).rows.find(row => row.target === necklaceTarget).record.state, 'equal');
+    assert.equal(JSON.stringify(input), before);
+  }
+  for (const value of [false, {}, [], Number.MAX_SAFE_INTEGER + 1]) {
+    const result = projectFirstSyncFields(necklaceLengthFixture({ remote: value }));
+    assert.notEqual(field(result, necklaceTarget).status, 'equal', String(value));
+  }
+});
+test('NM numeric comparison preserves the existing missing-value import and outward matrix', () => {
+  for (const value of [undefined, null, '', '   ']) {
+    const input = necklaceLengthFixture({ local: value, remote: '32.00' });
+    const selected = field(projectFirstSyncFields(input), necklaceTarget);
+    assert.equal(selected.status, 'imported'); assert.equal(selected.importValue, '32.00');
+    const outward = field(projectFirstSyncFields(necklaceLengthFixture({ remote: value })), necklaceTarget);
+    assert.equal(outward.status, 'pending_outward_confirmation'); assert.equal(outward.outwardValue, '32');
+    assert.equal(field(projectFirstSyncFields(necklaceLengthFixture({ local: value, remote: value })), necklaceTarget).status,
+      'review_required');
+  }
+  assert.equal(field(projectFirstSyncFields(necklaceLengthFixture({ local: null, remote: 32 })), necklaceTarget).status,
+    'review_required');
+});
+test('NM comparison requires the exact source, target and direct text-only expression', () => {
+  assert.throws(() => necklaceLengthFixture({ source: { category: 'BR' } }),
+    error => error.code === 'TEMPLATE_INVALID' && error.message === 'Source scope');
+  const cases = [
+    ['alias', { source: { aliases: [{ key: 'legacy_neckle_size', schemaId: '1', evidence: 'Synthetic alias proof' }] } }],
+    ['other information source', { source: { key: 'other_size' } }],
+    ['other target', { target: 'dovzhyna_namysta' }],
+    ['derived literal', { cell: literal('32') }],
+    ['derived join', { cell: { op: 'join', items: [text('necklaceLength'), literal('')], delimiter: '', omitEmpty: true } }],
+    ['number wrapper', { cell: { op: 'numberText', input: source('necklaceLength'), format: 'js-number-positive-v1',
+      error: { op: 'error', field: 'neckle_size', message: literal('Invalid length') } } }],
+    ['decimal wrapper', { cell: { op: 'decimalText', input: text('necklaceLength'), format: 'unsigned-comma-dot-v1',
+      error: { op: 'error', field: 'neckle_size', message: literal('Invalid length') } } }],
+  ];
+  for (const [label, options] of cases) {
+    const result = projectFirstSyncFields(necklaceLengthFixture(options)), target = options.target || necklaceTarget;
+    assert.notEqual(field(result, target).status, 'equal', label);
+    assert.notEqual(result.fields.find(row => row.target === target).comparison, necklaceComparison, label);
+  }
+  const br = fixture(); remote(br, 'dovzhyna_brasletu_diuimiv', '17.00');
+  const ordinary = field(projectFirstSyncFields(br), 'dovzhyna_brasletu_diuimiv');
+  assert.equal(ordinary.status, 'conflict'); assert.equal(ordinary.reason, 'POPULATED_VALUES_DIFFER');
+});
+test('NM exact comparison requires current approved binding, policy and unchanged schema identity', () => {
+  const cases = [
+    ['unapproved field', input => { input.observation.amber.revision.bindings.attributes
+      .find(value => value.target === necklaceTarget).reviewState = 'review_required'; }],
+    ['unapproved policy', input => {
+      const bindings = input.observation.amber.revision.bindings;
+      const key = bindings.attributes.find(value => value.target === necklaceTarget).bindingKey;
+      bindings.policies.find(value => value.bindingKey === key).reviewState = 'review_required';
+    }],
+    ['attribute identity', input => { input.observation.schema.attributes.find(value => value.attribute_code === necklaceTarget).attribute_id++; }],
+    ['attribute backend', input => { input.observation.schema.attributes.find(value => value.attribute_code === necklaceTarget).backend_type = 'decimal'; }],
+    ['attribute frontend', input => { input.observation.schema.attributes.find(value => value.attribute_code === necklaceTarget).frontend_input = 'textarea'; }],
+    ['attribute scope', input => { input.observation.schema.attributes.find(value => value.attribute_code === necklaceTarget).scope = 'store'; }],
+    ['set membership', input => { input.observation.schema.attributeSets[0].attributeCodes =
+      input.observation.schema.attributeSets[0].attributeCodes.filter(value => value !== necklaceTarget); }],
+  ];
+  for (const [label, mutate] of cases) {
+    const input = necklaceLengthFixture(); input.observation.schema = structuredClone(input.observation.schema); mutate(input);
+    const result = projectFirstSyncFields(input), selected = field(result, necklaceTarget);
+    assert.equal(selected.status, 'review_required', label);
+    assert.equal(selected.reason, 'MAPPING_NOT_PROVEN', label);
+    assert.notEqual(result.fields.find(row => row.target === necklaceTarget).comparison, necklaceComparison, label);
+  }
+});
+test('NM exact comparison accepts pinned store text in all scope but never grants English canonical equality', () => {
+  const changeSchema = schema => { schema.attributes.find(value => value.attribute_code === necklaceTarget).scope = 'store'; };
+  const base = projectFirstSyncFields(necklaceLengthFixture({ changeSchema }));
+  assert.equal(field(base, necklaceTarget).reason, 'NM_EXACT_LENGTH_CM_EQUAL');
+  const english = projectFirstSyncFields(necklaceLengthFixture({ scope: 'en', changeSchema }));
+  assert.notEqual(field(english, necklaceTarget, 'en').status, 'equal');
+  assert.notEqual(english.fields.find(row => row.target === necklaceTarget && row.scope === 'en').comparison, necklaceComparison);
+});
+test('matching unusual NM attribute metadata cannot invent an exact centimetre contract', () => {
+  for (const patch of [{ frontend_input: 'textarea' }, { backend_type: 'decimal' }, { scope: 'website' }, { backend_type: undefined }]) {
+    const input = necklaceLengthFixture({ changeSchema: schema => {
+      const attribute = schema.attributes.find(value => value.attribute_code === necklaceTarget);
+      Object.assign(attribute, patch);
+      if (Object.hasOwn(patch, 'backend_type') && patch.backend_type === undefined) delete attribute.backend_type;
+    } });
+    const result = projectFirstSyncFields(input);
+    assert.notEqual(field(result, necklaceTarget).status, 'equal', JSON.stringify(patch));
+    assert.notEqual(result.fields.find(row => row.target === necklaceTarget).comparison, necklaceComparison);
+  }
+});
+test('NM exact comparison rejects stale publication and wrong observed store scope', () => {
+  for (const mutate of [
+    input => { input.observation.amber.revision.definitionHash = '0'.repeat(64); },
+    input => { input.observation.amber.revision.state = 'draft'; },
+    input => { input.observation.schema = { ...input.observation.schema, storeCode: 'en' }; },
+  ]) {
+    const input = necklaceLengthFixture(); mutate(input);
+    const result = projectFirstSyncFields(input);
+    assert.ok(result.blockers.length); assert.equal(result.plan?.fields?.some(row => row.status === 'equal') || false, false);
+  }
+});
+test('NM normalized readback settles an existing pending local choice without replacing its raw evidence', () => {
+  const input = necklaceLengthFixture({ local: '32', remote: '32.00' });
+  const projection = projectFirstSyncFields(input);
+  const original = prepareProgress(projection, null).rows.find(row => row.target === necklaceTarget).record;
+  const pending = { ...original, state: 'pending_outward_confirmation', source: { ...original.source, decision: 'keep_local' } };
+  const before = JSON.stringify(pending);
+  const row = prepareProgress(projection, { fields: [pending] }).rows.find(value => value.target === necklaceTarget);
+  assert.equal(row.status, 'equal'); assert.equal(row.record.state, 'outward_verified');
+  assert.equal(row.record.before.value, '32'); assert.equal(row.record.remote.value, '32.00');
+  assert.equal(row.record.after, '32'); assert.equal(row.canAcceptRemote, false); assert.equal(row.canKeepLocal, false);
+  assert.equal(JSON.stringify(pending), before);
+});
+test('NM comparison does not change the existing pending-choice rule for unrelated equal text', () => {
+  const target = 'dovzhyna_brasletu_diuimiv', projection = projectFirstSyncFields(fixture());
+  const original = prepareProgress(projection, null).rows.find(row => row.target === target).record;
+  const pending = { ...original, state: 'pending_outward_confirmation', source: { ...original.source, decision: 'keep_local' } };
+  const row = prepareProgress(projection, { fields: [pending] }).rows.find(value => value.target === target);
+  assert.equal(row.record.state, 'pending_outward_confirmation');
+  assert.equal(row.record.source.decision, 'keep_local');
+});
+test('NM terminal receipt remains immutable after later numeric-looking values change', () => {
+  const input = necklaceLengthFixture({ local: '32', remote: '32.00' });
+  const original = prepareProgress(projectFirstSyncFields(input), null).rows.find(row => row.target === necklaceTarget).record;
+  input.receipts = [{ target: necklaceTarget, scope: 'all', state: 'equal' }];
+  input.observation.amber.product.details.answers.neckle_size = '33'; remote(input, necklaceTarget, '33.00');
+  const projection = projectFirstSyncFields(input), row = prepareProgress(projection, { fields: [original] })
+    .rows.find(value => value.target === necklaceTarget);
+  assert.equal(row.received, true); assert.deepEqual(row.record, original);
+  assert.equal(row.local.value, '33'); assert.equal(row.remote.value, '33.00');
+  assert.equal(row.canAcceptRemote, false); assert.equal(row.canKeepLocal, false);
+});
+
 function localizedDerivedFixture(cell = literal('English SEO')) {
   const input=fixture({changeDefinition:definition=>{
     definition.groups.find(group=>group.route==='BR').rows[1].cells.dovzhyna_brasletu_diuimiv=cell;

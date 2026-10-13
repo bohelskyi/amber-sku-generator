@@ -14,8 +14,8 @@ const seo=require('../src/services/magento/first-sync-seo-proof'),ledger=require
 const preview=require('../src/services/magento/sync-preview');
 const targets=['meta_title','meta_description'],template=(target,scope)=>'Active NM '+scope+' '+target;
 const name='amber_first_sync_local_authority_test';
-async function setup(){
-  const url=await recreateTestDatabase(name),db=new Pool({connectionString:url});
+async function setup({databaseName=name,numericLength=false}={}){
+  const url=await recreateTestDatabase(databaseName),db=new Pool({connectionString:url});
   try{
     const prior=await fs.mkdtemp(path.join(os.tmpdir(),'amber-nm-pre075-'));
     try{
@@ -26,6 +26,7 @@ async function setup(){
     const actor=Number((await db.query("INSERT INTO application_users(status,display_name) VALUES('active','NM fixture Administrator') RETURNING id")).rows[0].id);
     await db.query("INSERT INTO user_role_assignments(application_user_id,role_id) SELECT $1,id FROM roles WHERE role_key='administrator'",[actor]);
     for(const code of ['BR','NM','KL','CH','AR','SV'])await db.query('INSERT INTO categories(code,name) VALUES($1,$1)',[code]);
+    if(numericLength)await db.query("INSERT INTO questions(category_code,key,label,input_type,include_in_sku,required) VALUES('NM','neckle_size','Exact necklace length','text',0,0)");
     const d=structuredClone(fixture.definition()),literal=value=>({op:'literal',value}),text=id=>({op:'text',input:{op:'source',id},trim:false,format:'scalar-v1',onAbsent:'empty'});
     d.sources={sku:d.sources.sku,weight:d.sources.weight,price:{kind:'product',field:'total_price_uah',type:'scalar'}};d.tables={};
     for(const group of d.groups)for(const row of group.rows){
@@ -33,12 +34,20 @@ async function setup(){
       row.cells.price=row.id==='base'?text('price'):literal('');
     }
     const nm=d.groups.find(g=>g.route==='NM');nm.rows[0].cells.decor_weight=text('weight');nm.rows[0].cells.product_websites=literal('fixture');
+    if(numericLength){
+      d.sources.nmLength={kind:'information',category:'NM',key:'neckle_size',type:'scalar',provenance:'supplied-stored-answers-v1',aliases:[]};
+      nm.rows[0].cells.dovzhyna_namysta_tochna=text('nmLength');
+    }
     for(const row of nm.rows)for(const target of targets)row.cells[target]=literal(template(target,row.id==='base'?'all':'en'));
     const raw=structuredClone(fixture.schema());raw.attributes.find(a=>a.attribute_code==='name').scope='store';
     Object.assign(raw.attributes.find(a=>a.attribute_code==='decor_weight'),{frontend_input:'text',options:[]});
     for(const [index,target]of targets.entries()){
       raw.attributes.push({attribute_id:950+index,attribute_code:target,frontend_input:index?'textarea':'text',scope:'store',options:[]});
       raw.attributeSets[0].attributeCodes.push(target);
+    }
+    if(numericLength){
+      raw.attributes.push({attribute_id:960,attribute_code:'dovzhyna_namysta_tochna',frontend_input:'text',backend_type:'varchar',scope:'global',options:[]});
+      raw.attributeSets[0].attributeCodes.push('dovzhyna_namysta_tochna');
     }
     raw.storeTopology.websites[0].default_group_id=802;raw.storeTopology.storeGroups[0].default_store_id=805;
     raw.storeTopology.storeViews.push({id:805,code:'default',name:'Ukrainian',website_id:801,store_group_id:802,is_active:true});
@@ -59,16 +68,17 @@ async function setup(){
     const remotes=new Map(),products=[],calls=[];
     async function create(sample){
       const p=(await insertProductFixture(db,"INSERT INTO products(full_sku,category,weight,total_price_uah,details) VALUES($1,'NM',$2,$3,$4::jsonb) RETURNING *",
-        [sample.sku,sample.localWeight,sample.price,JSON.stringify({answers:{},manualPriceUah:sample.price})])).rows[0];
+        [sample.sku,sample.localWeight,sample.price,JSON.stringify({answers:numericLength?{neckle_size:sample.localLength??'77,5'}:{},manualPriceUah:sample.price})])).rows[0];
       await db.query("UPDATE product_full_export_state SET business_exclusion_state='none',delivery_version=delivery_version+1 WHERE product_id=$1",[p.id]);
       const values={all:Object.fromEntries(targets.map(t=>[t,sample.baseSeoEqual?template(t,'all'):'Magento NM all '+t+' '+sample.sku])),
         en:Object.fromEntries(targets.map(t=>[t,'Magento NM en '+t+' '+sample.sku]))};
       remotes.set(sample.sku,{id:sample.remoteId,sku:sample.sku,attribute_set_id:8001,type_id:'simple',name:'Fixture name',price:sample.price,status:1,visibility:4,
-        custom_attributes:[{attribute_code:'decor_weight',value:sample.remoteWeight},...targets.map(t=>({attribute_code:t,value:values.all[t]}))],extension_attributes:{website_ids:[801],category_links:[]},en:{name:'Fixture name',...values.en}});
+        custom_attributes:[{attribute_code:'decor_weight',value:sample.remoteWeight},...targets.map(t=>({attribute_code:t,value:values.all[t]})),
+          ...(numericLength?[{attribute_code:'dovzhyna_namysta_tochna',value:sample.remoteLength??'77.50'}]:[])],extension_attributes:{website_ids:[801],category_links:[]},en:{name:'Fixture name',...values.en}});
       products.push({...sample,id:p.id,publicIdentityId:p.public_product_identity_id,values});return products.at(-1);
     }
     for(const sample of cases)await create(sample);
-    let loseNextWrite=false,failReadback=false;
+    let loseNextWrite=false,failReadback=false;const readbackLengths=new Map();
     const run={...options,observeRate:async()=>({rateInfo:{rate:40,rateDate:'2026-10-12',source:'fixture',stale:false}}),
       preview:async(_config,input)=>{
         const amber=await require('../src/services/magento/sync-preview-db').readPreviewProduct(db,{sku:input.sku,bindingRevisionId:input.bindingRevisionId});
@@ -91,7 +101,9 @@ async function setup(){
         }
         for(const a of p.custom_attributes||[]){
           if(english)r.en[a.attribute_code]=a.value;
-          else {const old=r.custom_attributes.find(x=>x.attribute_code===a.attribute_code);if(old)old.value=a.value;else r.custom_attributes.push(a);}
+          else {const old=r.custom_attributes.find(x=>x.attribute_code===a.attribute_code);
+            const value=a.attribute_code==='dovzhyna_namysta_tochna'&&readbackLengths.has(p.sku)?readbackLengths.get(p.sku):a.value;
+            if(old)old.value=value;else r.custom_attributes.push({...a,value});}
         }
         if(loseNextWrite){loseNextWrite=false;failReadback=true;throw Error('synthetic lost POST response');}
         return new Response(JSON.stringify(r),{headers:{'content-type':'application/json'}});
@@ -101,7 +113,7 @@ async function setup(){
         assert.match(tablename,/^[a-z_]+$/);data[tablename]=(await db.query(`SELECT COALESCE(jsonb_agg(j ORDER BY j::text),'[]'::jsonb) rows FROM (SELECT to_jsonb(t) j FROM public."${tablename}" t) entries`)).rows[0].rows;
       }return c.hash(data);
     }
-    return {db,url,actor,binding,config,run,products,remotes,calls,create,fingerprint,loseWrite:()=>{loseNextWrite=true;}};
+    return {db,url,actor,binding,schema,config,run,products,remotes,calls,create,fingerprint,readbackLengths,loseWrite:()=>{loseNextWrite=true;}};
   }catch(e){await db.end();throw e;}
 }
 const request=(f,p)=>({sku:p.sku,bindingRevisionId:f.binding.id});
@@ -498,6 +510,86 @@ test('canonical local authority and atomic batch decisions',async t=>{
    assert.equal(result.status,'blocked',JSON.stringify(result));assert.equal(result.code,'BATCH_PLAN_CHANGED');
    assert.equal(await currentFields(f,p),null);assert.equal(await f.fingerprint(),before);
    assert.ok(f.calls.slice(callsBefore).every(call=>call.method==='GET'));
+  });
+  await t.test('exact numeric NM necklace length keeps raw receipts and ordinary delivery safe',async nested=>{
+   const databaseName='amber_first_sync_nm_length_test',target='dovzhyna_namysta_tochna';let n,index=0;
+   try{
+    n=await setup({databaseName,numericLength:true});await migrationStart(n.url);
+    const make=async values=>{
+     const p=await n.create({sku:'NM-LENGTH-'+(++index),remoteId:99700+index,localWeight:'132.300',remoteWeight:132,
+      price:1700,baseSeoEqual:false,...values});n.remotes.get(p.sku).price=1650;return p;
+    };
+    const remote=p=>n.remotes.get(p.sku).custom_attributes.find(a=>a.attribute_code===target);
+    const local=p=>n.db.query('SELECT * FROM products WHERE id=$1',[p.id]).then(result=>result.rows[0]);
+    const lifecycle=p=>n.db.query('SELECT * FROM product_full_export_state WHERE product_id=$1',[p.id]).then(result=>result.rows[0]);
+    await nested.test('77,5 and 77.50 receive equal without local rewrite and verify with price, weight and SEO delivery',async()=>{
+     const p=await make(),before=await local(p),state=await lifecycle(p),inspection=await inspectChosen(n,p,[]);
+     const field=inspection.prepared.rows.find(row=>row.target===target);
+     assert.equal(field.status,'equal');assert.equal(field.reason,'NM_EXACT_LENGTH_CM_EQUAL');assert.equal(field.record.state,'equal');
+     assert.equal(field.local.value,'77,5');assert.equal(field.remote.value,'77.50');assert.equal(field.record.after,'77,5');
+     const choices=localChoices(inspection);assert.equal(choices.length,6);assert.ok(choices.every(choice=>choice.target!==target));
+     const applied=await service.apply(n.config,{...request(n,p),previewToken:inspection.previewToken,choices},n.run);
+     assert.equal(applied.readyForOutbound,true);
+     assert.deepEqual(await local(p),before);assert.deepEqual(await lifecycle(p),state);
+     const pending=await currentFields(n,p),length=cleanField(pending.fields.find(row=>row.target===target));
+     assert.equal(length.state,'equal');assert.equal(length.before.value,'77,5');assert.equal(length.remote.value,'77.50');
+     assert.equal(length.after,'77,5');assert.equal(length.mappingHash,field.record.mappingHash);
+     assert.equal(length.source.decision,undefined);
+     n.readbackLengths.set(p.sku,'77.50');
+     const job=await jobs.enqueue(n.config,request(n,p),n.run);
+     assert.ok(job.intent.operations.some(op=>op.payload?.product?.custom_attributes?.some(a=>a.attribute_code===target&&a.value==='77,5')));
+     const done=await jobs.applyJob(n.config,job.id,{...n.run,apply:true});assert.equal(done.state,'succeeded',JSON.stringify(done.failure));
+     const final=await currentFields(n,p);assert.ok(final.session.completed_at);
+     assert.deepEqual(cleanField(final.fields.find(row=>row.target===target)),length);
+     assert.ok(final.fields.filter(row=>['price','decor_weight',...targets].includes(row.target)).every(row=>row.state==='outward_verified'));
+     assert.equal(remote(p).value,'77.50');assert.deepEqual(await local(p),before);
+    });
+    for(const [label,localLength,remoteLength]of [
+     ['unequal','77,5','78'],['units','77 cm','77 cm'],['range','77-78','77-78'],
+     ['malformed decimal','77,5','77,5,0'],['nonfinite','77,5','NaN'],['exponent','77,5','7.75e1'],
+     ['empty remote','77,5',''],['absent remote','77,5',null],
+     ['precision unequal','77.5000000000000001','77.5000000000000002'],
+    ])await nested.test(label+' does not acquire an equal length receipt from numeric normalization',async()=>{
+     const p=await make({localLength});remote(p).value=remoteLength;
+     const before=await n.fingerprint(),inspection=await inspectChosen(n,p,[]),field=inspection.prepared.rows.find(row=>row.target===target);
+     assert.notEqual(field.record.state,'equal');assert.notEqual(field.reason,'NM_EXACT_LENGTH_CM_EQUAL');
+     if(remoteLength!==null&&remoteLength!=='')assert.ok(['conflict','review_required','unknown'].includes(field.status),JSON.stringify(field));
+     assert.equal(await currentFields(n,p),null);assert.equal(await n.fingerprint(),before);
+    });
+    await nested.test('unequal high precision readback cannot complete a numerically rounded delivery',async()=>{
+     const value='77.5000000000000001',p=await make({localLength:value,remoteLength:value});
+     const inspection=await inspectChosen(n,p,[]),choices=localChoices(inspection);
+     assert.equal(inspection.prepared.rows.find(row=>row.target===target).record.state,'equal');
+     await service.apply(n.config,{...request(n,p),previewToken:inspection.previewToken,choices},n.run);
+     const before=await local(p),job=await jobs.enqueue(n.config,request(n,p),n.run);
+     n.readbackLengths.set(p.sku,'77.5000000000000002');
+     const done=await jobs.applyJob(n.config,job.id,{...n.run,apply:true});assert.notEqual(done.state,'succeeded');
+     assert.equal((await currentFields(n,p)).session.completed_at,null);assert.deepEqual(await local(p),before);
+     assert.ok((await n.db.query('SELECT * FROM magento_sync_steps WHERE job_id=$1',[job.id])).rows.some(row=>row.dispatched_at&&!row.verified_at));
+    });
+    await nested.test('independent source drift rejects the old equal preview without writes',async()=>{
+     const p=await make(),inspection=await inspectChosen(n,p,[]),writer=new Pool({connectionString:n.url,max:1});
+     try{await writer.query("UPDATE products SET details=jsonb_set(details,'{answers,neckle_size}','\"78\"'::jsonb) WHERE id=$1",[p.id]);}
+     finally{await writer.end();}
+     const before=await n.fingerprint();
+     await assert.rejects(service.apply(n.config,{...request(n,p),previewToken:inspection.previewToken,choices:localChoices(inspection)},n.run),
+      error=>error.statusCode===409);
+     assert.equal(await currentFields(n,p),null);assert.equal(await n.fingerprint(),before);
+    });
+    for(const [label,change]of [
+     ['attribute identity',schema=>{schema.attributes.find(a=>a.attribute_code===target).attribute_id++;}],
+     ['attribute type',schema=>{schema.attributes.find(a=>a.attribute_code===target).frontend_input='textarea';}],
+     ['set membership',schema=>{schema.attributeSets[0].attributeCodes=schema.attributeSets[0].attributeCodes.filter(code=>code!==target);}],
+    ])await nested.test(label+' drift cannot grant scoped equality or consume an old token',async()=>{
+     const p=await make(),inspection=await inspectChosen(n,p,[]),schema=structuredClone(n.schema);change(n.schema);
+     try{
+      const before=await n.fingerprint(),fresh=await inspectChosen(n,p,[]),field=fresh.prepared.rows.find(row=>row.target===target);
+      assert.notEqual(field?.record.state,'equal');assert.notEqual(field?.reason,'NM_EXACT_LENGTH_CM_EQUAL');
+      await assert.rejects(service.apply(n.config,{...request(n,p),previewToken:inspection.previewToken,choices:localChoices(inspection)},n.run));
+      assert.equal(await currentFields(n,p),null);assert.equal(await n.fingerprint(),before);
+     }finally{Object.assign(n.schema,schema);}
+    });
+   }finally{if(n)await n.db.end();await dropTestDatabase(databaseName);}
   });
   await t.test('real current-published rotation denies stale binding before any local authority mutation',async()=>{
    const {p,prior,field,old,progress}=f.bindingFixture,before=await currentFields(f,p),bindings=require('../src/services/magento/binding.service'),options={databasePool:f.db,actorUserId:f.actor,mutationContext:{actorUserId:f.actor}};

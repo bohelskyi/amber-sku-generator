@@ -20,17 +20,23 @@ test('allocated first CREATE breaks only the proven birth-photo dependency on ow
     const actor=Number((await db.query("INSERT INTO application_users(status,display_name) VALUES('active','Allocated birth fixture') RETURNING id")).rows[0].id);
     await db.query("INSERT INTO user_role_assignments(application_user_id,role_id) SELECT $1,id FROM roles WHERE role_key='administrator'",[actor]);
     await db.query("INSERT INTO categories(code,name,requires_weight) VALUES('NM','Native fixture',0)");
+    await db.query("INSERT INTO questions(category_code,key,label,input_type,include_in_sku,required) VALUES('NM','neckle_size','Exact necklace length','text',0,0)");
     const fixture=require('../test/fixtures/magento-v4'),c=require('../src/services/magento/binding-contract');
     const config=require('../src/config/magento').parseMagentoConfig({MAGENTO_BASE_URL:'https://allocated-fixture.invalid',
       MAGENTO_CONSUMER_KEY:'fixture-key',MAGENTO_CONSUMER_SECRET:'fixture-secret',MAGENTO_ACCESS_TOKEN:'fixture-token',MAGENTO_ACCESS_TOKEN_SECRET:'fixture-secret'});
     const definition=fixture.definition(['NM']);definition.sources={sku:definition.sources.sku,price:definition.sources.price};definition.tables={};definition.questionContracts={};
-    definition.groups[0].columns=[...new Set([...definition.groups[0].columns,'product_online','visibility'])];
+    const lengthTarget='dovzhyna_namysta_tochna';
+    definition.sources.nmLength={kind:'information',category:'NM',key:'neckle_size',type:'scalar',provenance:'supplied-stored-answers-v1',aliases:[]};
+    definition.groups[0].columns=[...new Set([...definition.groups[0].columns,'product_online','visibility',lengthTarget])];
     for(const row of definition.groups[0].rows) {
       if(row.id==='base') {
         row.cells.product_online={op:'literal',value:'2'};row.cells.visibility={op:'literal',value:'Catalog, Search'};
+        row.cells[lengthTarget]={op:'text',input:{op:'source',id:'nmLength'},trim:false,format:'scalar-v1',onAbsent:'empty'};
       }else row.cells.price={op:'literal',value:''};
     }
     const schema=fixture.observation();schema.attributes.find(a=>a.attribute_code==='name').scope='store';
+    schema.attributes.push({attribute_id:960,attribute_code:lengthTarget,frontend_input:'text',backend_type:'varchar',scope:'global',options:[]});
+    schema.attributeSets[0].attributeCodes.push(lengthTarget);
     const context={actorUserId:actor,requestId:randomUUID()},options={databasePool:db,mutationContext:context};
     const templates=require('../src/services/export-templates/template.service'),bindings=require('../src/services/magento/binding.service');
     const template=await templates.createTemplate({key:'allocated-fixture',displayName:'Allocated birth fixture',definition},options);
@@ -41,7 +47,7 @@ test('allocated first CREATE breaks only the proven birth-photo dependency on ow
       ({attribute_set_code:'attribute_set_id',product_type:'type_id',product_online:'status'}[attribute.target]||attribute.target);
     for(const policy of approved.policies) {
       const attribute=approved.attributes.find(a=>a.bindingKey===policy.bindingKey);
-      policy.policy=['name','price'].includes(attribute.target)?'authoritative_create_update':attribute.rowId==='english'?'magento_managed':'initialize_create_only';
+      policy.policy=['name','price',lengthTarget].includes(attribute.target)?'authoritative_create_update':attribute.rowId==='english'?'magento_managed':'initialize_create_only';
       if(attribute.target==='product_online'&&attribute.rowId==='base')policy.evidence={createValue:2};
     }
     draft=await bindings.updateDraft(draft.id,{expectedRevision:draft.revision,bindings:approved},options);
@@ -69,7 +75,7 @@ test('allocated first CREATE breaks only the proven birth-photo dependency on ow
       const client=await db.connect();
       try {
         await gate.begin(client);
-        const product=(await require('./product-fixture').insertNativeProductFixture(client,{category:'NM',weight:1,totalPriceUah:100,actorUserId:actor,details:{answers:{},manualPriceUah:100}})).rows[0];
+        const product=(await require('./product-fixture').insertNativeProductFixture(client,{category:'NM',weight:1,totalPriceUah:100,actorUserId:actor,details:{answers:{neckle_size:'77.5'},manualPriceUah:100}})).rows[0];
         const sku=(await client.query('SELECT public_sku FROM public_product_identities WHERE id=$1',[product.public_product_identity_id])).rows[0].public_sku;
         const media=asset?await photos.attachCreatedProduct(client,product.id,{photoIds:[asset.id],enableWhenVerified:true},mutationContext):null;
         if(receipt)await audit.writeAuditEvent(client,{mutationContext,eventKey:'product.created',subjectType:'product',subjectId:product.id,details:{fullSku:null,publicSku:sku,categoryCode:'NM'}});
@@ -77,7 +83,7 @@ test('allocated first CREATE breaks only the proven birth-photo dependency on ow
       }catch(e){await gate.rollback(client).catch(()=>{});throw e;}
       finally{await gate.release(client).catch(()=>{});client.release();}
     }
-    let raw=null,english=null;const writes=[];
+    let raw=null,english=null,beforeCreateResponse=null;const writes=[];
     const response=value=>new Response(JSON.stringify(value),{headers:{'content-type':'application/json'}});
     const fetchImpl=async(url,init)=>{
       const u=new URL(url),route=u.pathname.split('/V1/')[1];assert.equal(u.hostname,'allocated-fixture.invalid');
@@ -94,6 +100,7 @@ test('allocated first CREATE breaks only the proven birth-photo dependency on ow
       for(const a of payload.custom_attributes||[])attributes.set(a.attribute_code,a);
       const next={...old,...payload,custom_attributes:[...attributes.values()]};
       if(u.pathname.includes('/en/'))english=next;else {raw=next;english ||= structuredClone(raw);}
+      if(beforeCreateResponse){const check=beforeCreateResponse;beforeCreateResponse=null;await check();}
       return response(true);
     };
     const {previewProduct}=require('../src/services/magento/sync-preview'),jobs=require('../src/services/magento/sync-job.service');
@@ -132,7 +139,19 @@ test('allocated first CREATE breaks only the proven birth-photo dependency on ow
       const media=require('../src/services/magento/product-media-delivery');
       const waiting=await media.processJob(config,product.media.jobId,{databasePool:db,transport:{product:()=>assert.fail('Media cannot read or write before native acknowledgement')}});
       assert.equal(waiting.waitingForProduct,true);assert.deepEqual(await footprint(product),before);
+      assert.equal(queued.intent.operations[0].payload.product.custom_attributes.find(a=>a.attribute_code===lengthTarget).value,'77.5');
+      let checkedBeforeAcknowledgement=false;
+      beforeCreateResponse=async()=>{
+        const observed=await observation(product);
+        assert.equal(observed.raw.custom_attributes.find(a=>a.attribute_code===lengthTarget).value,'77.5');
+        assert.equal(require('../src/services/magento/first-sync-projection').getExactLengthComparison(observed),null,
+          'Allocated CREATE has no adopted remote ownership proof before acknowledgement');
+        assert.equal((await db.query('SELECT acknowledged_at FROM magento_sync_jobs WHERE id=$1',[queued.id])).rows[0].acknowledged_at,null);
+        checkedBeforeAcknowledgement=true;
+      };
       const done=await jobs.applyJob(config,queued.id,await automatic(product));assert.equal(done.state,'succeeded',JSON.stringify(done.failure));
+      assert.equal(checkedBeforeAcknowledgement,true);assert.equal(raw.custom_attributes.find(a=>a.attribute_code===lengthTarget).value,'77.5');
+      assert.deepEqual((await footprint(product)).product,before.product);
       assert.equal(raw.status,2);assert.ok(writes.length>=1);assert.ok(writes.every(p=>!Object.hasOwn(p,'status')||p.status===2));
       const after=await footprint(product);assert.deepEqual(after.state,before.state);assert.deepEqual(after.media,before.media);assert.deepEqual(after.sessions,[]);
       await require('../src/services/magento/automatic-sync-worker').createAutomaticSyncWorker(config,{databasePool:db,jobOptions:{preview,fetchImpl}}).runProduct(product.public_product_identity_id);
@@ -225,6 +244,33 @@ test('allocated first CREATE breaks only the proven birth-photo dependency on ow
       const request=await readRequest(item);assert.equal(request.state,'pending');assert.equal(request.desired_generation,'2');
       assert.ok(await native.readOnClient(db,config,await observation(item)));
       assert.equal(writes.length,count);assert.deepEqual(await footprint(item),before);
+    });
+    async function assertUndispatchedBlocked(item,job){
+      const count=writes.length,before=await footprint(item);
+      const outcome=await jobs.applyJob(config,job.id,await automatic(item)).then(value=>({value}),error=>({error}));
+      if(outcome.error){assert.equal(outcome.error.statusCode,409);assert.match(outcome.error.code,/^MAGENTO_/);}
+      else{assert.equal(outcome.value.state,'blocked',JSON.stringify(outcome.value.failure));assert.match(outcome.value.failure.code,/^MAGENTO_/);}
+      assert.equal(writes.length,count);assert.deepEqual(await footprint(item),before);
+      assert.equal((await db.query('SELECT count(*)::int n FROM magento_sync_steps WHERE job_id=$1',[job.id])).rows[0].n,0);
+    }
+    for(const kind of ['identity','source','lifecycle'])await t.test('exact native NM length does not bypass '+kind+' drift before CREATE',async()=>{
+      raw=null;english=null;const item=await make(),job=await jobs.enqueue(config,{sku:item.public_sku,bindingRevisionId:binding.id},await automatic(item));
+      if(kind==='identity')raw={id:8999,sku:item.public_sku,attribute_set_id:8001,type_id:'simple',name:'Foreign',status:2,visibility:4,
+        price:100,custom_attributes:[{attribute_code:lengthTarget,value:'77.5'}],extension_attributes:{category_links:[]}};
+      else{
+        const writer=new Client({connectionString:target.toString()});await writer.connect();
+        try{
+          if(kind==='source')await writer.query("UPDATE products SET details=jsonb_set(details,'{answers,neckle_size}','\"78\"'::jsonb) WHERE id=$1",[item.id]);
+          else await writer.query("UPDATE product_full_export_state SET business_exclusion_state='excluded',delivery_version=delivery_version+1 WHERE product_id=$1",[item.id]);
+        }finally{await writer.end();}
+      }
+      await assertUndispatchedBlocked(item,job);raw=null;english=null;
+    });
+    await t.test('exact native NM length does not authorize a queued CREATE under a replaced publication',async()=>{
+      const item=await make(),job=await jobs.enqueue(config,{sku:item.public_sku,bindingRevisionId:binding.id},await automatic(item));
+      const next=await bindings.clonePublished(binding.id,{expectedRevision:binding.revision},options);
+      const published=await bindings.publishDraft(next.id,{expectedRevision:next.revision,expectedCurrentId:binding.id},options);
+      assert.notEqual(published.id,binding.id);await assertUndispatchedBlocked(item,job);
     });
   }finally {
     globalThis.fetch=previousFetch;if(db)await db.end();if(appPool)await appPool.end();

@@ -23,6 +23,7 @@ const STATUSES = ['imported', 'equal', 'optional_empty', 'pending_outward_confir
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/;
 const RECEIPTS = new Set(['imported', 'equal', 'optional_empty', 'outward_verified', 'name_received', 'seo_received']);
 const CONTROL = /[\u0000-\u001f\u007f]/;
+const NM_EXACT_LENGTH_COMPARISON = 'nm-exact-length-cm-v1';
 function invalid() {
   throw Object.assign(new Error('Invalid bounded first-sync field evidence'),
     { code: 'FIRST_SYNC_FIELD_INPUT_INVALID', statusCode: 422 });
@@ -67,7 +68,7 @@ function readState(state, local) {
 }
 function validateField(field) {
   object(field, ['target', 'scope', 'kind', 'type', 'required', 'mapping', 'local', 'remote'],
-    ['unit', 'scale', 'constraints', 'receipt', 'reverseCandidates', 'prospective']);
+    ['unit', 'scale', 'constraints', 'receipt', 'reverseCandidates', 'prospective', 'comparison']);
   if (typeof field.target !== 'string' || typeof field.scope !== 'string'
     || !IDENTIFIER.test(field.target) || !IDENTIFIER.test(field.scope)
     || !KINDS.has(field.kind) || !TYPES.has(field.type) || typeof field.required !== 'boolean'
@@ -76,6 +77,9 @@ function validateField(field) {
     || field.kind === 'option' && field.type !== 'option'
     || field.kind !== 'option' && field.type === 'option') invalid();
   if (field.unit != null && !boundedText(field.unit, 32)) invalid();
+  if (Object.hasOwn(field, 'comparison') && (field.comparison !== NM_EXACT_LENGTH_COMPARISON
+    || field.target !== 'dovzhyna_namysta_tochna' || field.scope !== 'all'
+    || field.kind !== 'scalar' || field.type !== 'text' || field.unit != null)) invalid();
   if (field.scale !== undefined && (!Number.isInteger(field.scale) || field.scale < 0 || field.scale > 18
     || field.type !== 'decimal')) invalid();
   object(field.mapping, ['proven'], ['reason']);
@@ -193,6 +197,18 @@ function planField(field) {
     field.mapping.reason ? { evidenceReason: field.mapping.reason } : {});
   if (field.kind === 'name' && !['all', 'en'].includes(field.scope)) {
     return result('review_required', 'NAME_SCOPE_UNSUPPORTED');
+  }
+  // Only the server-proven NM centimetre mapping admits decimal equivalence.
+  // Keep the text contract for missing-value imports/outward values and retain
+  // the original read evidence. Exact decimal strings never round via Number.
+  if (field.comparison === NM_EXACT_LENGTH_COMPARISON && field.local.present && field.remote.present) {
+    for (const [side, read] of [['REMOTE', field.remote], ['LOCAL', field.local]]) {
+      if (read.unit != null) return result('review_required', side + '_UNIT_MISMATCH');
+      if (typeof read.value === 'string' && CONTROL.test(read.value)
+        || normalizeDecimal(read.value) === null) return result('review_required', side + '_DECIMAL_INVALID_OR_SCALE_EXCEEDED');
+    }
+    return normalizeDecimal(field.local.value) === normalizeDecimal(field.remote.value)
+      ? result('equal', 'NM_EXACT_LENGTH_CM_EQUAL') : result('conflict', 'POPULATED_VALUES_DIFFER');
   }
   const remote = normalized(field, field.remote);
   if (remote.reason) return result('review_required', 'REMOTE_' + remote.reason);
