@@ -1,5 +1,11 @@
 # Reviewed initial Magento names
 
+If ordinary `NAME_BASELINE_REQUIRED` prevents discovery from producing packets,
+use the separately sealed [initial-name scope adapter](FIRST_SYNC_INITIAL_NAMES.md)
+after canonical history admission. This adapter's existing `nameOnlyPreview`
+contract is unchanged; ordinary name resolution is not a substitute for legacy
+first-sync progress.
+
 This standalone adapter accepts the initial Magento full names in the `all`
 (Ukrainian/main) and `en` scopes for the exact `nameOnlyPreview` list produced by
 the [PR70 campaign review](FIRST_SYNC_CAMPAIGN.md). It depends on PR70; it is not
