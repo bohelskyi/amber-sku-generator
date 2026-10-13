@@ -149,6 +149,33 @@ second retained-inventory capture in that assertion. Exact identity and receipt
 hash checks remain; completed sessions and other proof types retain the fresh-read
 fallback. No evidence is cached across assertions, transactions, products or jobs.
 
+Progress commit combines that locked cutover assertion with its immediate
+eligibility check. When the assertion has just produced a valid first-mode
+cutover admission, it checks the complete expected eligibility hash inside the
+same call instead of loading retained inventory a second time. Nothing reusable
+is returned to the caller: every later call, transaction and dispatch boundary
+still reads fresh evidence. Other admission recipes and non-reusable proof paths
+retain their separate fresh eligibility read. This removes one retained capture
+per applicable progress commit; it does not establish a wall-clock speedup.
+
+`magento.auto_sync.local_phase` adds bounded timings for `first_sync_enforce`,
+`first_sync_commit`, `dispatch_admission`, `finalization`, `retained_capture` and
+`store_configs`. It records only the validated automatic product/public identity,
+generation, enqueue/apply stage, phase, UTC start/end, duration and bounded error
+code. Nested capture and store-config timers inherit that invocation's diagnostic
+context; manual calls outside it emit nothing. No SQL, SKU, field values, URLs,
+headers, payloads, rate values or exception messages are recorded. Logging cannot
+change the operation's result, error, cancellation or retries.
+
+These durations are inclusive: a commit or retained capture may be nested inside
+enforce, and finalization includes its final admission check. Do not sum a parent
+with its children. `store_configs` measures Magento currency-configuration GET,
+not an NBU refresh. The cutover `retained_capture` timer includes provenance
+validation and retained inventory/index work, rather than SQL alone. Finalization
+ends after the job's local acknowledgement transaction; the worker's request-generation update and
+lock release still follow it. A null timing error code alone is not proof of
+successful delivery; the durable job/step receipts remain authoritative.
+
 The gate stores an installation key and an active local actor with
 `export_templates.publish`. The worker looks up that installation's highest
 **published** binding version for the configured origin on each attempt. Drafts

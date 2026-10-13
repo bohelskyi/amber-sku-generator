@@ -1,12 +1,15 @@
 const { AsyncLocalStorage } = require('node:async_hooks');
 
 const phases = new Set(['observation', 'schema_discovery', 'precondition_read', 'dispatch', 'step_readback', 'final_readback']);
+const localPhases = new Set(['first_sync_enforce', 'first_sync_commit', 'dispatch_admission', 'finalization',
+  'retained_capture', 'store_configs']);
 const codes = new Set(['MAGENTO_TIMEOUT', 'MAGENTO_NETWORK_ERROR', 'MAGENTO_HTTP_ERROR', 'MAGENTO_RESPONSE_INVALID',
   'MAGENTO_RESPONSE_TOO_LARGE', 'MAGENTO_DISCOVERY_LIMIT', 'MAGENTO_INPUT_INVALID', 'MAGENTO_NOT_CONFIGURED',
   'MAGENTO_SYNC_READ_FAILED', 'MAGENTO_SYNC_OBSERVATION_REQUIRED', 'MAGENTO_SYNC_AMBER_CHANGED',
   'MAGENTO_SYNC_BINDING_CHANGED', 'MAGENTO_SYNC_MUTATION_UNCERTAIN', 'MAGENTO_SYNC_VERIFICATION_MISMATCH',
   'MAGENTO_SYNC_PREVIOUS_DISPATCH_UNRESOLVED', 'ADMIN_PERMISSION_REVOKED']);
 const storage = new AsyncLocalStorage();
+const localStorage = new AsyncLocalStorage();
 const wrapped = new WeakSet();
 const round = (value) => Number(Math.max(0, value).toFixed(3));
 
@@ -99,6 +102,35 @@ async function measurePhase(options, phase, operation) {
   }
 }
 
+// This timer neither wraps HTTP nor reads business data. Deep private helpers
+// inherit only this invocation's validated automatic identity/stage/logger.
+// Nested durations are inclusive and must not be summed with their parent.
+async function measureLocalPhase(options, phase, operation) {
+  let context = null;
+  try {
+    if (localPhases.has(phase)) {
+      if (options == null) context = localStorage.getStore() || null;
+      else {
+        const owner = identity(options);
+        if (owner && canLog(options)) context = { owner, logger: options.logger,
+          stage: ['enqueue', 'apply'].includes(options.telemetryStage) ? options.telemetryStage : 'unspecified' };
+      }
+    }
+  } catch { /* Unavailable diagnostic metadata cannot prevent the operation. */ }
+  if (!context) return localStorage.getStore() ? localStorage.run(null, operation) : operation();
+  const started = performance.now(), startedUtc = new Date().toISOString(); let code = null;
+  try { return await localStorage.run(context, operation); }
+  catch (cause) {
+    try { code = codes.has(cause?.code) ? cause.code : 'LOCAL_OPERATION_FAILED'; }
+    catch { code = 'LOCAL_OPERATION_FAILED'; }
+    throw cause;
+  }
+  finally {
+    log(context, 'magento.auto_sync.local_phase', { phase, stage: context.stage, ...context.owner,
+      startedUtc, finishedUtc: new Date().toISOString(), durationMs: round(performance.now() - started), code });
+  }
+}
+
 function recordRequestClaim(options, request, claimedAt = Date.now()) {
   try {
     const owner = identity(options);
@@ -112,4 +144,4 @@ function recordRequestClaim(options, request, claimedAt = Date.now()) {
   } catch { /* Invalid diagnostic metadata cannot interrupt the worker. */ }
 }
 
-module.exports = { measurePhase, recordRequestClaim };
+module.exports = { measurePhase, measureLocalPhase, recordRequestClaim };

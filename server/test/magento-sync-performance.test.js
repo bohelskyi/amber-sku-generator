@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { measurePhase } = require('../src/services/magento/sync-performance');
+const { measurePhase, measureLocalPhase } = require('../src/services/magento/sync-performance');
 
 test('phase transport telemetry preserves the exact response and transport arguments without logging private material', async () => {
   const entries = [], controller = new AbortController();
@@ -108,4 +108,137 @@ test('automatic phase telemetry records only safe identities/timings and preserv
   options.logger.info = () => { throw new Error('Logging failed'); };
   assert.equal(await measurePhase(options, 'dispatch', async () => privateResult), privateResult);
   await assert.rejects(measurePhase(options, 'step_readback', async () => { throw failure; }), (cause) => cause === failure);
+});
+
+test('local phase emits only its allowlisted identity and timing fields without observing private arguments or results', async () => {
+  const entries = [], result = { token: 'SENTINEL_PRIVATE_RESULT' }; let calls = 0, fetches = 0;
+  const options = { automatic: { productId: 12, publicIdentityId: '9', generation: '7', sku: 'SENTINEL_PRIVATE_SKU' },
+    telemetryStage: 'apply', jobId: 'SENTINEL_PRIVATE_JOB', credentials: 'SENTINEL_PRIVATE_SECRET',
+    fetchImpl: async () => { fetches++; throw Error('Unexpected HTTP'); },
+    logger: { info: (event, value) => entries.push({ event, value }) } };
+  for (const phase of ['first_sync_enforce', 'first_sync_commit', 'dispatch_admission', 'finalization', 'retained_capture', 'store_configs']) {
+    assert.equal(await measureLocalPhase(options, phase, (...args) => {
+      calls++; assert.deepEqual(args, []); return result;
+    }), result);
+  }
+  assert.equal(calls, 6); assert.equal(fetches, 0); assert.equal(entries.length, 6);
+  for (const entry of entries) {
+    assert.equal(entry.event, 'magento.auto_sync.local_phase');
+    assert.deepEqual(Object.keys(entry.value).sort(), ['code', 'durationMs', 'finishedUtc', 'generation', 'phase',
+      'productId', 'publicIdentityId', 'stage', 'startedUtc'].sort());
+    assert.equal(entry.value.stage, 'apply'); assert.equal(entry.value.code, null);
+    assert.ok(Number.isFinite(entry.value.durationMs) && entry.value.durationMs >= 0);
+  }
+  assert.doesNotMatch(JSON.stringify(entries), /SENTINEL|token|credentials|jobId|sku|transportHeaders/);
+});
+
+test('private retained-capture timing inherits automatic context through nested commit without returning timing evidence', async () => {
+  const entries = [], result = Object.freeze({ private: 'SENTINEL_RETAINED_CONTENT' });
+  const options = { automatic: { productId: 12, publicIdentityId: '9', generation: '7' }, telemetryStage: 'enqueue',
+    logger: { info: (event, value) => entries.push({ event, value }) } };
+  const actual = await measureLocalPhase(options, 'first_sync_enforce', () =>
+    measureLocalPhase(options, 'first_sync_commit', () => measureLocalPhase(null, 'retained_capture', async () => {
+      await new Promise(resolve => setImmediate(resolve)); return result;
+    })));
+  assert.equal(actual, result);
+  assert.deepEqual(entries.map(entry => entry.value.phase), ['retained_capture', 'first_sync_commit', 'first_sync_enforce']);
+  assert.ok(entries[2].value.durationMs >= entries[1].value.durationMs);
+  assert.ok(entries[1].value.durationMs >= entries[0].value.durationMs);
+  assert.ok(entries.every(entry => entry.value.productId === 12 && entry.value.stage === 'enqueue'));
+  const before = entries.length;
+  assert.equal(await measureLocalPhase(null, 'retained_capture', () => result), result);
+  assert.equal(entries.length, before, 'Context must not leak into an unrelated later caller');
+  assert.doesNotMatch(JSON.stringify(entries), /SENTINEL|private/);
+});
+
+test('overlapping automatic operations keep inherited capture identities and stages isolated', async () => {
+  const entries = []; let readyCount = 0, release;
+  const bothReady = new Promise(resolve => { release = resolve; });
+  const execute = (id, stage) => {
+    const options = { automatic: { productId: id, publicIdentityId: String(id), generation: String(id + 1) }, telemetryStage: stage,
+      logger: { info: (event, value) => entries.push({ event, value }) } };
+    return measureLocalPhase(options, 'dispatch_admission', async () => {
+      if (++readyCount === 2) release(); await bothReady;
+      return measureLocalPhase(null, 'retained_capture', async () => {
+        await new Promise(resolve => setImmediate(resolve)); return id;
+      });
+    });
+  };
+  assert.deepEqual(await Promise.all([execute(12, 'enqueue'), execute(13, 'apply')]), [12, 13]);
+  assert.equal(entries.length, 4);
+  for (const id of [12, 13]) {
+    const own = entries.filter(entry => entry.value.productId === id).map(entry => entry.value);
+    assert.deepEqual(own.map(entry => entry.phase), ['retained_capture', 'dispatch_admission']);
+    assert.ok(own.every(entry => entry.publicIdentityId === String(id) && entry.generation === String(id + 1)
+      && entry.stage === (id === 12 ? 'enqueue' : 'apply')));
+  }
+});
+
+test('local phase preserves exact sync and async failures, including null and hostile diagnostic properties', async () => {
+  const entries = [], options = { automatic: { productId: 12, publicIdentityId: '9', generation: '7' },
+    logger: { info: (event, value) => entries.push({ event, value }) } };
+  const known = Object.assign(Error('SENTINEL_PRIVATE_ERROR'), { code: 'MAGENTO_TIMEOUT' });
+  const unknown = Object.assign(Error('SENTINEL_PRIVATE_SQL'), { code: 'SENTINEL_PRIVATE_CODE', sql: 'SENTINEL_PRIVATE_QUERY' });
+  const hostile = { get code() { throw Error('SENTINEL_CODE_GETTER'); } };
+  for (const failure of [known, unknown, hostile, null]) {
+    let calls = 0;
+    await assert.rejects(measureLocalPhase(options, 'dispatch_admission', () => { calls++; throw failure; }), cause => cause === failure);
+    assert.equal(calls, 1);
+    await assert.rejects(measureLocalPhase(options, 'first_sync_commit', async () => { throw failure; }), cause => cause === failure);
+  }
+  assert.deepEqual(entries.map(entry => entry.value.code), ['MAGENTO_TIMEOUT', 'MAGENTO_TIMEOUT',
+    ...Array(6).fill('LOCAL_OPERATION_FAILED')]);
+  assert.doesNotMatch(JSON.stringify(entries), /SENTINEL|sql|message|stack/);
+});
+
+test('logger failure or unavailable metadata never changes local operation success, rejection or call count', async () => {
+  const result = {}, failure = Error('Original operation failure');
+  const loggers = [
+    { info() { throw Error('Logger unavailable'); } },
+    { info: async () => { throw Error('Logger unavailable'); } },
+    { get info() { throw Error('Logger getter unavailable'); } },
+  ];
+  for (const logger of loggers) {
+    let calls = 0;
+    const options = { automatic: { productId: 12, publicIdentityId: '9', generation: '7' }, logger };
+    assert.equal(await measureLocalPhase(options, 'finalization', () => { calls++; return result; }), result);
+    await assert.rejects(measureLocalPhase(options, 'finalization', () => { calls++; throw failure; }), cause => cause === failure);
+    assert.equal(calls, 2);
+  }
+  await new Promise(resolve => setImmediate(resolve));
+  const options = { automatic: { productId: 12, publicIdentityId: '9', generation: '7' }, logger: loggers[0],
+    get telemetryStage() { throw Error('Unavailable stage'); } };
+  assert.equal(await measureLocalPhase(options, 'finalization', () => result), result);
+});
+
+test('manual, invalid and unknown local phases cannot inherit another product context into deep hooks', async () => {
+  const entries = [], result = {}, logger = { info: (event, value) => entries.push({ event, value }) };
+  const options = { automatic: { productId: 12, publicIdentityId: '9', generation: '7' }, logger };
+  await measureLocalPhase(options, 'first_sync_enforce', async () => {
+    for (const [input, phase] of [[{ logger }, 'first_sync_commit'],
+      [{ logger, automatic: { productId: 12, publicIdentityId: 'SENTINEL_PRIVATE_ID', generation: '7' } }, 'first_sync_commit'],
+      [options, 'SENTINEL_PRIVATE_PHASE']]) {
+      assert.equal(await measureLocalPhase(input, phase, () => measureLocalPhase(null, 'retained_capture', () => result)), result);
+    }
+  });
+  assert.deepEqual(entries.map(entry => entry.value.phase), ['first_sync_enforce']);
+  assert.doesNotMatch(JSON.stringify(entries), /SENTINEL/);
+});
+
+test('local context coexists with transport collectors without changing HTTP arguments or counts', async () => {
+  const entries = [], response = new Response('{}'), signal = new AbortController().signal;
+  const request = { method: 'GET', signal, headers: { Authorization: 'SENTINEL_PRIVATE_AUTH' } };
+  const url = 'https://fixture.invalid/rest/all/V1/products?sku=SENTINEL_PRIVATE_SKU'; let calls = 0;
+  const options = { automatic: { productId: 12, publicIdentityId: '9', generation: '7' }, telemetryStage: 'apply',
+    logger: { info: (event, value) => entries.push({ event, value }) },
+    fetchImpl: async (actualUrl, actualRequest) => {
+      calls++; assert.equal(actualUrl, url); assert.equal(actualRequest, request); return response;
+    } };
+  const actual = await measureLocalPhase(options, 'first_sync_enforce', () => measurePhase(options, 'observation', read =>
+    measureLocalPhase(null, 'store_configs', () => read(url, request))));
+  assert.equal(actual, response); assert.equal(calls, 1);
+  const transport = entries.filter(entry => entry.event === 'magento.auto_sync.phase');
+  assert.equal(transport.length, 1); assert.equal(transport[0].value.transportHeaders.count, 1);
+  assert.equal(entries.filter(entry => entry.event === 'magento.auto_sync.local_phase').length, 2);
+  assert.doesNotMatch(JSON.stringify(entries), /SENTINEL|Authorization|headers.*AUTH/);
 });

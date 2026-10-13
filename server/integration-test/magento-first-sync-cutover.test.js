@@ -417,7 +417,7 @@ test('explicit cutover-only first-sync admission preserves history and field dec
       const read=repair.readRepairInput;let captures=0;
       const commitRead=subtest.mock.method(repair,'readRepairInput',async client=>{captures++;return read(client);});
       const result=await commit(prepared);assert.equal(result.localChanged,true);
-      assert.equal(captures,2,'commit keeps its separate fresh eligibility after the one-capture admission assertion');
+      assert.equal(captures,1,'commit consumes the same locked fresh eligibility within its combined admission assertion');
       commitRead.mock.restore();
       const f=await counter(p);assert.equal(f.csv_retired_revision,f.revision);assert.ok(BigInt(f.revision)>1n);
       const pending=await service.inspect(config,await observation(p,{size:'18',ua:'Remote UA',en:'Remote EN'}),options);

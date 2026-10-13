@@ -79,7 +79,8 @@ async function readCurrencyEvidence(config, observation, { fetchImpl } = {}) {
     const en = exactActive(current.storeTopology, pinned.storeTopology, 'en');
     if (!ua || !en || ua.id === en.id || ua.website_id !== website.id || en.website_id !== website.id
       || ua.store_group_id !== groups[0].id) return denied('PRICE_UA_EN_SCOPE_NOT_PROVEN');
-    const configs = await createMagentoClient(config, { fetchImpl, storeCode: 'all' }).getStoreConfigs();
+    const configs = await require('./sync-performance').measureLocalPhase(null,'store_configs',() =>
+      createMagentoClient(config, { fetchImpl, storeCode: 'all' }).getStoreConfigs());
     if (!Array.isArray(configs) || configs.length > 100 || configs.some(row => !row || typeof row !== 'object'
       || Array.isArray(row)) || new Set(configs.map(row => row.id)).size !== configs.length
       || new Set(configs.map(row => row.code)).size !== configs.length) return denied('PRICE_STORE_CONFIGS_INVALID');
