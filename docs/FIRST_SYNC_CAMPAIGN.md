@@ -29,7 +29,7 @@
 ## Один точний scope, без ручної роботи з кожним пакетом
 
 1. Отримайте один свіжий audit JSON. Звірте поточну publication, immutable handoff membership, стан запитів і групи причин. Не використовуйте загальну кількість `needs_attention` як кількість history blockers. Відокремте вже доставлені товари та іншу незавершену роботу на основі доказів, а не позиції у списку.
-2. Підготуйте один `candidates.json` у форматі [FIRST_SYNC_LOCAL_DISCOVERY.md](FIRST_SYNC_LOCAL_DISCOVERY.md). Він містить exact SKU, локальний product ID, category та точні погоджені пари local/remote. `remoteProductId: null` дозволяє отримати ID тільки з канонічного ordinary preview. Укажіть нові `bindingRevisionId` та `expectedDefinitionHash`, якщо вони вже відомі. Розташуйте срібло (`SV`) наприкінці списку; послідовність scope зберігається.
+2. Підготуйте один `candidates.json` у форматі [FIRST_SYNC_LOCAL_DISCOVERY.md](FIRST_SYNC_LOCAL_DISCOVERY.md). Він містить exact SKU, локальний product ID, category та точні погоджені пари local/remote. `remoteProductId: null` дозволяє отримати ID тільки з канонічного ordinary preview. Укажіть нові `bindingRevisionId` та `expectedDefinitionHash`, якщо вони вже відомі. Срібні вироби залиште останніми за підтвердженою категорією; SV у цьому каталозі означає сувеніри. Послідовність scope зберігається.
 3. Запустіть discovery один раз для всього списку. Оберіть `--limit` рівним кількості товарів, максимум 2000. Не покладайтеся на default 10.
 
 ```sh

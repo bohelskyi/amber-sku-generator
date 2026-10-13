@@ -11,9 +11,10 @@ Repository validation is not production execution or delivery acceptance.
 
 Use exact public SKUs and known local product IDs/categories from the frozen
 comparison. The helper never discovers by category, SKU prefix, fuzzy search or
-Magento numeric-ID guessing. It preserves input order; arrange silver candidates
-last in the input. A null `remoteProductId` requests fresh identity discovery.
-A supplied ID must match exactly.
+Magento numeric-ID guessing. It preserves input order. Keep silver products last
+by their confirmed category; SV means souvenirs in this catalog. No silver
+category code is inferred. A null `remoteProductId` requests fresh identity
+discovery. A supplied ID must match exactly.
 
 ```json
 {
