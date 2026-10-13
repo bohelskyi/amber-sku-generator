@@ -448,8 +448,13 @@ async function readCategoryObservation(client, schema, concurrency = 1) {
   return { trees, categoryFailures };
 }
 
+// Each default preview owns a fresh, bounded schema observation. Injected
+// discovery retains its caller-owned observation and existing argument contract.
+const discoverPreviewSchema = (config, reads) =>
+  auditMagentoSchema(config, { ...reads, concurrency: 4, preferInlineOptions: true });
+
 async function previewProduct(config, { databasePool, fetchImpl, storeCode = 'all', now = () => new Date().toISOString(),
-  readAmber = readPreviewProduct, discover = auditMagentoSchema, sensitiveValues = [], onObservation, categoryObservation, ...selection } = {}) {
+  readAmber = readPreviewProduct, discover = discoverPreviewSchema, sensitiveValues = [], onObservation, categoryObservation, ...selection } = {}) {
   const amber = await readAmber(databasePool, selection);
   if (amber.revision && (amber.revision.originHash !== originHash(config.baseUrl) || amber.revision.schema.storeCode !== storeCode)) {
     throw error(422, 'MAGENTO_BINDING_INSTALLATION_OR_SCOPE_MISMATCH', 'Binding installation or observation scope differs');
