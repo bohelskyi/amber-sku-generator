@@ -109,11 +109,11 @@ it('preview displays the exact delivery set; only one separate explicit apply us
   let finishApply; api.post.mockResolvedValueOnce({ data: proof }).mockReturnValueOnce(new Promise((done) => { finishApply = done; }));
   const applied = vi.fn(); render(shell(<MagentoPublicationActions revision={{ ...revision, state: 'draft' }} currentPublishedId="old" onPublished={applied} compact />));
   fireEvent.click(screen.getByRole('button', { name: 'Перевірити вплив на товари' }));
-  const list = await screen.findByRole('region', { name: 'Точний перелік товарів для доставки' }); expect(list.textContent).toContain('SV1');
+  const list = await screen.findByRole('region', { name: 'Перелік товарів для перевірки й синхронізації' }); expect(list.textContent).toContain('SV1');
   expect(api.post).toHaveBeenCalledTimes(1);
-  const apply = screen.getByRole('button', { name: 'Застосувати правила й передати 1 товарів' }); fireEvent.click(apply); fireEvent.click(apply);
+  const apply = screen.getByRole('button', { name: 'Застосувати правила й запланувати 1 товарів' }); fireEvent.click(apply); fireEvent.click(apply);
   expect(api.post).toHaveBeenCalledTimes(2); expect(api.post.mock.calls[1][1].previewToken).toBe('reviewed');
-  expect(screen.getByRole('button', { name: 'Застосовуємо правила й передачу…' }).disabled).toBe(true);
+  expect(screen.getByRole('button', { name: 'Застосовуємо правила й плануємо синхронізацію…' }).disabled).toBe(true);
   await act(async () => finishApply({ data: { revision } })); expect(applied).toHaveBeenCalledTimes(1);
 });
 
@@ -126,7 +126,7 @@ it('handoff focus refresh reads Amber; aborted older responses cannot replace fr
   await screen.findByText(/Magento: 90 \/ 152 синхронізовано/);
   await act(async () => oldRead({ data: handoff(0) }));
   expect(screen.queryByText(/Magento: 0 \/ 152/)).toBeNull();
-  expect(screen.getByText(/Ще не поставлено в чергу доставки/)).toBeTruthy(); expect(screen.getByText(/Час підтвердження недоступний/)).toBeTruthy();
+  expect(screen.getByText(/Очікують передавання на перевірку/)).toBeTruthy(); expect(screen.getByText(/Час підтвердження недоступний/)).toBeTruthy();
   fireEvent(window, new Event('focus')); await vi.waitFor(() => expect(api.get).toHaveBeenCalledTimes(3));
   expect(api.post.mock.calls.filter(([url]) => !url.endsWith('/controlled-products/resolve'))).toHaveLength(0);
 });

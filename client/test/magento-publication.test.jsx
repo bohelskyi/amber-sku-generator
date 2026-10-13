@@ -66,47 +66,74 @@ it('complete affected and lost sets paginate locally without new HTTP snapshot p
   const products=Array.from({length:101},(_,i)=>({productId:i+1,article:`ARTICLE-${i+1}`,routeKey:'XG:all',reason:'unblocked'}));
   api.post.mockResolvedValueOnce({data:{...proof,totalProducts:3323,affected:products,lostProducts:products,lostRoutes:['XG:all']}});
   shell();fireEvent.click(screen.getByRole('button',{name:'Перевірити вплив публікації'}));
-  await screen.findByText(/Перевірено поточних товарів: 3323/);
-  expect(screen.getByText('ARTICLE-1 · Готовність відновлено')).toBeTruthy();
-  expect(screen.getByRole('region', { name: 'Точний перелік товарів для доставки' })).toBeTruthy();
+  await screen.findByText(/Перевірено вплив правил на поточні товари: 3323/);
+  expect(screen.getByText('ARTICLE-1 · Правила тепер охоплюють товар')).toBeTruthy();
+  expect(screen.getByRole('region', { name: 'Перелік товарів для перевірки й синхронізації' })).toBeTruthy();
   const {within}=await import('@testing-library/react');
-  const pager=screen.getByRole('navigation',{name:'Товари для доставки'});
+  const pager=screen.getByRole('navigation',{name:'Товари для перевірки й синхронізації'});
   fireEvent.click(within(pager).getByRole('button',{name:'Далі'}));
-  expect(screen.queryByText('ARTICLE-101 · Готовність відновлено')).toBeNull();
+  expect(screen.queryByText('ARTICLE-101 · Правила тепер охоплюють товар')).toBeNull();
   fireEvent.click(within(pager).getByRole('button',{name:'Далі'}));
-  expect(screen.getByText('ARTICLE-101 · Готовність відновлено')).toBeTruthy();
+  expect(screen.getByText('ARTICLE-101 · Правила тепер охоплюють товар')).toBeTruthy();
   expect(api.post).toHaveBeenCalledTimes(1);expect(api.get).not.toHaveBeenCalled();
 });
 it('publication requires an explicit impact preview and reuses exact representative inputs', async () => {
   const published = vi.fn(), input = { product: { categoryCode: 'XX', answers: {}, weight: '2' } };
   api.post.mockResolvedValueOnce({ data: proof }).mockResolvedValueOnce({ data: { revision: { id: 'published' } } });
   shell({ representatives: [{ routeKey: 'XX:all', input }], onPublished: published });
-  expect(screen.queryByRole('button', { name: /Застосувати правила й передати / })).toBeNull();
+  expect(screen.queryByRole('button', { name: /Застосувати правила й запланувати / })).toBeNull();
   expect(api.post).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Перевірити вплив публікації' }));
-  await screen.findByText(/До синхронізації буде передано: 1/);
-  fireEvent.click(screen.getByRole('button', { name: /Застосувати правила й передати / }));
+  await screen.findByText(/Для перевірки й синхронізації: 1\./);
+  fireEvent.click(screen.getByRole('button', { name: /Застосувати правила й запланувати / }));
   await vi.waitFor(() => expect(published).toHaveBeenCalledWith({ id: 'published' }));
   expect(api.post.mock.calls[1]).toEqual(['/admin/magento-integration/publication/apply', { bindingRevisionId: 'draft', expectedRevision: '3', expectedCurrentId: 'current', representatives: [input], previewToken: 'proof' }]);
+});
+it.each([false, true])('publication impact keeps restored coverage distinct from first-sync readiness (compact=%s)', async (compact) => {
+  const affected = Array.from({ length: 244 }, (_, index) => ({ productId: index + 1, article: `NM-${index + 1}`, reason: index ? 'unblocked' : 'delivery_changed' }));
+  api.post.mockResolvedValueOnce({ data: { ...proof, totalProducts: 3339, affected,
+    checked: [{ kind: 'current', productId: 1, sendable: true, blockers: [] }] } });
+  shell({ compact });
+  fireEvent.click(screen.getByRole('button', { name: compact ? 'Перевірити вплив на товари' : 'Перевірити вплив публікації' }));
+  await screen.findByText(/Перевірено вплив правил на поточні товари: 3339\. Для перевірки й синхронізації: 244\./);
+  expect(screen.getByText('NM-1 · Змінились дані для синхронізації')).toBeTruthy();
+  expect(screen.getByText('NM-2 · Правила тепер охоплюють товар')).toBeTruthy();
+  expect(screen.getByText(/Готовність кожного товару до надсилання перевіряється окремо, зокрема історія та поля першої синхронізації/)).toBeTruthy();
+  expect(screen.queryByText(/Готовність відновлено|До доставки:|До синхронізації буде передано/)).toBeNull();
+  expect(screen.getByRole('button', { name: 'Застосувати правила й запланувати 244 товарів' }).disabled).toBe(false);
+  expect(api.post.mock.calls).toEqual([['/admin/magento-integration/publication/preview', {
+    bindingRevisionId: 'draft', expectedRevision: '3', expectedCurrentId: 'current', representatives: [],
+  }]]);
+  expect(api.get).not.toHaveBeenCalled();
+});
+it('published handoff shows aggregate attention without inventing first-sync counts or performing product audits', async () => {
+  api.get.mockResolvedValue({ data: [{ id: 'handoff', kind: 'publication', created_at: '2026-10-12T23:08:59Z',
+    total: 244, pending_handoff: 0, waiting: 153, protected: 0, synced: 0, needs_attention: 91, retired: 0 }] });
+  shell({ revision: { ...revision, id: 'current', state: 'published' } });
+  await screen.findByText('Magento: 0 / 244 синхронізовано · Очікують завершення перевірки й синхронізації: 153 · Очікують передавання на перевірку: 0 · 91 потребують уваги');
+  expect(screen.getByText(/Готовність кожного товару до надсилання перевіряється окремо, зокрема історія та поля першої синхронізації/)).toBeTruthy();
+  expect(screen.queryByText(/91.*(історії|полів|першої синхронізації)/)).toBeNull();
+  expect(api.get.mock.calls).toEqual([['/admin/magento-integration/bindings/current/handoffs', { signal: expect.any(AbortSignal) }]]);
+  expect(api.post).not.toHaveBeenCalled();
 });
 it('exact route/product loss requires acknowledgement and explanation; stale apply clears review', async () => {
   api.post.mockResolvedValueOnce({ data: { ...proof, lostRoutes: ['SV:normal'], lostProducts: [{ productId: 2, article: 'AG-000004', routeKey: 'SV:normal' }] } })
     .mockRejectedValueOnce({ response: { data: { error: 'Дані змінилися' } } });
   shell(); fireEvent.click(screen.getByRole('button', { name: 'Перевірити вплив публікації' }));
   await screen.findByText('AG-000004 · SV:normal');
-  expect(screen.getByRole('button', { name: /Застосувати правила й передати / }).disabled).toBe(true);
+  expect(screen.getByRole('button', { name: /Застосувати правила й запланувати / }).disabled).toBe(true);
   fireEvent.click(screen.getByLabelText('Підтверджую точну втрату покриття'));
   fireEvent.change(screen.getByLabelText('Пояснення скорочення'), { target: { value: 'Свідоме скорочення' } });
-  fireEvent.click(screen.getByRole('button', { name: /Застосувати правила й передати / }));
+  fireEvent.click(screen.getByRole('button', { name: /Застосувати правила й запланувати / }));
   await screen.findByText('Дані змінилися');
-  expect(screen.queryByRole('button', { name: /Застосувати правила й передати / })).toBeNull();
+  expect(screen.queryByRole('button', { name: /Застосувати правила й запланувати / })).toBeNull();
   expect(api.post.mock.calls[1][1]).toMatchObject({ ackCoverageLoss: true, coverageReason: 'Свідоме скорочення' });
 });
 it('missing CREATE readiness blocks publication and view-only cannot publish', async () => {
   api.post.mockResolvedValueOnce({ data: { ...proof, blockers: [{ code: 'REPRESENTATIVE_CREATE_REQUIRED', routeKey: 'XX:all' }] } });
   shell(); fireEvent.click(screen.getByRole('button', { name: 'Перевірити вплив публікації' }));
   await screen.findByText('Потрібен перевірений приклад нового товару. Відкрийте «Приклад на товарі». · XX:all');
-  expect(screen.getByRole('button', { name: /Застосувати правила й передати / }).disabled).toBe(true);
+  expect(screen.getByRole('button', { name: /Застосувати правила й запланувати / }).disabled).toBe(true);
   cleanup(); shell({}, ['export_templates.view']);
   expect(screen.queryByRole('button', { name: 'Перевірити вплив публікації' })).toBeNull();
 });
@@ -127,7 +154,7 @@ it('source failures name affected fields in both languages and keep the exact dr
   expect(en.searchParams.get('language')).toBe('english'); expect(en.searchParams.get('field')).toBe('description');
   expect(screen.queryByRole('link', { name: 'Проблеми синхронізації' })).toBeNull();
   expect(screen.queryByText('Потрібно перевірити відповідності.')).toBeNull();
-  expect(screen.getByRole('button', { name: /Застосувати правила й передати / }).disabled).toBe(true);
+  expect(screen.getByRole('button', { name: /Застосувати правила й запланувати / }).disabled).toBe(true);
   openDetails('Точна причина перевірки'); expect(screen.getByText(/Current non-SKU question metadata required/)).toBeTruthy();
 });
 it('binding diagnostics identify the exact category, field, language and option in compact publication', async () => {
@@ -139,7 +166,7 @@ it('binding diagnostics identify the exact category, field, language and option 
   await screen.findByText('Чотки → Колір каменю → EN → значення «Медовий»');
   const target = new URL(screen.getByRole('link', { name: 'Перевірити поле: Чотки → Колір каменю · EN' }).href);
   expect(Object.fromEntries(target.searchParams)).toMatchObject({ binding: 'draft', source: 'current', field: 'kolir', language: 'english', route: 'CH:all' });
-  expect(screen.getByRole('button', { name: /Застосувати правила й передати / }).disabled).toBe(true);
+  expect(screen.getByRole('button', { name: /Застосувати правила й запланувати / }).disabled).toBe(true);
   expect(api.post).toHaveBeenCalledTimes(1);
 });
 it('an affected product blocker shows the server explanation and opens that product, not the unfiltered queue', async () => {
@@ -160,7 +187,7 @@ it('a product preview blocked by a draft rule opens that exact draft field inste
   const link = await screen.findByRole('link', { name: 'Перевірити поле: Кулони → Категорії Magento · UA' });
   expect(Object.fromEntries(new URL(link.href).searchParams)).toMatchObject({ binding: 'draft', source: 'current', field: 'categories', route: 'KL:all', language: 'base' });
   expect(screen.queryByRole('link', { name: 'Відкрити проблему цього товару' })).toBeNull();
-  expect(screen.getByRole('button', { name: /Застосувати правила й передати / }).disabled).toBe(true);
+  expect(screen.getByRole('button', { name: /Застосувати правила й запланувати / }).disabled).toBe(true);
 });
 it('unknown validation keeps exact diagnostics in a copyable report and cannot apply until a fresh successful preview', async () => {
   const writeText = vi.fn().mockResolvedValue(undefined);
@@ -169,13 +196,13 @@ it('unknown validation keeps exact diagnostics in a copyable report and cannot a
   api.post.mockResolvedValueOnce({ data: { ...proof, blockers: [diagnostic] } }).mockResolvedValueOnce({ data: proof });
   shell({ compact: true }); fireEvent.click(screen.getByRole('button', { name: 'Перевірити вплив на товари' }));
   await screen.findByText(/Точну причину наведено в деталях/);
-  expect(screen.getByRole('button', { name: /Застосувати правила й передати / }).disabled).toBe(true);
+  expect(screen.getByRole('button', { name: /Застосувати правила й запланувати / }).disabled).toBe(true);
   fireEvent.click(screen.getByRole('button', { name: 'Копіювати причини блокування' }));
   await screen.findByText('Причини блокування скопійовано.');
   expect(JSON.parse(writeText.mock.calls[0][0])).toMatchObject({ bindingRevisionId: 'draft', expectedRevision: '3', expectedCurrentId: 'current', blockers: [diagnostic] });
   openDetails('Точна причина перевірки'); expect(screen.getByText(/Exact server explanation/)).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Перевірити вплив на товари' }));
-  await vi.waitFor(() => expect(screen.getByRole('button', { name: /Застосувати правила й передати / }).disabled).toBe(false));
+  await vi.waitFor(() => expect(screen.getByRole('button', { name: /Застосувати правила й запланувати / }).disabled).toBe(false));
   expect(api.post.mock.calls.every(([url]) => url.endsWith('/publication/preview'))).toBe(true);
 });
 it('missing create evidence opens the exact category example in place without creating or delivering a product', async () => {
@@ -186,17 +213,17 @@ it('missing create evidence opens the exact category example in place without cr
   await vi.waitFor(() => expect(api.get).toHaveBeenCalledWith('/admin/magento-integration/creation-inputs', expect.objectContaining({ params: { categoryCode: 'CH' } })));
   expect(screen.getByRole('region', { name: 'Приклад для застосування змін' })).toBeTruthy();
   expect(api.post).toHaveBeenCalledTimes(1);
-  expect(screen.getByRole('button', { name: /Застосувати правила й передати / }).disabled).toBe(true);
+  expect(screen.getByRole('button', { name: /Застосувати правила й запланувати / }).disabled).toBe(true);
 });
 it('a fresh apply revalidation failure exposes returned blockers and discards the obsolete publication proof', async () => {
   api.post.mockResolvedValueOnce({ data: proof }).mockRejectedValueOnce({ response: { data: { code: 'MAGENTO_PUBLICATION_STALE', error: 'Repeat publication review',
     details: { blockers: [{ code: 'SOURCE_REFERENCE_UNRESOLVED', category: 'CH', sourceId: 'CH.size', key: 'size', requirement: 'current_non_sku_question' }] } } } });
   shell({ compact: true }); fireEvent.click(screen.getByRole('button', { name: 'Перевірити вплив на товари' }));
-  fireEvent.click(await screen.findByRole('button', { name: /Застосувати правила й передати / }));
+  fireEvent.click(await screen.findByRole('button', { name: /Застосувати правила й запланувати / }));
   await screen.findByText(/Перевірка застаріла. Зміни не застосовано/);
   expect(screen.getByText('Чотки → size')).toBeTruthy();
   expect(screen.getByText(/інформаційну характеристику, яку не знайдено/)).toBeTruthy();
-  expect(screen.queryByRole('button', { name: /Застосувати правила й передати / })).toBeNull();
+  expect(screen.queryByRole('button', { name: /Застосувати правила й запланувати / })).toBeNull();
   expect(screen.getByRole('button', { name: 'Перевірити вплив на товари' }).disabled).toBe(false);
   expect(api.post).toHaveBeenCalledTimes(2);
 });
@@ -208,7 +235,7 @@ it('keeps the exact blocker report available when clipboard access fails', async
   const report = await screen.findByLabelText('Скопіюйте цей звіт вручну');
   expect(JSON.parse(report.value).blockers[0].code).toBe('SOURCE_REFERENCE_AMBIGUOUS');
   expect(report.readOnly).toBe(true);
-  expect(screen.getByRole('button', { name: /Застосувати правила й передати / }).disabled).toBe(true);
+  expect(screen.getByRole('button', { name: /Застосувати правила й запланувати / }).disabled).toBe(true);
 });
 it('publication status survives remount, polls real pending counts and offers no blind retry', async () => {
   vi.useFakeTimers(); const state = { id: 'handoff', kind: 'publication', created_at: '2026-10-02T00:00:00Z', total: 3, pending_handoff: 1, waiting: 1, protected: 1, synced: 0, needs_attention: 0, retired: 0 };
@@ -274,13 +301,13 @@ it('delegated publication capabilities allow normal publication but never Admini
   shell({},permissions,[]);fireEvent.click(screen.getByRole('button',{name:'Перевірити вплив публікації'}));
   await screen.findByText(/Покриття буде скорочено/);
   expect(screen.queryByLabelText('Підтверджую точну втрату покриття')).toBeNull();
-  expect(screen.queryByRole('button',{name:/Застосувати правила й передати /})).toBeNull();
+  expect(screen.queryByRole('button',{name:/Застосувати правила й запланувати /})).toBeNull();
   cleanup();controlledShell({},permissions,[]);
   expect(screen.queryByRole('button',{name:'Перевірити товари для контрольованої дії'})).toBeNull();
   expect(api.get).not.toHaveBeenCalled();
   cleanup();api.post.mockResolvedValueOnce({data:proof});shell({},permissions,[]);
   fireEvent.click(screen.getByRole('button',{name:'Перевірити вплив публікації'}));
-  expect((await screen.findByRole('button',{name:/Застосувати правила й передати /})).disabled).toBe(false);
+  expect((await screen.findByRole('button',{name:/Застосувати правила й запланувати /})).disabled).toBe(false);
 });
 it('name-rule application needs exports.create and a current publication, independently from broad resync',()=>{
   controlledShell({kind:'name_rule'},permissions.filter(permission=>permission!=='exports.create'));
@@ -310,5 +337,5 @@ it('a new coverage review resets the old acknowledgement',async()=>{
   fireEvent.change(screen.getByLabelText('Пояснення скорочення'),{target:{value:'Перша перевірка'}});
   fireEvent.click(screen.getByRole('button',{name:'Перевірити вплив публікації'}));
   expect((await screen.findByLabelText('Підтверджую точну втрату покриття')).checked).toBe(false);
-  expect(screen.getByRole('button',{name:/Застосувати правила й передати /}).disabled).toBe(true);
+  expect(screen.getByRole('button',{name:/Застосувати правила й запланувати /}).disabled).toBe(true);
 });

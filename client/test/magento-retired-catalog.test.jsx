@@ -12,7 +12,7 @@ const retired = { state: 'retired_targets', publicationBlocked: true, resources:
 ] };
 const permissions = ['export_templates.manage', 'export_templates.publish', 'exports.view'];
 const principalLifetime = { id: 'retired-catalog-administrator', valid: true };
-const applyLabel = 'Застосувати правила й передати 0 товарів';
+const applyLabel = 'Застосувати правила й запланувати 0 товарів';
 const shell = (value, autoPreview = false) => <AuthContext.Provider value={{ permissions, principalLifetime, roles: [{ key: 'administrator' }] }}><MemoryRouter><MagentoPublicationActions revision={value} currentPublishedId="current" autoPreview={autoPreview} onPublished={vi.fn()} /></MemoryRouter></AuthContext.Provider>;
 it('shows the exact cleaned resource and a fresh preparation route while preventing automatic or explicit preview', async () => {
   render(shell({ ...revision, catalogAvailability: retired }, true));

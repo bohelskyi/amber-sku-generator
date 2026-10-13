@@ -254,9 +254,9 @@ it('checks the originating product, confirms its new path and requires a separat
   expect(api.post).toHaveBeenCalledWith('/admin/magento-integration/successor/apply', { ...request, previewToken: 'successor-proof' });
   expect((await screen.findByLabelText('Відповідність: Default/Браслети/Світлі')).value).toBe('42');
   expect(screen.getByText(/Перевірте шлях у колонці Magento/)).toBeTruthy();
-  expect(screen.queryByRole('button', { name: /Застосувати правила й передати / })).toBeNull();
+  expect(screen.queryByRole('button', { name: /Застосувати правила й запланувати / })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Підтвердити', exact: true }));
-  const apply = await screen.findByRole('button', { name: /Застосувати правила й передати / });
+  const apply = await screen.findByRole('button', { name: /Застосувати правила й запланувати / });
   expect(api.post).toHaveBeenCalledWith('/admin/magento-integration/bindings/isolated/decision', { expectedRevision: '1', binding: categoryEntry.id, action: 'approve', acceptReview: true });
   expect(api.post.mock.calls.some(([url]) => url.endsWith('/publication/apply'))).toBe(false);
   fireEvent.click(apply);
@@ -279,7 +279,7 @@ it('continues restored category review explicitly and checks impact without crea
   await screen.findByText('Відповідності перевірено');
   expect(api.post).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Продовжити перевірку розділів' }));
-  await screen.findByRole('button', { name: /Застосувати правила й передати / });
+  await screen.findByRole('button', { name: /Застосувати правила й запланувати / });
   expect(api.post.mock.calls).toEqual([['/admin/magento-integration/publication/preview', {
     bindingRevisionId: 'isolated', expectedRevision: '1', expectedCurrentId: 'current', representatives: [],
   }]]);
@@ -302,7 +302,7 @@ it('keeps a source failure after category approvals in the same exact preparatio
   const target = new URL(within(issues).getByRole('link', { name: 'Перевірити поле: Браслети → Колір · UA' }).href);
   expect(Object.fromEntries(target.searchParams)).toMatchObject({ binding: 'isolated', source: 'current', field: 'kolir', language: 'base', productId: '5080', returnTo: '/attention?problem=5080' });
   expect(within(issues).queryByRole('link', { name: 'Проблеми синхронізації' })).toBeNull();
-  expect(screen.getByRole('button', { name: /Застосувати правила й передати / }).disabled).toBe(true);
+  expect(screen.getByRole('button', { name: /Застосувати правила й запланувати / }).disabled).toBe(true);
   expect(api.post.mock.calls).toEqual([['/admin/magento-integration/publication/preview', {
     bindingRevisionId: 'isolated', expectedRevision: '1', expectedCurrentId: 'current', representatives: [],
   }]]);
@@ -342,7 +342,7 @@ it('shows the exact remaining category after placement confirmation and applies 
   fireEvent.click(screen.getByRole('button', { name: 'Підтвердити', exact: true }));
   await screen.findByText('Оновлюємо підтвердження…');
   expect(screen.queryByText(/Чернетка змінилася/)).toBeNull();
-  expect(screen.queryByRole('button', { name: /Застосувати правила й передати / })).toBeNull();
+  expect(screen.queryByRole('button', { name: /Застосувати правила й запланувати / })).toBeNull();
   await waitFor(() => expect(finishRead).toBeTypeOf('function'));
   await act(async () => finishRead());
   await screen.findByRole('heading', { name: 'Підтвердьте відповідності інших категорій' });
@@ -354,7 +354,7 @@ it('shows the exact remaining category after placement confirmation and applies 
   expect(api.post.mock.calls.filter(([url]) => url.endsWith('/decision'))).toHaveLength(1);
   expect(api.post.mock.calls.some(([url]) => url.includes('/publication/'))).toBe(false);
   fireEvent.click(within(row).getByRole('button', { name: 'Підтвердити', exact: true }));
-  const apply = await screen.findByRole('button', { name: /Застосувати правила й передати / });
+  const apply = await screen.findByRole('button', { name: /Застосувати правила й запланувати / });
   expect(api.post.mock.calls.filter(([url]) => url.endsWith('/decision')).map(([, body]) => [body.binding, body.expectedRevision])).toEqual([[placement.id, '1'], [other.id, '2']]);
   expect(screen.queryByText(/Застосування чекає на підтвердження/)).toBeNull();
   expect(api.post.mock.calls.some(([url]) => url.endsWith('/publication/apply'))).toBe(false);
@@ -375,7 +375,7 @@ it('restores the remaining fields of another category visibly without automatic 
   const row = screen.getByRole('row', { name: /Золотиста оправа/ });
   expect(row.textContent).toContain('Інші');
   expect(within(row).queryByText('Колір: Нуль')).toBeNull();
-  expect(screen.queryByRole('button', { name: /Застосувати правила й передати / })).toBeNull();
+  expect(screen.queryByRole('button', { name: /Застосувати правила й запланувати / })).toBeNull();
   expect(api.post).not.toHaveBeenCalled();
 });
 
@@ -393,7 +393,7 @@ it('shows remaining local fields after the focused placement is confirmed and ke
   fireEvent.change(screen.getByLabelText('Пояснення перевірки'), { target: { value: 'Перевірено' } });
   fireEvent.click(screen.getByRole('button', { name: 'Підтвердити', exact: true }));
   expect(api.post).not.toHaveBeenCalled();
-  expect(screen.queryByRole('button', { name: /Застосувати правила й передати / })).toBeNull();
+  expect(screen.queryByRole('button', { name: /Застосувати правила й запланувати / })).toBeNull();
 });
 
 it('isolates a shared text rule to the chosen category and language and saves a separate family', async () => {
@@ -559,7 +559,7 @@ it('checks product impact after the single explicit check and waits for a separa
   fireEvent.change(await screen.findByLabelText('Текст для магазину'), { target: { value: 'Новий опис' } });
   fireEvent.click(screen.getByRole('button', { name: 'Готово' }));
   fireEvent.click(screen.getByRole('button', { name: 'Перевірити зміни' }));
-  const apply = await screen.findByRole('button', { name: /Застосувати правила й передати / });
+  const apply = await screen.findByRole('button', { name: /Застосувати правила й запланувати / });
   expect(apply.disabled).toBe(false);
   expect(api.post.mock.calls.filter(([url]) => url.endsWith('/publication/preview'))).toHaveLength(1);
   expect(api.post.mock.calls.some(([url]) => url.endsWith('/publication/apply'))).toBe(false);
