@@ -5,6 +5,7 @@ const optionalReceipts = require('./first-sync-optional-receipt-audit');
 const nativeCreate = require('./first-sync-native-create');
 const seo = require('./first-sync-seo-proof');
 const { TERMINAL, fieldKey } = require('./first-sync-progress-plan');
+const { measureLocalPhase } = require('./sync-performance');
 const fail = code => {throw c.error(409,'MAGENTO_FIRST_SYNC_' + code,'Передавання потребує актуального рішення щодо полів першої синхронізації.');};
 const lanes = new WeakMap();
 const recoveryProofs = new WeakMap();
@@ -115,7 +116,7 @@ async function enforce(config,observation,state,options,{job=null,createLane=nul
   let changed=false;
   if(inspection.mode==='first' && hasProgressChange(inspection)) {
     let result;
-    try {result=await service.commit(config,inspection,state,options,{jobId:job?.id || null});}
+    try {result=await measureLocalPhase(options,'first_sync_commit',()=>service.commit(config,inspection,state,options,{jobId:job?.id || null}));}
     catch(cause) {
       if(/^FIRST_SYNC_[A-Z_]+$/.test(cause.code || '')) cause.code='MAGENTO_' + cause.code;
       throw cause;

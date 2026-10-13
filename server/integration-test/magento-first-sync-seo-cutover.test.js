@@ -16,6 +16,7 @@ const ledger = require('../src/services/magento/first-sync-ledger');
 const jobs = require('../src/services/magento/sync-job.service');
 const seo = require('../src/services/magento/first-sync-seo-proof');
 const gate = require('../src/services/full-product-cutover-gate');
+const repair = require('../src/services/export-exposure/repair-loader');
 
 test('native NM SEO completion preserves the real cutover admission root and captured lifecycle state', async t => {
   const source = new URL(process.env.TEST_DATABASE_URL || '');
@@ -139,6 +140,7 @@ test('native NM SEO completion preserves the real cutover admission root and cap
       (SELECT jsonb_agg(s ORDER BY id) FROM magento_first_sync_sessions s) sessions,
       (SELECT jsonb_agg(p ORDER BY session_id,revision) FROM magento_first_sync_progress p) progress,
       (SELECT jsonb_agg(f ORDER BY session_id,revision,target,scope) FROM magento_first_sync_fields f) fields,
+      (SELECT jsonb_agg(r ORDER BY product_id) FROM magento_product_sync_requests r) requests,
       (SELECT jsonb_agg(j ORDER BY id) FROM magento_sync_jobs j) jobs,
       (SELECT jsonb_agg(s ORDER BY job_id,ordinal) FROM magento_sync_steps s) steps`)).rows[0]);
     const before = await snapshot(), proposal = await service.review(config, selection, runtimeOptions);
@@ -155,7 +157,70 @@ test('native NM SEO completion preserves the real cutover admission root and cap
       {target:'decor_weight',scope:'all',choice:'keep_local'},
       ...reviewed.fields.filter(field=>targets.includes(field.target)&&field.canAcceptRemote)
         .map(({target,scope})=>({target,scope,choice:'accept_remote'}))] };
-    const kept = await service.apply(config, choice, runtimeOptions); assert.equal(kept.complete, false); assert.equal(kept.readyForOutbound, true);
+    // Prepare through the real guarded observation/inspection/decision path, then
+    // instrument only commit. Preview captures must not hide a duplicate final read.
+    const choices = service.decisions(choice);
+    const withPreparedCommit = operation => jobs.recoveryBoundary.guard(config, selection, runtimeOptions, async state => {
+      const { observation } = await jobs.recoveryBoundary.observe(config, selection, runtimeOptions);
+      const base = await service.inspect(config, observation, runtimeOptions);
+      assert.equal(base.mode, 'first'); assert.equal(base.previewToken, choice.previewToken);
+      const { prepared } = await service.prepareDecision(config, base, choices, runtimeOptions);
+      const inspection = { ...base, prepared, previewToken: c.hash({ previewToken: choice.previewToken, choices }) };
+      return operation(() => service.commit(config, inspection, state, { ...runtimeOptions, firstSyncDecision: choices }));
+    });
+    await t.test('one fresh commit capture still rolls back actual ledger, audit and field writes on failure', async subtest => {
+      const beforeCommit = await snapshot(), read = repair.readRepairInput, record = ledger.recordProgressOnClient;
+      const failure = new Error('Synthetic failure after real ledger persistence'); let captures = 0, recorded = false;
+      await withPreparedCommit(async commit => {
+        subtest.mock.method(repair, 'readRepairInput', async client => { captures++; return read(client); });
+        subtest.mock.method(ledger, 'recordProgressOnClient', async (client, input) => {
+          const result = await record(client, input); recorded = true;
+          const persisted = (await client.query(`SELECT
+            (SELECT count(*)::int FROM magento_first_sync_progress WHERE session_id=$1) progress,
+            (SELECT count(*)::int FROM magento_first_sync_fields WHERE session_id=$1) fields,
+            (SELECT count(*)::int FROM audit_events WHERE event_key='magento.first_sync_progress_recorded' AND subject_id=$1::text) audits`,
+          [result.sessionId])).rows[0];
+          assert.equal(persisted.progress, 1); assert.ok(persisted.fields > 0); assert.equal(persisted.audits, 1);
+          throw failure;
+        });
+        await assert.rejects(commit(), error => error === failure);
+      });
+      assert.equal(recorded, true); assert.equal(captures, 1);
+      assert.equal(await snapshot(), beforeCommit); assert.equal(await current(), null);
+      assert.ok(traffic.every(call => call.method === 'GET'));
+    });
+    await t.test('commit rejects a changed latest receipt read after its fresh retained capture and rolls it back', async subtest => {
+      const beforeCommit = await snapshot(), read = repair.readRepairInput; let captures = 0, inserted = false;
+      await withPreparedCommit(async commit => {
+        subtest.mock.method(repair, 'readRepairInput', async client => {
+          const input = await read(client); captures++;
+          assert.equal(captures, 1);
+          const details = structuredClone((await client.query('SELECT details FROM audit_events WHERE id=$1', [admissionRoot])).rows[0].details);
+          // Even identical details cannot replace the reviewed root audit ID.
+          // This new receipt is transaction-local; the other
+          // cutover suite covers independent-connection receipt races.
+          const receipt = await require('../src/audit/audit-events').writeAuditEvent(client, {
+            mutationContext: { actorUserId: actor }, eventKey: 'product.magento_first_sync_cutover_reviewed',
+            subjectType: 'magento_first_sync_cutover_admission', subjectId: c.hash('synthetic NM changed commit receipt'), details });
+          assert.notEqual(String(receipt.id), admissionRoot);
+          inserted = true; return input;
+        });
+        await assert.rejects(commit(), { code: 'MAGENTO_FIRST_SYNC_HISTORY_ADMISSION_CHANGED' });
+      });
+      assert.equal(inserted, true); assert.equal(captures, 1);
+      assert.equal(await snapshot(), beforeCommit); assert.equal(await current(), null);
+      assert.equal(await admissionCount(), 1); assert.ok(traffic.every(call => call.method === 'GET'));
+    });
+    await t.test('successful canonical progress commit uses one fresh retained capture and preserves the admission root', async subtest => {
+      const read = repair.readRepairInput; let captures = 0;
+      const kept = await withPreparedCommit(async commit => {
+        subtest.mock.method(repair, 'readRepairInput', async client => { captures++; return read(client); });
+        return commit();
+      });
+      assert.equal(captures, 1, 'one locked eligibility read supplies the final commit evidence check');
+      assert.equal(kept.complete, false); assert.equal(kept.readyForOutbound, true);
+      assert.equal((await current()).historyAdmissionEventId, admissionRoot);
+    });
     assert.equal((await service.apply(config, choice, runtimeOptions)).receipt.alreadyApplied, true);
     const pending = await current(); assert.equal(pending.historyAdmissionEventId, admissionRoot); assert.equal(pending.session.completed_at, null);
     assert.equal(pending.fields.filter(field => field.state === seo.PENDING).length, 4);

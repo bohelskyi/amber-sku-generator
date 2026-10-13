@@ -89,6 +89,10 @@ async function baseline(client,i,history) {
     batchEventId:String(receipt.id),baselineEventId:row.cutover_baseline_event_id,deliveryVersion:row.delivery_version,evidenceHash:digest(row.evidence)}};
 }
 async function capture(client,observation,history,progress,reject=()=>null) {
+  return require('./sync-performance').measureLocalPhase(null,'retained_capture',
+    ()=>captureCurrent(client,observation,history,progress,reject));
+}
+async function captureCurrent(client,observation,history,progress,reject) {
   const i=identity(observation);
   if(!observation.raw || observation.raw.sku!==i.sku || !Number.isSafeInteger(i.remoteId) || i.remoteId<1) return reject('FIRST_SYNC_REMOTE_IDENTITY_UNPROVEN');
   if(!historyShape(history,i)) return reject('FIRST_SYNC_HISTORY_COMPONENT_UNSUPPORTED');
@@ -182,7 +186,7 @@ async function readOnClient(client,config,observation,{history,progress}={}) {
 }
 function allows(o,admission) {const p=proofs.get(admission);return !!p && p.product===o.amber.product && sameIdentity(p.envelope.identity,identity(o));}
 function rootId(admission) {return proofs.get(admission)?.root;}
-async function assertOnClient(client,config,observation,admission,{jobId=null,reviewedRecovery=false}={}) {
+async function assertCurrentOnClient(client,config,observation,admission,{jobId=null,reviewedRecovery=false}={},checkCommit=null) {
   const p=proofs.get(admission);if(!p || !allows(observation,admission)) throw changed();
   await require('./first-sync-history-admission').lockOnClient(client,{productIds:[p.envelope.identity.productId],skus:[p.envelope.identity.sku]});
   const eligibility=await require('./first-sync-eligibility').readFirstSyncEligibility(client,config,observation,{jobId,reviewedRecovery});
@@ -190,11 +194,28 @@ async function assertOnClient(client,config,observation,admission,{jobId=null,re
   // Eligibility just captured history under these locks, including the latest
   // receipt after capture. Reuse only its private proof for this observation;
   // completed/ordinary sessions without that proof still need a fresh read.
-  const fresh=allows(observation,eligibility.historyAdmission)
+  const reusable=allows(observation,eligibility.historyAdmission);
+  const fresh=reusable
     ? {admission:eligibility.historyAdmission,evidenceHash:eligibility.historyAdmissionHash}
     : await readOnClient(client,config,observation);
   if(!fresh.admission || fresh.evidenceHash!==p.evidenceHash) throw changed();
+  if(checkCommit) {
+    // Consume this exact locked first-mode read synchronously. No eligibility,
+    // callback or reusable handle escapes the combined commit assertion.
+    const current=eligibility.mode==='first' && reusable ? eligibility
+      : await require('./first-sync-eligibility').readFirstSyncEligibility(client,config,observation,{jobId,reviewedRecovery});
+    checkCommit(current);
+  }
   return fresh;
+}
+async function assertOnClient(client,config,observation,admission,options={}) {
+  return assertCurrentOnClient(client,config,observation,admission,options);
+}
+async function assertCommitOnClient(client,config,observation,admission,expectedEvidenceHash,options={}) {
+  await assertCurrentOnClient(client,config,observation,admission,options,current=>{
+    if(current.mode!=='first' || current.evidenceHash!==expectedEvidenceHash)
+      throw c.error(409,'MAGENTO_FIRST_SYNC_EVIDENCE_CHANGED','Потрібна актуальна перевірка полів першої синхронізації.');
+  });
 }
 function descriptor(envelope,observation) {
   return {scope:SCOPE,sku:envelope.identity.sku,remoteProductId:envelope.identity.remoteId,doesNotAcknowledgeExport:true,
@@ -235,4 +256,4 @@ async function apply(config,input,options={}) {
     finally{await gate.release(client).catch(()=>{});client.release();}
   });
 }
-module.exports={proposal,assessProposal,readOnClient,allows,assertOnClient,rootId,captureState,descriptor,apply};
+module.exports={proposal,assessProposal,readOnClient,allows,assertOnClient,assertCommitOnClient,rootId,captureState,descriptor,apply};

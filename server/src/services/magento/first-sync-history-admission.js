@@ -166,5 +166,17 @@ async function assertOnClient(client, config, observation, admission, options={}
   if (!fresh.admission || fresh.evidenceHash !== proof.evidenceHash) throw changed();
   return fresh;
 }
+async function assertCommitOnClient(client,config,observation,admission,expectedEvidenceHash,options={}) {
+  const cutover=require('./first-sync-cutover-admission');
+  if(cutover.allows(observation,admission)) {
+    await cutover.assertCommitOnClient(client,config,observation,admission,expectedEvidenceHash,options);
+    return;
+  }
+  // Other admission recipes keep their separate fresh eligibility boundary.
+  await assertOnClient(client,config,observation,admission,options);
+  const fresh=await require('./first-sync-eligibility').readFirstSyncEligibility(client,config,observation,options);
+  if(fresh.mode!=='first' || fresh.evidenceHash!==expectedEvidenceHash)
+    throw c.error(409,'MAGENTO_FIRST_SYNC_EVIDENCE_CHANGED','Потрібна актуальна перевірка полів першої синхронізації.');
+}
 
-module.exports = { captureOnClient, readOnClient, allows, lockOnClient, assertOnClient };
+module.exports = { captureOnClient, readOnClient, allows, lockOnClient, assertOnClient, assertCommitOnClient };

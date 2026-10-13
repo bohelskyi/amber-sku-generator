@@ -98,10 +98,13 @@ async function commit(config, inspection, state, options, {jobId=null}={}) {
     // Existing access/binding/lifecycle/product/generation locks and snapshot CAS.
     await require('./sync-job-transaction').revalidate(client,config,state,options);
     if(options.firstSyncDecision) await require('./binding-publication').administrator(client,options.actorUserId);
-    if(first.historyAdmission) await require('./first-sync-history-admission').assertOnClient(client,config,observation,first.historyAdmission,
-      {jobId,reviewedRecovery:inspection.reviewedRecovery===true});
-    const fresh=await eligibility.readFirstSyncEligibility(client,config,observation,{jobId,reviewedRecovery:inspection.reviewedRecovery===true});
-    if(fresh.mode!=='first'||fresh.evidenceHash!==first.evidenceHash) fail('EVIDENCE_CHANGED');
+    const eligibilityOptions={jobId,reviewedRecovery:inspection.reviewedRecovery===true};
+    if(first.historyAdmission) await require('./first-sync-history-admission').assertCommitOnClient(
+      client,config,observation,first.historyAdmission,first.evidenceHash,eligibilityOptions);
+    else {
+      const fresh=await eligibility.readFirstSyncEligibility(client,config,observation,eligibilityOptions);
+      if(fresh.mode!=='first'||fresh.evidenceHash!==first.evidenceHash) fail('EVIDENCE_CHANGED');
+    }
     const identity=first.progress?.session;
     const cutover=require('./first-sync-cutover-admission');
     const admissionRoot=first.progress?.historyAdmissionEventId || cutover.rootId(first.historyAdmission);
