@@ -113,6 +113,25 @@ particular field, such as positive physical weight or price. Decimal comparison
 normalizes comma/dot and trailing zeros exactly at the declared scale and unit;
 it uses no tolerance, rounding or inferred unit conversion.
 
+The confirmed `NM.neckle_size` → `dovzhyna_namysta_tochna` contract is a number
+in centimetres. For this exact approved direct information mapping in `all`
+scope, populated values compare as exact decimal strings: `77,5` and `77.50`
+are equal. The proof requires the published text-only source expression,
+successful unchanged forward value, approved binding/policy, and matching
+pinned/fresh `varchar`/`text` attribute identity, scope and set membership.
+Ordinary preview and guarded delivery readback use this same proof. Neither
+path converts through `Number`, rounds, changes raw text or alters the generic
+text comparator. Without that proof, ordinary readback retains only identical
+valid decimal raw values; this preserves the existing first CREATE path before
+its remote identity is acknowledged, under the unchanged job/lifecycle guards.
+It does not grant equivalence between different representations. Unit-bearing
+text, ranges, invalid decimals and differences
+beyond JavaScript numeric precision cannot establish equality. The bounded
+comparison accepts at most 18 significant fractional digits. Missing-value
+import/outward rules, raw receipt evidence, mapping hashes and terminal receipts
+remain unchanged. A previously pending local choice can become
+`outward_verified` after this freshly proven equality.
+
 For an explicitly active product's recognized stored `SV.weight` informational source, a comma-decimal
 mirror can be read by its direct numeric weight expression as dot-decimal grams
 only when whole positive plain decimals

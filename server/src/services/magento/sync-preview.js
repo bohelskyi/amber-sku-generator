@@ -14,6 +14,8 @@ const { syncEligibility } = require('./sync-eligibility');
 const { readDomains, planDomains } = require('./sync-preview-domains');
 const { sourceSupportChecker } = require('../export-templates/source-support');
 const { upgradeRequirement } = require('./native-characteristic-upgrade');
+const { normalizeDecimal } = require('./first-sync-field-plan');
+const { getExactLengthComparison } = require('./first-sync-projection');
 
 const MERCHANDISING = ['description', 'short_description', 'meta_title', 'meta_description'];
 const NATIVE = { sku: 'sku', name: 'name', price: 'price', weight: 'weight', product_type: 'type_id',
@@ -62,6 +64,21 @@ function comparison(expected, current, isOption = false) {
   const result = numericComparison(expected, current, true);
   return result === 'numeric_equivalent' ? 'numeric_equivalent_formatting' : result === 'rounded'
     ? 'rounded_legacy_value' : 'semantic_difference';
+}
+// The projection owns the source/mapping proof. This comparator neither changes
+// the raw payload nor lends that proof to a different expected/current value.
+function exactLengthComparison(expected, current, field) {
+  if (field?.comparison !== 'nm-exact-length-cm-v1' || field.target !== 'dovzhyna_namysta_tochna'
+    || field.scope !== 'all' || field.kind !== 'scalar' || field.type !== 'text'
+    || !field.mapping?.proven || field.unit != null
+    || !field.local?.known || !field.local.present || field.local.unit != null
+    || !field.remote?.known || !field.remote.present || field.remote.unit != null) return 'semantic_difference';
+  if ([expected, current, field.local.value, field.remote.value]
+    .some(value => typeof value === 'string' && /[\u0000-\u001f\u007f]/.test(value))) return 'semantic_difference';
+  const local = normalizeDecimal(expected), remote = normalizeDecimal(current);
+  if (local === null || remote === null || local !== normalizeDecimal(field.local.value)
+    || remote !== normalizeDecimal(field.remote.value) || local !== remote) return 'semantic_difference';
+  return equal(expected, current) ? 'exact' : 'numeric_equivalent_formatting';
 }
 function policyFor(revision, key, scope) {
   return revision?.bindings.policies.find((p) => p.bindingKey === key && p.storeCode === scope)
@@ -166,6 +183,9 @@ function planPreview(amber, schema, raw, categoryNodes, { storeCode = 'all', gen
   const payload = { sku: publicSku, custom_attributes: [] };
   const attributes = []; const diff = []; const fieldOwnership = [];
   const group = definition.groups.find((g) => g.route === product.category);
+  const exactLengthScope = raw && storeCode === 'all' && product.category === 'NM'
+    && group?.columns.includes('dovzhyna_namysta_tochna');
+  const exactLength = exactLengthScope ? getExactLengthComparison({ amber, schema, raw, domainEvidence }) : null;
   const values = current?.fields || {};
   const boundAttribute = (target) => revision?.bindings.attributes.find((a) => a.routeKey === route?.routeKey && a.rowId === 'base' && a.target === target);
   const policy = (target) => policyFor(revision, bindingKey(route?.routeKey || '', 'base', target), storeCode);
@@ -298,8 +318,11 @@ function planPreview(amber, schema, raw, categoryNodes, { storeCode = 'all', gen
     const writable = !preserve && !blocked && authority !== 'blocked' && candidate !== null && !domain;
     if (writable && native) payload[native] = candidate;
     else if (writable && attr) payload.custom_attributes.push({ attribute_code: attributeCode, value: candidate });
-    const compared = isOption ? comparison(option?.label ?? value, labels?.map((l) => l.label).join(',') ?? null, true)
-      : comparison(candidate ?? value, rawValue);
+    const compared = exactLengthScope && target === 'dovzhyna_namysta_tochna'
+      ? !populated(rawValue) ? 'absent' : exactLength ? exactLengthComparison(candidate ?? value, rawValue, exactLength)
+        : equal(candidate ?? value, rawValue) ? 'exact' : 'semantic_difference'
+      : isOption ? comparison(option?.label ?? value, labels?.map((l) => l.label).join(',') ?? null, true)
+        : comparison(candidate ?? value, rawValue);
     const same = ['exact', 'numeric_equivalent_formatting'].includes(compared)
       && (!isOption || String(rawValue) === String(candidate));
     if (writable && !same && !['sku', 'attribute_set_code'].includes(target)) {
@@ -514,4 +537,4 @@ function applyFirstSyncSeoProof(report,observation,proof,options={}) {
     ? {...d,action:'preserve',includedInPayload:false,reason:'FIRST_SYNC_MAGENTO_SEO_ACCEPTED'} : d),
     sendability:sendability(report.blockers,candidatePayload,transport)};
 }
-module.exports = { previewProduct, planPreview, preparePreview, comparison, readCategoryObservation,applyFirstSyncNameProof,applyFirstSyncSeoProof };
+module.exports = { previewProduct, planPreview, preparePreview, comparison, exactLengthComparison, readCategoryObservation,applyFirstSyncNameProof,applyFirstSyncSeoProof };

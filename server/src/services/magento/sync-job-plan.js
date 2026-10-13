@@ -1,5 +1,7 @@
 const { hash, error, safeData } = require('./binding-contract');
-const { planPreview, comparison } = require('./sync-preview');
+const { planPreview, comparison, exactLengthComparison } = require('./sync-preview');
+const { getExactLengthComparison } = require('./first-sync-projection');
+const { normalizeDecimal } = require('./first-sync-field-plan');
 const { currentAssignments } = require('./sync-preview-categories');
 
 const fail = (code) => { throw error(409, code, code); };
@@ -89,11 +91,20 @@ function replan(job, observation,{firstSyncNameProof=null,firstSyncSeoProof=null
     firstSyncSeoProof,{job,freshObservation:observation});
   if (!equal(intent(report, job.intent.version), job.intent)) fail('MAGENTO_SYNC_PLAN_CHANGED');
 }
-function matchesProduct(payload, raw, schema) {
+function matchesExactLength(expected, current, field) {
+  if (field) return ['exact', 'numeric_equivalent_formatting'].includes(exactLengthComparison(expected, current, field));
+  // A new allocated identity has no acknowledged projection proof yet. Readback
+  // can compare valid raw decimals strictly; it cannot authorize the operation.
+  return expected === current && [expected, current].every(value => normalizeDecimal(value) !== null
+    && !(typeof value === 'string' && /[\u0000-\u001f\u007f]/.test(value)));
+}
+function matchesProduct(payload, raw, schema, exactLengthScope = false, exactLength = null) {
   if (!raw) return false;
   const values = fields(raw);
   return Object.entries(payload.product).every(([k, v]) => k === 'custom_attributes'
-    ? v.every((a) => ['select', 'multiselect', 'boolean'].includes(schema?.attributes.find((x) => x.attribute_code === a.attribute_code)?.frontend_input)
+    ? v.every((a) => exactLengthScope && a.attribute_code === 'dovzhyna_namysta_tochna'
+      ? matchesExactLength(a.value, values[a.attribute_code] ?? null, exactLength)
+      : ['select', 'multiselect', 'boolean'].includes(schema?.attributes.find((x) => x.attribute_code === a.attribute_code)?.frontend_input)
       ? String(a.value) === String(values[a.attribute_code])
       : ['exact', 'numeric_equivalent_formatting'].includes(comparison(a.value, values[a.attribute_code] ?? null)))
     : k === 'extension_attributes' ? equal(links(v.category_links), links(currentLinks(raw) || []))
@@ -121,7 +132,10 @@ function matches(operation, observation) {
   if (operation.domain === 'websites') return raw.extension_attributes?.website_ids?.includes(operation.payload.productWebsiteLink.website_id) === true;
   if (operation.domain === 'storeViews') return matchesProduct(operation.payload,
     domainEvidence.english ? { sku: domainEvidence.english.sku, ...domainEvidence.english.fields } : null);
-  return matchesProduct(operation.payload, raw, observation.schema);
+  const exactLengthScope = observation.amber?.product?.category === 'NM'
+    && operation.payload.product.custom_attributes?.some(a => a.attribute_code === 'dovzhyna_namysta_tochna');
+  const exactLength = exactLengthScope ? getExactLengthComparison(observation) : null;
+  return matchesProduct(operation.payload, raw, observation.schema, exactLengthScope, exactLength);
 }
 function verifyStep(operation, observation) {
   if (!['categoryLinkDelete', 'categoryLinkSave'].includes(operation.domain)) return matches(operation, observation);

@@ -62,6 +62,36 @@ test('zero is populated data, including numeric and string zero', () => {
   assert.equal(first(field({ local: present(0), remote: present('0.000') })).status, 'equal');
   assert.equal(first(field({ local: present(0), remote: absent() })).status, 'pending_outward_confirmation');
 });
+test('NM exact-length comparison is a closed text-field contract, not generic numeric coercion', () => {
+  const exact = field({ target: 'dovzhyna_namysta_tochna', type: 'text', scale: undefined,
+    comparison: 'nm-exact-length-cm-v1', local: present('32'), remote: present('32.00') });
+  assert.equal(first(exact).reason, 'NM_EXACT_LENGTH_CM_EQUAL');
+  for (const patch of [{ comparison: 'generic-numeric' }, { comparison: null },
+    { target: 'other_length' }, { scope: 'en' }, { type: 'decimal', scale: 3 }, { unit: 'cm' },
+    { kind: 'derived', prospective: { verified: true, value: '32' } }]) {
+    invalid({ fields: [{ ...exact, ...patch }] });
+  }
+  const ordinary = { ...exact }; delete ordinary.comparison;
+  assert.equal(first(ordinary).status, 'conflict');
+  assert.equal(first({ ...exact, mapping: { proven: false } }).reason, 'MAPPING_NOT_PROVEN');
+  assert.equal(first({ ...exact, remote: { known: false } }).reason, 'REMOTE_READ_UNKNOWN');
+  assert.equal(first({ ...exact, local: { ...exact.local, unit: 'mm' } }).reason, 'LOCAL_UNIT_MISMATCH');
+  assert.equal(first({ ...exact, remote: { ...exact.remote, unit: 'cm' } }).reason, 'REMOTE_UNIT_MISMATCH');
+  for (const value of ['32\n', '\t32']) {
+    assert.equal(first({ ...exact, local: present(value) }).status, 'review_required');
+    assert.equal(first({ ...exact, remote: present(value) }).status, 'review_required');
+  }
+  assert.equal(first({ ...exact, receipt: { state: 'equal' } }).ordinaryReconciliation, true);
+});
+test('NM exact-length comparison leaves missing local and missing remote text semantics unchanged', () => {
+  const exact = field({ target: 'dovzhyna_namysta_tochna', type: 'text', scale: undefined,
+    comparison: 'nm-exact-length-cm-v1', local: absent(), remote: present('032.00') });
+  assert.equal(first(exact).status, 'imported'); assert.equal(first(exact).importValue, '032.00');
+  assert.equal(first({ ...exact, remote: present(32) }).reason, 'REMOTE_TEXT_INVALID');
+  const pending = first({ ...exact, local: present('032,00'), remote: absent() });
+  assert.equal(pending.status, 'pending_outward_confirmation'); assert.equal(pending.outwardValue, '032,00');
+  assert.equal(first({ ...exact, remote: absent() }).reason, 'REQUIRED_FIELD_EMPTY');
+});
 test('false and native boolean zero are populated data, not emptiness', () => {
   const base = field({ target: 'custom_boolean', type: 'boolean', scale: undefined });
   assert.equal(first({ ...base, remote: present(false) }).importValue, false);

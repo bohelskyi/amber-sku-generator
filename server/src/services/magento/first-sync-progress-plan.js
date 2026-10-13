@@ -40,7 +40,9 @@ function prepareProgress(projection, progress, decision = null) {
       && (!seo || require('./first-sync-local-authority').validSeoLocal(field));
     const priorKeep=prior?.state==='pending_outward_confirmation'
       && prior.source?.decision==='keep_local' && prior.mappingHash===meta.mappingHash
-      && hash(prior.before)===hash(field.local) && hash(prior.remote)===hash(field.remote);
+      && hash(prior.before)===hash(field.local) && hash(prior.remote)===hash(field.remote)
+      && !(field.comparison==='nm-exact-length-cm-v1' && result.status==='equal'
+        && result.reason==='NM_EXACT_LENGTH_CM_EQUAL');
     const selected=selections.get(key);
     if (selected && selected.choice==='keep_local' && !canKeepLocal) fail('DECISION_NOT_AVAILABLE');
     if (selected && selected.choice==='accept_remote' && !canAcceptRemote) fail('DECISION_NOT_AVAILABLE');
