@@ -2394,6 +2394,14 @@ changes invalidate the review and original session proof. Existing flag-false
 v1 proofs retain their exact representation. Dedicated price-stream counters are
 separate from full-product delivery evidence.
 
+Before a session starts, an absent exact admission receipt skips the retained
+inventory capture used only to validate an existing receipt. Proposal assessment
+still performs its full fresh capture. A new admission without a prior receipt uses
+one capture at review, one at apply inspection and one at final locked validation,
+instead of two at each boundary. Existing receipts are freshly read again after
+capture; ongoing sessions retain their root checks. No evidence is cached between
+eligibility calls or SKUs, and both remote observations remain unchanged.
+
 After admission, obtain another fresh field preview. Filled physical weight
 remains filled; a different Magento value does not become an automatic import.
 Keep or receive each eligible conflict under the existing field policy. A

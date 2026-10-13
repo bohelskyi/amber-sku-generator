@@ -157,14 +157,14 @@ test('explicit cutover-only first-sync admission preserves history and field dec
       (SELECT jsonb_agg(a ORDER BY id) FROM audit_events a) audits`)).rows[0]);
 
     const products=[];
-    for(let n=0;n<13;n++) products.push(await product());
+    for(let n=0;n<16;n++) products.push(await product());
     const svAcceptance=(await insertProductFixture(db,`INSERT INTO products(id,full_sku,category,weight,total_price_uah,details,
       magento_name_subject_ua,magento_name_subject_en)
       VALUES(1488,'SV11500004','SV',132.300,2950,'{"answers":{"weight":"132,3"},"manualPriceUah":2950}',
         'Existing Amber UA','Existing Amber EN') RETURNING id,full_sku,category,public_product_identity_id`)).rows[0];
     products.push(svAcceptance);
     await db.query('INSERT INTO product_export_revisions(product_id,has_product_snapshot) SELECT unnest($1::int[]),TRUE',
-      [[products[0].id,products[1].id,products[3].id,products[8].id,products[10].id,products[11].id,products[12].id,svAcceptance.id]]);
+      [[products[0].id,products[1].id,products[3].id,products[8].id,products[10].id,products[11].id,products[12].id,products[13].id,products[14].id,products[15].id,svAcceptance.id]]);
     await db.query(`UPDATE product_full_export_state SET evidence='{"origin":"migration_039","coverage":"unresolved_historical"}',
       business_exclusion_state='none',delivery_version=delivery_version+1`);
     await db.query('UPDATE export_state SET exported_to_product_id=$1',[products.at(-1).id]);
@@ -194,6 +194,107 @@ test('explicit cutover-only first-sync admission preserves history and field dec
     const counter=async p=>(await db.query('SELECT revision,confirmed_revision,cutover_baseline_revision,cutover_baseline_event_id,csv_retired_revision,externally_delivered_revision,delivery_version FROM product_full_export_state WHERE product_id=$1',[p.id])).rows[0];
     const auditCount=async()=> (await db.query("SELECT count(*)::int n FROM audit_events WHERE event_key='product.magento_first_sync_cutover_reviewed'")).rows[0].n;
 
+    const repair=require('../src/services/export-exposure/repair-loader');
+    const publicState=async()=>{
+      const result={};
+      for(const {tablename}of(await db.query("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename")).rows){
+        assert.match(tablename,/^[a-z_]+$/);
+        result[tablename]=(await db.query(`SELECT COALESCE(jsonb_agg(j ORDER BY j::text),'[]'::jsonb) rows
+          FROM (SELECT to_jsonb(t) j FROM public."${tablename}" t) entries`)).rows[0].rows;
+      }
+      return result;
+    };
+    const deferred=()=>{let resolve;const promise=new Promise(r=>{resolve=r;});return {promise,resolve};};
+    const reached=async promise=>{
+      let timer;try{return await Promise.race([promise,new Promise((_,reject)=>{
+        timer=setTimeout(()=>reject(Error('Synthetic eligibility race barrier timed out')),10000);
+      })]);}finally{clearTimeout(timer);}
+    };
+    await t.test('new admission captures retained inventory once per review and twice per apply with two remote observations',async subtest=>{
+      const p=products[13],before=await publicState(),captures=[],read=repair.readRepairInput;
+      let phase='review',observations=0;
+      subtest.mock.method(repair,'readRepairInput',async client=>{captures.push(phase);return read(client);});
+      const opts={...requestOptions,preview:async(...args)=>{observations++;return requestOptions.preview(...args);}};
+      const plan=await service.review(config,selection(p),opts);
+      assert.equal(plan.historyReviewAssessment.status,'available');assert.equal(plan.historyReview.legacySnapshotFlag,true);
+      assert.deepEqual(captures,['review']);assert.equal(observations,1);assert.deepEqual(await publicState(),before);
+      phase='apply';const result=await admission.apply(config,{...selection(p),previewToken:plan.historyReview.previewToken},opts);
+      assert.deepEqual(captures,['review','apply','apply']);assert.equal(observations,2);
+      assert.equal(result.receipt.alreadyApplied,false);assert.equal(result.scope,'first_sync_review_only');
+      const after=await publicState(),oldIds=new Set(before.audit_events.map(row=>row.id));
+      const added=after.audit_events.filter(row=>!oldIds.has(row.id));assert.equal(added.length,1);
+      assert.equal(added[0].event_key,'product.magento_first_sync_cutover_reviewed');
+      assert.equal(added[0].details.remoteWrites,0);assert.equal(added[0].details.enqueued,false);
+      assert.equal(added[0].details.admission.identity.productId,p.id);
+      assert.deepEqual({...after,audit_events:after.audit_events.filter(row=>oldIds.has(row.id))},before);
+    });
+    await t.test('an exact receipt appearing during capture is read again under READ COMMITTED instead of reusing the earlier receipt',async subtest=>{
+      const p=products[13],observed=await observation(p,remote),read=repair.readRepairInput,captured=deferred(),resume=deferred();
+      const reader=new Client({connectionString:target.toString()}),writer=new Client({connectionString:target.toString()});
+      await reader.connect();await writer.connect();let reading,captures=0;
+      const ids=await Promise.all([reader,writer].map(async client=>(await client.query('SELECT pg_backend_pid() pid')).rows[0].pid));assert.notEqual(ids[0],ids[1]);
+      subtest.mock.method(repair,'readRepairInput',async client=>{const input=await read(client);captures++;captured.resolve();await resume.promise;return input;});
+      try{
+        await reader.query('BEGIN READ ONLY');assert.equal((await reader.query('SHOW transaction_isolation')).rows[0].transaction_isolation,'read committed');
+        reading=admission.readOnClient(reader,config,observed).then(result=>({result}),error=>({error}));await reached(captured.promise);
+        const prior=(await writer.query(`SELECT details FROM audit_events WHERE event_key='product.magento_first_sync_cutover_reviewed'
+          AND details->'admission'->'identity'->>'publicIdentityId'=$1 ORDER BY id DESC LIMIT 1`,[String(p.public_product_identity_id)])).rows[0];
+        const details=structuredClone(prior.details);details.admission.retainedHash='0'.repeat(64);
+        await gate.begin(writer,'BEGIN');await require('../src/audit/audit-events').writeAuditEvent(writer,{
+          mutationContext:{actorUserId:actor},eventKey:'product.magento_first_sync_cutover_reviewed',
+          subjectType:'magento_first_sync_cutover_admission',subjectId:c.hash('synthetic newer invalid receipt'),details});
+        await gate.commit(writer);await gate.release(writer);const afterRace=await publicState();resume.resolve();
+        const outcome=await reading;assert.equal(outcome.error,undefined);assert.deepEqual(outcome.result,{admission:null,evidenceHash:null});
+        assert.equal(captures,1);await reader.query('COMMIT');assert.deepEqual(await publicState(),afterRace);
+      }finally{resume.resolve();if(reading)await reading;await reader.query('ROLLBACK').catch(()=>{});await reader.end();
+        await gate.rollback(writer).catch(()=>{});await gate.release(writer);await writer.end();}
+    });
+
+    for(const [index,kind]of ['legacy_flag','retained_file'].entries())await t.test(
+      'fresh final eligibility rejects '+kind+' committed by an independent connection after apply inspection',async subtest=>{
+        const p=products[14+index],read=repair.readRepairInput,inspect=service.inspect,captures=[];
+        const inspected=deferred(),resume=deferred();let phase='review',observations=0,paused=false,applying;
+        const writer=new Client({connectionString:target.toString()});await writer.connect();
+        const writerPid=(await writer.query('SELECT pg_backend_pid() pid')).rows[0].pid;
+        subtest.mock.method(repair,'readRepairInput',async client=>{
+          const input=await read(client),pid=(await client.query('SELECT pg_backend_pid() pid')).rows[0].pid;
+          captures.push({phase,pid,flag:input.revisions.find(row=>row.product_id===p.id)?.has_product_snapshot,
+            retained:input.snapshots.map(row=>row.id)});return input;
+        });
+        subtest.mock.method(service,'inspect',async(...args)=>{
+          const result=await inspect(...args);
+          if(phase==='apply_inspect'&&!paused){paused=true;assert.ok(result.historyReview);inspected.resolve();await resume.promise;}
+          return result;
+        });
+        const opts={...requestOptions,preview:async(...args)=>{observations++;return requestOptions.preview(...args);}};
+        try{
+          const plan=await service.review(config,selection(p),opts);assert.ok(plan.historyReview);
+          const count=await auditCount();phase='apply_inspect';
+          applying=admission.apply(config,{...selection(p),previewToken:plan.historyReview.previewToken},opts)
+            .then(result=>({result}),error=>({error}));
+          await reached(inspected.promise);assert.deepEqual(captures.map(row=>row.phase),['review','apply_inspect']);
+          assert.ok(captures.every(row=>row.pid!==writerPid));
+          await gate.begin(writer,'BEGIN');
+          if(kind==='legacy_flag')await writer.query('UPDATE product_export_revisions SET has_product_snapshot=FALSE WHERE product_id=$1',[p.id]);
+          else {
+            const id=randomUUID();await writer.query(`INSERT INTO export_snapshots(id,idempotency_key,from_sku,to_sku,resolved_to_sku,exported_to_product_id,
+              row_count,file_name,csv_content,status) VALUES($1,$1,$2,$2,$2,$3,1,'race.csv',$4,'generated')`,
+            [id,p.full_sku,p.id,`sku,price_uah\r\n${p.full_sku},42\r\n`]);
+          }
+          await gate.commit(writer);await gate.release(writer);
+          const afterRace=await publicState();phase='apply_final';resume.resolve();const outcome=await applying;
+          assert.equal(outcome.error?.code,'MAGENTO_FIRST_SYNC_HISTORY_ADMISSION_CHANGED');
+          assert.deepEqual(captures.map(row=>row.phase),['review','apply_inspect','apply_final']);assert.equal(observations,2);
+          assert.ok(captures.every(row=>row.pid!==writerPid));
+          if(kind==='legacy_flag')assert.deepEqual(captures.map(row=>row.flag),[true,true,false]);
+          else assert.equal(captures[2].retained.length,captures[1].retained.length+1);
+          assert.equal(await auditCount(),count);assert.equal(await session(p),undefined);
+          assert.deepEqual(await publicState(),afterRace);
+        }finally{
+          resume.resolve();if(applying)await applying;await gate.rollback(writer).catch(()=>{});
+          await gate.release(writer);await writer.end();
+        }
+      });
     await t.test('preview is read-only and explicit admission only records one scoped immutable audit',async()=>{
       const p=products[0],before=await snapshot(),original=await counter(p);
       const preview=await review(p);assert.equal(preview.mode,'review');assert.ok(preview.historyReview);
