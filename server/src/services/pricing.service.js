@@ -38,7 +38,7 @@ async function calculatePricing(
       assertUsdRateObservationCurrent(rateObservation);
       if (rateObservation.rateError) throw new Error(rateObservation.rateError);
       resolvedRateInfo = rateObservation.rateInfo;
-    } else resolvedRateInfo = rateInfo || await getUsdUahRateInfo();
+    } else resolvedRateInfo = rateInfo || await getUsdUahRateInfo({ databasePool: queryable });
   } catch (err) {
     rateError = err;
   }

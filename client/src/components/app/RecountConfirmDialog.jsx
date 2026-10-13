@@ -3,6 +3,7 @@ import { formatDecimal, formatUah } from '../../lib/formatters';
 import { getQuestionLabel } from '../../lib/answer-labels';
 import { getPresentableRecountChanges, getPresentedAnswerLabel } from '../../lib/answer-presentation';
 import { CopyAction, Dialog } from '../ui';
+import { ExchangeRateNotice } from '../ExchangeRateNotice';
 
 const PRICING_MODES = [
   { value: 'system_auto', label: 'Автоматична' },
@@ -186,6 +187,10 @@ export function RecountConfirmDialog({
               {showTargetPrice ? formatUah(priceDelta.toFixed(2)) : '—'}
             </span>
           </div>
+
+          {previewCurrent && showTargetPrice && <ExchangeRateNotice rate={preview.corrected.uahRate}
+            rateDate={preview.corrected.uahRateDate} fetchedAt={preview.corrected.uahRateFetchedAt}
+            stale={preview.corrected.uahRateStale} />}
 
           {requiresManualPrice && (
             <div className="danger-panel p-4 text-sm">

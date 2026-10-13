@@ -29,6 +29,18 @@ const {
 const { getBlockingCorrectionRequests } = require('./correction-blockers');
 const { startPhase } = require('../../observability/performance-metrics');
 
+function getPreviewCurrency(rateInfo, rateError) {
+  const error = rateInfo?.error ?? rateError;
+  return {
+    rate: rateInfo?.rate ?? null,
+    rateDate: rateInfo?.rateDate ?? null,
+    fetchedAt: rateInfo?.fetchedAt ?? null,
+    source: rateInfo?.source ?? (error ? 'unavailable' : null),
+    stale: Boolean(rateInfo?.stale),
+    error: error ? String(error.message || error) : null,
+  };
+}
+
 async function getActiveScenario(scenarioId) {
   const result = await pool.query(
     `SELECT *
@@ -100,7 +112,7 @@ async function buildRepricingPreviewState(scenarioId, options = {}) {
   const fullConfigurationToken = hashPayload([getPricingContextSnapshot(pricingContext)]);
   let rateInfo;
   try {
-    rateInfo = options.rateObservation === undefined ? await getUsdUahRateInfo() : options.rateObservation.rateInfo;
+    rateInfo = options.rateObservation === undefined ? await getUsdUahRateInfo({ databasePool: queryable }) : options.rateObservation.rateInfo;
   } catch (error) {
     rateInfo = {
       rate: null,
@@ -279,6 +291,7 @@ async function buildRepricingPreviewState(scenarioId, options = {}) {
 
   const preview = {
     scenario: getScenarioSnapshot(scenario),
+    currency: getPreviewCurrency(rateInfo, options.rateObservation?.rateError),
     customOnlyPricing,
     previewToken: getPreviewToken(scenario, applicableItems, {
       configurationToken,
@@ -356,7 +369,7 @@ async function buildGlobalRepricingPreview(options = {}) {
   const bindingScenarios = scenarios.filter((scenario) => systemCategories.has(scenario.categoryCode));
   let rateInfo;
   try {
-    rateInfo = options.rateObservation === undefined ? await getUsdUahRateInfo() : options.rateObservation.rateInfo;
+    rateInfo = options.rateObservation === undefined ? await getUsdUahRateInfo({ databasePool: queryable }) : options.rateObservation.rateInfo;
   } catch (error) {
     rateInfo = {
       rate: null,
@@ -508,6 +521,7 @@ async function buildGlobalRepricingPreview(options = {}) {
   const blockingCorrectionRequests = await getBlockingCorrectionRequests(items, queryable);
   const preview = {
     scope: REPRICING_SCOPE_GLOBAL,
+    currency: getPreviewCurrency(rateInfo, options.rateObservation?.rateError),
     customOnlyPricing,
     scenarios,
     bindingScenarios,

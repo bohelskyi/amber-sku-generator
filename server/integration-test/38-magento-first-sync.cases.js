@@ -162,8 +162,8 @@ test('first-sync coordinator preserves real names, partial progress and transact
         price: 42, custom_attributes: [{ attribute_code: 'decor_weight', value: '140' }] };
       let report;
       const previewOptions = { ...options,
-        observeRate: () => require('../src/services/currency.service').observeUsdRate({ databasePool: db,
-          fetchLive: async () => ({ rate: 40, rateDate: '2026-10-09', fetchedAt: '2026-10-09T00:00:00Z' }) }),
+        observeRate: async () => ({ rateInfo: { rate: 40, rateDate: new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Kyiv' }), fetchedAt: new Date().toISOString(),
+          source: 'fixture', stale: false, ageMs: 0, error: null }, rateError: null }),
         preview: async (config, input) => {
           report = await require('../src/services/magento/sync-preview').previewProduct(config,
             { ...input, discover: async () => schema, categoryObservation: { trees: [], categoryFailures: [] } });

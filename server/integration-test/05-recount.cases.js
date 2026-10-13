@@ -1,4 +1,5 @@
 const { requestRecount } = require('./recount-fixture');
+const { getCorrectionPreviewSignature } = require('../src/services/product/product-signatures');
 const suite = require('./suite-context');
 const {
   assert,
@@ -77,7 +78,14 @@ test('complete Size target previews identically for blank and null manual prices
 
   assert.equal(livePreview.response.status, 200, livePreview.text);
   assert.equal(continuePreview.response.status, 200, continuePreview.text);
-  assert.deepEqual(livePreview.data.corrected, continuePreview.data.corrected);
+  const { uahRateFetchedAt: liveFetchedAt, ...liveCorrected } = livePreview.data.corrected;
+  const { uahRateFetchedAt: continueFetchedAt, ...continueCorrected } = continuePreview.data.corrected;
+  for (const fetchedAt of [liveFetchedAt, continueFetchedAt]) {
+    assert.equal(typeof fetchedAt, 'string');
+    assert.equal(new Date(fetchedAt).toISOString(), fetchedAt);
+  }
+  assert.deepEqual(liveCorrected, continueCorrected);
+  assert.equal(getCorrectionPreviewSignature(livePreview.data), getCorrectionPreviewSignature(continuePreview.data));
   assert.deepEqual(livePreview.data.changes, continuePreview.data.changes);
   assert.equal(livePreview.data.priceDeltaUah, continuePreview.data.priceDeltaUah);
   assert.equal(livePreview.data.priceDeltaUsd, continuePreview.data.priceDeltaUsd);

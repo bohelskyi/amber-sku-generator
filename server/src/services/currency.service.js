@@ -1,6 +1,17 @@
 const pool = require('../db/pool');
 const { fetchJson } = require('../utils/http');
 const { nbuRateOverride, nbuMaxStaleMs } = require('../config/env');
+const { getRatePeriod, normalizeStrictRateDate } = require('./currency-rate-policy');
+const { performance } = require('node:perf_hooks');
+
+// Process-local evidence belongs to the exact returned snapshot, not its public
+// age/clock fields. Serialization or cloning cannot transfer this clock proof.
+const rateEvidence = new WeakMap();
+function rememberRateEvidence(rateInfo, startedAt, wallStartedAt) {
+  rateEvidence.set(rateInfo, { snapshot: { ...rateInfo }, startedAt, wallStartedAt,
+    ageMs: rateInfo.ageMs, elapsed: 0 });
+  return rateInfo;
+}
 
 const NBU_USD_URL =
   'https://bank.gov.ua/NBUStatService/v1/statdirectory/exchange?valcode=USD&json';
@@ -112,41 +123,34 @@ function createUsdRateProvider({
   return { getRateInfo, reset: () => { cached = null; inFlight = null; } };
 }
 
-async function fetchLiveUsdRate() {
-  if (nbuRateOverride !== null) {
+async function fetchLiveUsdRate({ date = getKyivDateString(), signal, fetchJsonImpl = fetchJson,
+  rateOverride = nbuRateOverride } = {}) {
+  if (rateOverride !== null) {
     return {
-      rate: nbuRateOverride,
+      rate: rateOverride,
       rateDate: getKyivDateString(),
       fetchedAt: new Date().toISOString(),
     };
   }
-  const data = await fetchJson(NBU_USD_URL);
+  if (normalizeStrictRateDate(date) !== date) {
+    throw Object.assign(new Error('NBU request date is invalid'), { code: 'ERR_INVALID_RATE' });
+  }
+  const url = new URL(NBU_USD_URL);
+  url.searchParams.set('date', date.replaceAll('-', ''));
+  const data = await fetchJsonImpl(url.toString(), { signal });
   const rate = data && data[0] && data[0].rate ? Number(data[0].rate) : null;
-  if (!Number.isFinite(rate) || rate <= 0) {
+  const rateDate = normalizeStrictRateDate(data?.[0]?.exchangedate);
+  if (!Array.isArray(data) || data.length !== 1 || data[0].cc !== 'USD'
+      || !Number.isFinite(rate) || rate <= 0 || !rateDate || rateDate > date) {
     const error = new Error('NBU rate missing');
     error.code = 'ERR_INVALID_RATE';
     throw error;
   }
   return {
     rate,
-    rateDate: normalizeRateDate(data[0].exchangedate),
+    rateDate,
     fetchedAt: new Date().toISOString(),
   };
-}
-
-async function loadLastKnownRate() {
-  try {
-    const result = await pool.query(
-      `SELECT rate, rate_date, fetched_at
-       FROM exchange_rate_cache
-       WHERE currency_pair = 'USD_UAH'
-       LIMIT 1`
-    );
-    return result.rows[0] || null;
-  } catch (error) {
-    if (error?.code === '42P01') return null;
-    throw error;
-  }
 }
 
 async function saveLastKnownRate(rateInfo) {
@@ -166,40 +170,90 @@ async function saveLastKnownRate(rateInfo) {
   }
 }
 
-const provider = createUsdRateProvider({
-  fetchLive: fetchLiveUsdRate,
-  loadLastKnown: loadLastKnownRate,
-  saveLastKnown: saveLastKnownRate,
-  maxStaleMs: nbuMaxStaleMs,
-});
-
-async function getUsdUahRateInfo() {
-  return provider.getRateInfo();
+// Business readers never refresh or write the cache. A background runtime owns
+// NBU retrieval; each call returns a detached, timestamped snapshot for pricing.
+async function getUsdUahRateInfo({ databasePool = pool, now, rateOverride = nbuRateOverride } = {}) {
+  const startedAt = performance.now(), wallStartedAt = Date.now();
+  if (rateOverride !== null) {
+    const current = now ? now() : new Date();
+    return rememberRateEvidence(normalizeRateInfo({ rate: rateOverride, rateDate: getKyivDateString(current), fetchedAt: current.toISOString() },
+      { source: 'nbu', now: current }), startedAt, wallStartedAt);
+  }
+  const value = (await databasePool.query(`SELECT r.rate,r.rate_date::text,r.fetched_at,
+      s.last_attempt_at,s.last_error,clock_timestamp() AS observed_at
+    FROM exchange_rate_cache r
+    LEFT JOIN exchange_rate_refresh_state s USING (currency_pair)
+    WHERE r.currency_pair='USD_UAH'`)).rows[0];
+  // Validate against the read's clock, not request start: a refresh may commit
+  // while this SELECT waits for a connection. Production uses the DB clock,
+  // matching the background publisher's timestamps.
+  const current = now ? now() : new Date(value?.observed_at || NaN);
+  const rateDate = normalizeStrictRateDate(value?.rate_date);
+  const fetchedAt = new Date(value?.fetched_at || NaN);
+  if (!(current instanceof Date) || !Number.isFinite(current.getTime())
+      || !rateDate || rateDate > getKyivDateString(current) || !Number.isFinite(fetchedAt.getTime())
+      || fetchedAt > current) {
+    throw Object.assign(new Error('Stored USD/UAH rate is unavailable; background refresh is required'), { code: 'ERR_RATE_UNAVAILABLE' });
+  }
+  const stale = getRatePeriod(fetchedAt) < getRatePeriod(current);
+  const rateInfo = normalizeRateInfo({ ...value, rateDate }, {
+    source: stale ? 'last_known_good' : 'nbu', stale, now: current,
+    error: stale ? (value.last_error || 'Scheduled USD/UAH rate refresh is pending') : null,
+  });
+  if (!rateInfo) {
+    throw Object.assign(new Error('Stored USD/UAH rate is invalid'), { code: 'ERR_RATE_UNAVAILABLE' });
+  }
+  assertUsdRateObservationCurrent({ rateInfo }, current);
+  return rememberRateEvidence(rateInfo, startedAt, wallStartedAt);
 }
 
 async function getUsdUahRate() {
   return (await getUsdUahRateInfo()).rate;
 }
 
-function assertUsdRateObservationCurrent(observation, now = new Date()) {
+function assertUsdRateObservationCurrent(observation, now) {
   const rate = observation?.rateInfo;
-  if (rate?.stale && now.getTime() - new Date(rate.fetchedAt).getTime() > nbuMaxStaleMs) {
+  if (!rate) return;
+  const invalid = () => Object.assign(new Error('Observed USD/UAH rate timestamp is invalid'), { code: 'ERR_RATE_UNAVAILABLE' });
+  const evidence = rateEvidence.get(rate);
+  let ageMs = 0, elapsedAtCheck;
+  if (evidence) {
+    if (Object.keys(evidence.snapshot).some(key => {
+      const field = Object.getOwnPropertyDescriptor(rate, key);
+      return !field || !Object.hasOwn(field, 'value') || !Object.is(field.value, evidence.snapshot[key]);
+    })) throw invalid();
+    const elapsed = performance.now() - evidence.startedAt;
+    const wallElapsed = Date.now() - evidence.wallStartedAt;
+    if (!Number.isFinite(elapsed) || elapsed < evidence.elapsed || !Number.isFinite(wallElapsed)) throw invalid();
+    // DB age and process elapsed time share no absolute wall-clock comparison.
+    // Starting before SELECT conservatively includes waiting/response latency.
+    // A wall-clock rollback cannot extend validity; a forward jump/suspend can
+    // only expire it sooner. Neither a public ageMs nor stale flag grants trust.
+    ageMs = Math.max(evidence.ageMs + elapsed - evidence.elapsed,
+      evidence.snapshot.ageMs + Math.max(elapsed, wallElapsed));
+    elapsedAtCheck = elapsed;
+  }
+  if (!evidence || now !== undefined) {
+    const fetchedAt = new Date(evidence ? evidence.snapshot.fetchedAt : rate.fetchedAt).getTime();
+    const current = now === undefined ? new Date() : now;
+    if (!(current instanceof Date) || !Number.isFinite(current.getTime())
+        || !Number.isFinite(fetchedAt) || fetchedAt > current.getTime()) throw invalid();
+    // An explicit clock may tighten a proven observation, never extend it.
+    ageMs = Math.max(ageMs, current.getTime() - fetchedAt);
+  }
+  // A wall-clock correction cannot rejuvenate an already consumed observation.
+  // Keep this high-water age private; the public snapshot stays unchanged.
+  if (evidence) { evidence.ageMs = ageMs; evidence.elapsed = elapsedAtCheck; }
+  // Even an observation that was fresh when captured can expire while waiting
+  // for a lock. The stored stale flag must never extend the existing age limit.
+  if (ageMs > nbuMaxStaleMs) {
     throw Object.assign(new Error('Observed USD/UAH fallback expired before use'), { code: 'ERR_RATE_TOO_OLD' });
   }
 }
 
-// Observe before opening a business transaction. This provider shares the normal
-// live parsing/fallback rules but cannot persist the cache (including on preview).
-async function observeUsdRate({ databasePool, fetchLive = fetchLiveUsdRate, now } = {}) {
-  const readOnlyProvider = createUsdRateProvider({
-    fetchLive,
-    loadLastKnown: async () => (await databasePool.query(
-      "SELECT rate,rate_date,fetched_at FROM exchange_rate_cache WHERE currency_pair='USD_UAH'"
-    )).rows[0] || null,
-    maxStaleMs: nbuMaxStaleMs,
-    ...(now ? { now } : {}),
-  });
-  try { return { rateInfo: await readOnlyProvider.getRateInfo(), rateError: null }; }
+// Observe before opening a business transaction, without HTTP or cache writes.
+async function observeUsdRate(options = {}) {
+  try { return { rateInfo: await getUsdUahRateInfo(options), rateError: null }; }
   catch (error) { return { rateInfo: null, rateError: String(error.message || error) }; }
 }
 
@@ -207,6 +261,7 @@ module.exports = {
   DEFAULT_MAX_STALE_MS,
   NBU_USD_URL,
   createUsdRateProvider,
+  fetchLiveUsdRate,
   getKyivDateString,
   getUsdUahRate,
   getUsdUahRateInfo,

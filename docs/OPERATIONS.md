@@ -106,6 +106,26 @@ SIGTERM/SIGINT stop new HTTP acceptance, wait for HTTP closure, close the Postgr
 
 The request pool has configurable size and connect/idle/query/statement timeouts. Migration DDL deliberately uses a separate no-query-timeout client; ordinary long-running operations still use request limits.
 
+The currency runtime owns a separate one-connection pool and refreshes the stored
+USD/UAH quote at 04:00 Europe/Kyiv (within one polling minute), or catches up after
+startup. Migration 078 adds retry metadata without creating a quote or changing
+products. Replicas share a PostgreSQL advisory lock and durable 15-minute retry
+deadline. `currency.refresh.succeeded` records the quote date and success time;
+`currency.refresh.failed` reports a bounded failure code. Inspect
+`exchange_rate_cache` and `exchange_rate_refresh_state` for the last success and
+attempt; a failed attempt never updates the successful timestamp. Business
+requests remain read-only consumers of this snapshot. On a cold start without a
+usable quote, rate-dependent calculations wait for a successful background
+refresh; liveness/readiness and existing stored prices remain independent. The
+normal seven-day fallback limit still applies. Shutdown aborts active NBU HTTP,
+drains the updater and closes its pool before the existing process deadline.
+
+Deploy migration and application code together. Old live-first application
+replicas must be stopped before starting this version: their foreground provider
+does not participate in the new refresh lock and could overwrite the day's
+snapshot. No production setting, rate override, manual cache population or
+product resynchronization is required by this change.
+
 ## Backup and restore
 
 `scripts/postgres-backup.sh` creates a timestamped custom-format archive, removes incomplete output on failure, verifies non-empty output, and checks the archive listing.

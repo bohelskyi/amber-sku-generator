@@ -20,7 +20,9 @@ async function buildCustomUsdRepricingItem(product, details, answers, rateInfo) 
     mode: 'usd_per_gram',
     usdPerGram: Number(basis.usdPerGram),
     marketingRoundingEnabled: basis.marketingRoundingEnabled,
-  }, product.weight, rateInfo);
+  // A missing captured rate is a calculation failure, never permission to read
+  // another quote for this product inside the already observed preview.
+  }, product.weight, rateInfo, { rateInfo });
   const oldPriceUah = toNullableNumber(product.total_price_uah);
   const newPriceUah = pricing.currencyPayload.totalPriceUah;
   const matrixName = details.logMessage || 'Власна ціна USD/г';

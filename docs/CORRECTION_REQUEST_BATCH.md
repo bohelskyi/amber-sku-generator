@@ -115,9 +115,9 @@ explanation text (`fetchedAt`, `uahRateFetchedAt`, `uahRateAgeMs`, `ageMs`,
 plan. Apply observes rates anew before transactions and requires the same rate,
 quote date, provider source and stale/fallback state. Fallback age limits are
 rechecked when the rate is used. Preflight cannot write `exchange_rate_cache`:
-its independent normal-semantics provider has no persistence callback, and the
-CLI connection and snapshot are read-only. No batch business transaction spans
-the NBU request. A rate change requires a new plan; the old observed rate is
+its provider only reads the persisted daily snapshot, and the CLI connection
+and snapshot are read-only. NBU retrieval belongs to the independent background
+currency runtime; batch reads never trigger HTTP. A rate change requires a new plan; the old observed rate is
 not a permanent rate override.
 
 ## Ownership, locking and recovery

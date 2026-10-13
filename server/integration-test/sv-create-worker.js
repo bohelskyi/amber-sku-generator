@@ -101,7 +101,10 @@ async function run() {
     const dot = { ...comma, answers: { ...comma.answers, weight: '12.7' } };
     const before = await protectedState();
     const a = await buildNewProductPreview(comma), b = await buildNewProductPreview(dot);
-    const comparable = ({ uahRateAgeMs: _age, ...preview }) => preview;
+    for (const preview of [a, b]) {
+      assert.equal(new Date(preview.uahRateFetchedAt).toISOString(), preview.uahRateFetchedAt);
+    }
+    const comparable = ({ uahRateAgeMs: _age, uahRateFetchedAt: _fetchedAt, ...preview }) => preview;
     assert.deepEqual(comparable(a), comparable(b), 'decimal representations must produce the same SKU, price, weight and preview token');
     assert.equal(a.weightVal, 12.7);
     assert.deepEqual(await protectedState(), before, 'preview must not write anything');
