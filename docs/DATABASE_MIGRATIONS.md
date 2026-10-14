@@ -10,7 +10,7 @@ Checksums canonicalize CRLF and lone CR to LF before hashing, so Windows and Lin
 
 ## Forward-only rule
 
-Checked-in migrations now span `000`–`078`. Migrations `000`–`077` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
+Checked-in migrations now span `000`–`079`. Migrations `000`–`078` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
 
 - never edit, reorder, rename, or replace an applied migration;
 - add the next lexically ordered forward migration;
@@ -437,3 +437,16 @@ PostgreSQL advisory lock across its bounded HTTP attempt without opening a
 transaction, then commits successful cache/state changes atomically. See
 [pricing](PRICING.md#nbu-exchange-rate-behavior) and [operations](OPERATIONS.md#health-logs-and-shutdown)
 for the 04:00 Kyiv schedule, seven-day age limit, replica transition and recovery.
+
+## 079 — canonical weight repair for every legacy SV kind
+
+[079_canonical_weight_repair_all_sv.sql](../server/migrations/079_canonical_weight_repair_all_sv.sql)
+replaces only the `sv_weight_repair_candidate` function from 072, removing its
+`souvenir = 5` (stone) scope condition and renaming the matching reason code to
+`NOT_CURRENT_LEGACY_SV`. Zero canonical weight, a positive valid recorded answer,
+legacy identity/reservation, correction, lifecycle and unfinished-delivery proofs,
+the receipt trigger and the identical-published-result check stay as in 072.
+It changes no product, receipt or delivery data, and 072's checksum is untouched.
+The preview in [the canonical weight repair runbook](CANONICAL_WEIGHT_REPAIR.md)
+now scans all current active SV products; production application remains a
+separate reviewed run.

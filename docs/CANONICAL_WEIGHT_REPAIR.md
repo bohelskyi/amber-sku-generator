@@ -11,8 +11,11 @@ Production deployment and a reviewed production run are separate decisions.
 
 ## Eligible scope
 
-The preview scans at most 1,000 current active SV products with souvenir semantic
-value `5`. It includes a row only when all of these facts are proved:
+The preview scans at most 1,000 current active SV products of any souvenir kind.
+Migration [079](../server/migrations/079_canonical_weight_repair_all_sv.sql)
+widened the original stone-only (`souvenir` semantic value `5`) scope after the
+catalog owner approved repairing every legacy SV kind on 2026-10-14; every other
+proof below is unchanged. It includes a row only when all of these facts are proved:
 
 - Canonical weight is exactly zero; the positive recorded answer has plain numeric
   syntax, at most three decimal places, fits `NUMERIC(14,3)` and satisfies the one

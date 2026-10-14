@@ -42,6 +42,9 @@ test('072 reviewed canonical weight repair preserves pricing, history and delive
       assert.equal((await db.query("SELECT checksum FROM schema_migrations WHERE name='072_reviewed_canonical_weight_repair.sql'")).rows[0].checksum,runner.getMigrationChecksum(migration));
       assert.deepEqual((await db.query("SELECT name,checksum FROM schema_migrations WHERE name<'072_' ORDER BY name")).rows,before);
       assert.equal((await db.query('SELECT count(*)::int n FROM product_weight_repair_receipts')).rows[0].n,0);
+      const widened=await fs.readFile(path.join(directory,'079_canonical_weight_repair_all_sv.sql'),'utf8');
+      assert.equal((await db.query("SELECT checksum FROM schema_migrations WHERE name='079_canonical_weight_repair_all_sv.sql'")).rows[0].checksum,runner.getMigrationChecksum(widened));
+      assert.doesNotMatch((await db.query("SELECT prosrc FROM pg_proc WHERE proname='sv_weight_repair_candidate'")).rows[0].prosrc,/souvenir/);
     });
     assert.ok((await db.query("SELECT to_regclass('product_weight_repair_receipts') name")).rows[0].name,'Checkpoint fixture must install 072 before domain tests');
     const actor=Number((await db.query("INSERT INTO application_users(status,display_name) VALUES('active','Canonical weight fixture') RETURNING id")).rows[0].id);
@@ -49,16 +52,16 @@ test('072 reviewed canonical weight repair preserves pricing, history and delive
     const actorOptions={databasePool:pool,mutationContext:{actorUserId:actor}};
     await db.query("INSERT INTO categories(code,name,requires_weight,sku_publication_mode) VALUES('SV','Souvenirs',0,'explicit')");
     const souvenir=(await db.query("INSERT INTO questions(category_code,key,label,sku_index,include_in_sku,required,input_type) VALUES('SV','souvenir','Souvenir',1,1,1,'options') RETURNING id")).rows[0].id;
-    await db.query("INSERT INTO options(question_id,value_id,sku_code,label) VALUES($1,5,'5','Stone')",[souvenir]);
+    await db.query("INSERT INTO options(question_id,value_id,sku_code,label) VALUES($1,5,'5','Stone'),($1,6,'6','Statuette')",[souvenir]);
     const question=(await db.query(`INSERT INTO questions(category_code,key,label,sku_index,include_in_sku,required,input_type,numeric_validation)
       VALUES('SV','weight','Weight',2,0,1,'text','{"kind":"decimal","unit":"g","min":0,"max":1000000,"minInclusive":false,"maxInclusive":true,"maxFractionDigits":3}') RETURNING id`)).rows[0].id;
     const schema=await require('../src/services/sku-schema.service').publishSkuSchema('SV',actorOptions);
     let sequence=0;
-    async function product(answer,weight=0) {
+    async function product(answer,weight=0,kind=5) {
       const index=++sequence; await db.query('BEGIN');
       const row=(await db.query(`INSERT INTO products(full_sku,base_sku,sequence_number,category,weight,total_price_uah,details,sku_schema_version_id,created_by_user_id)
-        VALUES($1,'SV5',$2,'SV',$3,123.45,$4::jsonb,$5,$6) RETURNING *`,
-      [`SV5-${String(index).padStart(6,'0')}`,index,weight,JSON.stringify({answers:{souvenir:5,weight:answer},manualPriceUah:123.45}),schema.id,actor])).rows[0];
+        VALUES($1,$2,$3,'SV',$4,123.45,$5::jsonb,$6,$7) RETURNING *`,
+      [`SV${kind}-${String(index).padStart(6,'0')}`,`SV${kind}`,index,weight,JSON.stringify({answers:{souvenir:kind,weight:answer},manualPriceUah:123.45}),schema.id,actor])).rows[0];
       await require('../src/services/full-product-export.service').initializeNewProduct(db,row.id);
       await db.query('INSERT INTO product_export_revisions(product_id,revision,confirmed_revision) VALUES($1,3,1)',[row.id]);
       await db.query('COMMIT'); return row;
@@ -69,6 +72,7 @@ test('072 reviewed canonical weight repair preserves pricing, history and delive
     for(const value of ['25 g','1e2','-1','0','','1.2345','100000000000','1000001',null,true,{}]) invalid.push(await product(value));
     const reserve=await product('33.3'),history=await product('16.3'),pending=await product('20.5'),stale=await product('21.5'),auditFailure=await product('22.5'),race=await product('23.5');
     const missingAudit=await product('24.5'),sideEffect=await product('26.5'),normal=await product('27.5'),configDrift=await product('28.5');
+    const statuette=await product('123',0,6),statuetteWeighed=await product('205.1',7,6);
     await db.query('UPDATE sku_registry SET first_product_id=$2 WHERE full_sku=$1',[reserve.full_sku,base.id]);
     await db.query('UPDATE products SET corrected_from_product_id=$2 WHERE id=$1',[history.id,nonzero.id]);
     const content=Buffer.alloc(32,1),photo=crypto.randomUUID();
@@ -181,6 +185,16 @@ test('072 reviewed canonical weight repair preserves pricing, history and delive
       const fresh=await service.preview(options); await db.query("UPDATE application_users SET status='disabled' WHERE id=$1",[actor]);
       const revoked=await apply(fresh,[configDrift.id]); assert.equal(revoked.counts.failed,1); assert.equal(await snapshot(configDrift.id),before);
       await db.query("UPDATE application_users SET status='active' WHERE id=$1",[actor]);
+    });
+    await t.test('079 repairs any current legacy SV kind with the same proofs, not only stones',async()=>{
+      const plan=await service.preview(options),entry=plan.entries.find(e=>e.productId===statuette.id);
+      assert.equal(entry.eligible,true); assert.equal(entry.targetWeight,'123.000');
+      assert.ok(plan.entries.find(e=>e.productId===statuetteWeighed.id).reasonCodes.includes('CANONICAL_WEIGHT_NOT_ZERO'));
+      assert.equal((await apply(plan,[statuette.id])).counts.applied,1);
+      const row=(await db.query('SELECT weight::text,details FROM products WHERE id=$1',[statuette.id])).rows[0];
+      assert.equal(row.weight,'123.000'); assert.equal(row.details.answers.weight,'123'); assert.equal(row.details.answers.souvenir,6);
+      assert.equal((await db.query('SELECT count(*)::int n FROM magento_product_sync_requests WHERE product_id=$1',[statuette.id])).rows[0].n,0);
+      assert.equal((await db.query('SELECT weight::text FROM products WHERE id=$1',[statuetteWeighed.id])).rows[0].weight,'7.000');
     });
     await t.test('explicit inverse restores only exact post-repair evidence and preserves both immutable audited receipts',async()=>{
       const rollback=await service.preview({...options,rollbackReceiptIds:[original]});
