@@ -11,6 +11,7 @@ const plan = require('./first-sync-initial-name-plan');
 const { runNameCommit } = require('./first-sync-name-commit');
 const MAX_INPUT = 4 * 1024 * 1024, MAX_REVIEW = 32 * 1024 * 1024;
 const REVIEW = 'first-sync-initial-names-review-v1', JOURNAL = 'first-sync-initial-names-journal-v1';
+const pristineFirstVersion = 1;
 const deliveryEffect = names.deliveryEffect;
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const hex = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
@@ -130,7 +131,7 @@ async function loadReview(cli, runtime, codeHash) {
   const selections = validateReview(review, scope, cli, runtime, codeHash);
   return { review, scope, selections };
 }
-async function previewItem(runtime, config, scope, item, run, authority, stopping) {
+async function previewItem(runtime, config, scope, item, run, authority, stopping, { allowPristineFirst = false } = {}) {
   let report, base;
   try {
     await authority(); if (stopping()) fail('INITIAL_NAMES_INTERRUPTED');
@@ -139,7 +140,7 @@ async function previewItem(runtime, config, scope, item, run, authority, stoppin
       onObservation: value => { observation = value; } });
     if (!observation) fail('INITIAL_NAMES_OBSERVATION_REQUIRED');
     base = await runtime.first.inspect(config, observation, run);
-    const selection = plan.selectionFor(runtime, scope, item, base, report, run);
+    const selection = plan.selectionFor(runtime, scope, item, base, report, run, { allowPristineFirst });
     await authority(); if (stopping()) fail('INITIAL_NAMES_INTERRUPTED');
     return { sku: item.sku, status: 'available', selection };
   } catch (cause) {
@@ -148,7 +149,8 @@ async function previewItem(runtime, config, scope, item, run, authority, stoppin
       ordinaryBlockers: brief(report?.blockers), firstSyncBlockers: brief(base?.blockers) };
   }
 }
-async function runItem(runtime, config, scope, selected, run, { append, authority, commit = runNameCommit, stopping = () => false }) {
+async function runItem(runtime, config, scope, selected, run, { append, authority, commit = runNameCommit,
+  stopping = () => false, allowPristineFirst = false }) {
   let entered = false, proof;
   try {
     await authority(); if (stopping()) fail('INITIAL_NAMES_INTERRUPTED');
@@ -157,7 +159,7 @@ async function runItem(runtime, config, scope, selected, run, { append, authorit
         { sku: selected.item.sku, bindingRevisionId: scope.bindingRevisionId }, run);
       const base = await runtime.first.inspect(config, observation, run);
       const item = scope.items.find(row => row.sku === selected.item.sku);
-      plan.selectionFor(runtime, scope, item, base, report, run, { expected: selected });
+      plan.selectionFor(runtime, scope, item, base, report, run, { expected: selected, allowPristineFirst });
       proof = names.commitProof(runtime, base, run);
       await authority(); if (stopping()) fail('INITIAL_NAMES_INTERRUPTED');
       await append({ type: 'prepared', sku: item.sku, scopeHash: selected.scopeHash, proof, deliveryEffect });
@@ -295,4 +297,4 @@ async function main(args = process.argv.slice(2), dependencies = {}) {
   }
 }
 if (require.main === module) main().then(code => { process.exitCode = code; });
-module.exports = { argumentsFor, createRuntime, implementationHash, validateReview, loadReview, previewItem, runItem, main, deliveryEffect };
+module.exports = { argumentsFor, createRuntime, implementationHash, validateReview, loadReview, previewItem, runItem, main, deliveryEffect, pristineFirstVersion };

@@ -39,7 +39,7 @@ function keyed(rows) {
   return new Map(rows.map(row => [key(row), row]));
 }
 
-function selectionFor(runtime, scope, item, base, report, run, { expected = null } = {}) {
+function selectionFor(runtime, scope, item, base, report, run, { expected = null, allowPristineFirst = false } = {}) {
   validateScope(scope, runtime);
   if (!scope.items.some(candidate => same(runtime, candidate, item))) fail('ITEM_OUTSIDE_SCOPE');
   const observation = base?.observation, amber = observation?.amber, product = amber?.product, first = base?.first;
@@ -57,10 +57,16 @@ function selectionFor(runtime, scope, item, base, report, run, { expected = null
     || report.bindingRevision?.id !== scope.bindingRevisionId || report.bindingRevision.state !== 'published'
     || report.evaluation?.ready !== true || report.syncEligibility?.eligible !== true)
     fail('FRESH_EVIDENCE_INVALID');
-  if (!first.historyAdmission || !runtime.admission.allows(observation, first.historyAdmission)
-    || first.admissionGuards?.protectedWork !== false || first.admissionGuards?.otherOrigin !== false) fail('HISTORY_ADMISSION_REQUIRED');
-  const historyRoot = runtime.admission.rootId(first.historyAdmission);
-  if (!counter(historyRoot) || first.progress && first.progress.historyAdmissionEventId !== historyRoot) fail('HISTORY_ADMISSION_REQUIRED');
+  if (first.admissionGuards?.protectedWork !== false || first.admissionGuards?.otherOrigin !== false) fail('HISTORY_ADMISSION_REQUIRED');
+  // A campaign may explicitly use the canonical pristine-first lane. The
+  // canonical commit rereads its eligibility hash; no admission is invented.
+  const pristine = allowPristineFirst === true && first.historyAdmission === null && first.progress === null;
+  let historyRoot = null;
+  if (!pristine) {
+    if (!first.historyAdmission || !runtime.admission.allows(observation, first.historyAdmission)) fail('HISTORY_ADMISSION_REQUIRED');
+    historyRoot = runtime.admission.rootId(first.historyAdmission);
+    if (!counter(historyRoot) || first.progress && first.progress.historyAdmissionEventId !== historyRoot) fail('HISTORY_ADMISSION_REQUIRED');
+  }
   if (!dense(report.blockers, 0, 500) || report.blockers.some(blocker => blocker?.code !== 'NAME_BASELINE_REQUIRED'))
     fail('ORDINARY_BLOCKER');
   if (!dense(observation.domainEvidence?.failures, 0, 20) || observation.domainEvidence.failures.length
