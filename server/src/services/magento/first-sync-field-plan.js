@@ -24,6 +24,7 @@ const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/;
 const RECEIPTS = new Set(['imported', 'equal', 'optional_empty', 'outward_verified', 'name_received', 'seo_received']);
 const CONTROL = /[\u0000-\u001f\u007f]/;
 const NM_EXACT_LENGTH_COMPARISON = 'nm-exact-length-cm-v1';
+const svDimensions = require('./sv-dimensions');
 function invalid() {
   throw Object.assign(new Error('Invalid bounded first-sync field evidence'),
     { code: 'FIRST_SYNC_FIELD_INPUT_INVALID', statusCode: 422 });
@@ -77,8 +78,9 @@ function validateField(field) {
     || field.kind === 'option' && field.type !== 'option'
     || field.kind !== 'option' && field.type === 'option') invalid();
   if (field.unit != null && !boundedText(field.unit, 32)) invalid();
-  if (Object.hasOwn(field, 'comparison') && (field.comparison !== NM_EXACT_LENGTH_COMPARISON
-    || field.target !== 'dovzhyna_namysta_tochna' || field.scope !== 'all'
+  if (Object.hasOwn(field, 'comparison') && (!(
+    field.comparison === NM_EXACT_LENGTH_COMPARISON && field.target === 'dovzhyna_namysta_tochna'
+    || field.comparison === svDimensions.COMPARISON && field.target === 'rozmir_suveniriv') || field.scope !== 'all'
     || field.kind !== 'scalar' || field.type !== 'text' || field.unit != null)) invalid();
   if (field.scale !== undefined && (!Number.isInteger(field.scale) || field.scale < 0 || field.scale > 18
     || field.type !== 'decimal')) invalid();
@@ -209,6 +211,11 @@ function planField(field) {
     }
     return normalizeDecimal(field.local.value) === normalizeDecimal(field.remote.value)
       ? result('equal', 'NM_EXACT_LENGTH_CM_EQUAL') : result('conflict', 'POPULATED_VALUES_DIFFER');
+  }
+  if (field.comparison === svDimensions.COMPARISON && field.local.present && field.remote.present
+    && field.local.unit == null && field.remote.unit == null
+    && svDimensions.equivalent(field.local.value, field.remote.value)) {
+    return result('equal', 'SV_DIMENSIONS_ORDERED_COMPONENTS_EQUAL');
   }
   const remote = normalized(field, field.remote);
   if (remote.reason) return result('review_required', 'REMOTE_' + remote.reason);

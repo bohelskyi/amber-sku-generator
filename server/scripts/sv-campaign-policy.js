@@ -12,6 +12,7 @@ const { normalizeDecimal } = local('./src/services/magento/first-sync-field-plan
 const { projectFirstSyncFields } = local('./src/services/magento/first-sync-projection');
 const { roundedWeight } = local('./src/services/magento/first-sync-batch-preflight');
 const { intent: canonicalIntent } = local('./src/services/magento/sync-job-plan');
+const svDimensions = local('./src/services/magento/sv-dimensions');
 const SEO = new Set(['meta_title', 'meta_description']);
 const NATIVE_CONTROLS = new Set(['status', 'visibility']);
 const RECORD = ['target', 'scope', 'state', 'before', 'remote', 'after', 'source', 'mappingHash'];
@@ -138,7 +139,11 @@ function assertPayload(payload, observation, source, { english = false, initialN
       if (SEO.has(name)) fail('SEO_PAYLOAD_DENIED');
       if (!Object.hasOwn(row, 'value') || Object.keys(row).some(field => !['attribute_code', 'value'].includes(field))) fail('PAYLOAD_INVALID');
       if (!english && name === 'decor_weight') permittedChange(name, row.value, values[name], source);
-      else if (!equivalent(row.value, values[name], attributes.get(name))
+      else if (!(!english && name === 'rozmir_suveniriv'
+        && source.fields.get('all/rozmir_suveniriv')?.comparison === svDimensions.COMPARISON
+        && source.fields.get('all/rozmir_suveniriv').mapping.proven
+        && svDimensions.equivalent(row.value, values[name]))
+        && !equivalent(row.value, values[name], attributes.get(name))
         && !((values[name] === undefined || values[name] === null || values[name] === '')
           && approvedFill(name, row.value, source, english))) fail('OTHER_FIELD_CHANGE');
     }

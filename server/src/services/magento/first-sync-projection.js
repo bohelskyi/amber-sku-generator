@@ -13,6 +13,7 @@ const { compareSchema } = require('./binding-drift');
 const ownership = require('./native-identity-ownership');
 const { isLegacySv } = require('./first-sync-legacy-inputs');
 const { planFirstSyncFields, normalizeDecimal } = require('./first-sync-field-plan');
+const svDimensions = require('./sv-dimensions');
 
 const INFORMATION = Object.freeze({ BR: ['braclet_size'], NM: ['neckle_size'],
   KL: ['exact_size'], CH: ['bead_length', 'bead_width', 'rosary_length'], SV: ['size'] });
@@ -431,6 +432,14 @@ function projectFirstSyncFields(input) {
         }
         if (!reason) comparison = NM_EXACT_LENGTH_COMPARISON;
       }
+      // Only this exact reversible SV text field gets ordered decimal-component
+      // comparison. Other text, localized fields and unproven metadata stay exact.
+      if (!reason && category === 'SV' && scope === 'all' && target === 'rozmir_suveniriv'
+        && binding?.attributeCode === target && descriptor.key === 'size' && direct.wrappers.every(wrapper => wrapper === 'text')
+        && expected?.strategy === 'scalar' && attr?.backend_type === 'varchar' && attr.frontend_input === 'text'
+        && ['global', 'store'].includes(attr.scope) && pinnedAttr && hash(attr) === hash(pinnedAttr)
+        && currentSet?.attributeCodes.includes(target) && pinnedSet?.attributeCodes.includes(target)
+        && output.verified && (!local.present || output.value === local.value)) comparison = svDimensions.COMPARISON;
       const exactNumericPair = comparison && local.known && local.present && remote.known && remote.present
         && normalizeDecimal(local.value) !== null && normalizeDecimal(remote.value) !== null;
       if (direct?.trimmed && remote.known && remote.present && (typeof remote.value !== 'string'
@@ -538,4 +547,12 @@ function getExactLengthComparison(observation) {
     return projected.fields.find(field => field.comparison === NM_EXACT_LENGTH_COMPARISON && field.mapping.proven) || null;
   } catch { return null; }
 }
-module.exports = { projectFirstSyncFields, getExactLengthComparison };
+function getSvDimensionsComparison(observation) {
+  if (observation?.amber?.product?.category !== 'SV' || !observation.raw) return null;
+  try {
+    const projected = projectFirstSyncFields({ observation: { amber: observation.amber,
+      raw: observation.raw, schema: observation.schema, domainEvidence: observation.domainEvidence } });
+    return projected.fields.find(field => field.comparison === svDimensions.COMPARISON && field.mapping.proven) || null;
+  } catch { return null; }
+}
+module.exports = { projectFirstSyncFields, getExactLengthComparison, getSvDimensionsComparison };

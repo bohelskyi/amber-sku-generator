@@ -1,6 +1,7 @@
 const { hash, error, safeData } = require('./binding-contract');
 const { planPreview, comparison, exactLengthComparison } = require('./sync-preview');
-const { getExactLengthComparison } = require('./first-sync-projection');
+const { getExactLengthComparison, getSvDimensionsComparison } = require('./first-sync-projection');
+const svDimensions = require('./sv-dimensions');
 const { normalizeDecimal } = require('./first-sync-field-plan');
 const { currentAssignments } = require('./sync-preview-categories');
 
@@ -98,13 +99,14 @@ function matchesExactLength(expected, current, field) {
   return expected === current && [expected, current].every(value => normalizeDecimal(value) !== null
     && !(typeof value === 'string' && /[\u0000-\u001f\u007f]/.test(value)));
 }
-function matchesProduct(payload, raw, schema, exactLengthScope = false, exactLength = null) {
+function matchesProduct(payload, raw, schema, exactLengthScope = false, exactLength = null, dimensionsComparison = null) {
   if (!raw) return false;
   const values = fields(raw);
   return Object.entries(payload.product).every(([k, v]) => k === 'custom_attributes'
     ? v.every((a) => exactLengthScope && a.attribute_code === 'dovzhyna_namysta_tochna'
       ? matchesExactLength(a.value, values[a.attribute_code] ?? null, exactLength)
-      : ['select', 'multiselect', 'boolean'].includes(schema?.attributes.find((x) => x.attribute_code === a.attribute_code)?.frontend_input)
+      : dimensionsComparison && a.attribute_code === 'rozmir_suveniriv' && svDimensions.equivalent(a.value, values[a.attribute_code])
+      ? true : ['select', 'multiselect', 'boolean'].includes(schema?.attributes.find((x) => x.attribute_code === a.attribute_code)?.frontend_input)
       ? String(a.value) === String(values[a.attribute_code])
       : ['exact', 'numeric_equivalent_formatting'].includes(comparison(a.value, values[a.attribute_code] ?? null)))
     : k === 'extension_attributes' ? equal(links(v.category_links), links(currentLinks(raw) || []))
@@ -135,7 +137,7 @@ function matches(operation, observation) {
   const exactLengthScope = observation.amber?.product?.category === 'NM'
     && operation.payload.product.custom_attributes?.some(a => a.attribute_code === 'dovzhyna_namysta_tochna');
   const exactLength = exactLengthScope ? getExactLengthComparison(observation) : null;
-  return matchesProduct(operation.payload, raw, observation.schema, exactLengthScope, exactLength);
+  return matchesProduct(operation.payload, raw, observation.schema, exactLengthScope, exactLength, getSvDimensionsComparison(observation));
 }
 function verifyStep(operation, observation) {
   if (!['categoryLinkDelete', 'categoryLinkSave'].includes(operation.domain)) return matches(operation, observation);
