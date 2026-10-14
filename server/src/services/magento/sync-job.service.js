@@ -64,6 +64,17 @@ async function guard(config, input, options, operation, applying = false) {
     client.release();
   }
 }
+const SCHEMA_REUSE_MS = 60000;
+// A slot belongs to one worker product pass. Copies keep a later planner from
+// mutating the retained observation.
+async function reuseSchema(slot, input, storeCode, read, now = Date.now) {
+  if (!slot || typeof slot !== 'object') return read();
+  const key = JSON.stringify([input.bindingRevisionId, storeCode]);
+  if (slot.key === key && slot.schema && now() - slot.at >= 0 && now() - slot.at <= SCHEMA_REUSE_MS) return structuredClone(slot.schema);
+  const schema = await read();
+  Object.assign(slot, { key, at: now(), schema: structuredClone(schema) });
+  return schema;
+}
 async function observe(config, input, options) {
   return measurePhase(options, 'observation', async (fetchImpl) => {
   let observation;
@@ -71,11 +82,13 @@ async function observe(config, input, options) {
   if (await standardHistorical.present(options.databasePool)) standardProof = (await options.databasePool.query(
     `SELECT * FROM historical_standard_intents WHERE public_sku=$1 AND origin_hash=$2 AND state IN ('queued','delivering','blocked') ORDER BY created_at DESC LIMIT 1`,
     [input.sku,c.originHash(config.baseUrl)])).rows[0];
-  // Automatic work retains the complete fresh schema contract, while independent
-  // set/option GETs use one bounded four-read observation budget. No cache spans
-  // enqueue, APPLY, jobs, products or publications.
-  const discover = options.automatic ? (config, reads) => measurePhase({ ...options, fetchImpl: reads.fetchImpl }, 'schema_discovery', (read) =>
-    require('./schema-audit').auditMagentoSchema(config, { ...reads, fetchImpl: read, concurrency: 4, preferInlineOptions: true })) : undefined;
+  // Automatic work reads the complete schema with one bounded four-read budget.
+  // Only the worker's own enqueue -> APPLY pass for one product may reuse it
+  // (same publication and store scope, at most SCHEMA_REUSE_MS old). Product,
+  // category and domain reads, preconditions and readbacks always stay fresh.
+  const discover = options.automatic ? (config, reads) => reuseSchema(options.schemaReuse, input, reads.storeCode,
+    () => measurePhase({ ...options, fetchImpl: reads.fetchImpl }, 'schema_discovery', (read) =>
+      require('./schema-audit').auditMagentoSchema(config, { ...reads, fetchImpl: read, concurrency: 4, preferInlineOptions: true }))) : undefined;
   const report = await (options.preview || previewProduct)(config, { databasePool: options.databasePool,
     fetchImpl, sku: input.sku, bindingRevisionId: input.bindingRevisionId,
     ...(discover ? { discover } : {}),
@@ -338,5 +351,5 @@ async function supersedeUndispatched(config, id, options) {
     client.release();
   }
 }
-module.exports = { enqueue, applyJob, supersedeUndispatched,
+module.exports = { reuseSchema, SCHEMA_REUSE_MS, enqueue, applyJob, supersedeUndispatched,
   recoveryBoundary: { guard, observe, ledger, revalidate: transaction.revalidate } };

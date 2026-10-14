@@ -78,21 +78,31 @@ Unchanged manual CLI invocations use the existing explicit APPLY contract.
 
 The SV keychain optional-size correction does not, by deployment alone, retry parked `needs_attention` requests or alter their published template. Review/publish the [corrected template and binding successor](EXPORT_TEMPLATES.md#sv-keychain-size-correction) through H3b: its exact affected/unblocked scope creates the existing bounded handoff, which advances safe request generations. If an earlier publication did not capture the product, use the existing separately reviewed broader resync. Do not change prices or fabricate sizes just to trigger reevaluation. Historical comma-decimal `SV.answers.weight` still requires the reviewed [`sv-readiness-repair.js`](../server/scripts/sv-readiness-repair.js) operation; future writes normalize that answer authoritatively. Other blockers must still pass review, and manual/dispatched/uncertain work remains protected. There is no unrestricted retry/reset or automatic resend.
 
-After normal migrations/startup, the server starts one worker lane with a separate
-five-connection PostgreSQL pool. Each poll selects at most ten due requests and
-processes them sequentially; the idle polling interval is five seconds. A product
+After normal migrations/startup, the server starts one worker with a separate
+PostgreSQL pool of `2 + 4 × MAGENTO_AUTO_SYNC_CONCURRENCY` connections (default 1, maximum 4).
+Each poll selects at most ten due requests. That many product lanes take distinct
+products from the selection; with the default of 1 they are processed sequentially.
+The idle polling interval is five seconds. Passes never overlap. A product
 session lock coordinates replicas, and the existing origin/SKU lock coordinates
 automatic and manual jobs. No product/request row lock spans remote I/O. Shutdown
 stops new claims, drains the current operation and closes the worker pool before
 the main pool; the existing ten-second force-exit leaves durable recovery evidence.
 
 The queue cadence subtracts the preceding pass's elapsed time, so a long batch does
-not add another five-second idle wait. Passes still never overlap. Automatic enqueue
-and APPLY each read the complete fresh schema. Independent topology, set memberships
-and option lists use batches of at most four GETs. Pagination retains its order.
-Each parallel audit has one 512-request/60-second budget, and failed
-batches drain before errors propagate. No schema evidence is cached between jobs,
-generations or publications. Product preconditions, dispatch markers and every
+not add another five-second idle wait. Automatic enqueue reads the complete fresh schema.
+Independent topology, set memberships and option lists use batches of at most four GETs.
+Pagination retains its order. Each parallel audit has one 512-request/60-second budget,
+and failed batches drain before errors propagate.
+
+The APPLY that immediately follows reuses a copy of the schema from its own enqueue.
+This happens only in the same worker pass for the same product, publication and store
+scope, and only for at most 60 seconds. Otherwise APPLY reads it again. No schema
+evidence is shared between products, passes, generations or publications. Product,
+category and domain observations, preconditions, dispatch markers and every
+step/final readback remain fresh. A Magento schema change inside that window is
+caught by the existing readback/verification and retains the uncertain-work protection.
+
+Product preconditions, dispatch markers and every
 step/final readback remain unchanged. Safe `magento.auto_sync.phase` logs distinguish
 schema discovery, observation, precondition reads, dispatch and readback timings;
 the immutable job/step ledger remains the delivery authority.

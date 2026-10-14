@@ -357,6 +357,28 @@ test('Magento sync durable jobs: real PostgreSQL persistence, dispatch races and
     assert.deepEqual(job.intent.operations.map((o) => o.domain), ['coreProduct', 'categoryLinkSave', 'inventory', 'websites', 'storeViews']);
     assert.equal(s.writes.at(-1).scope, 'en'); assert.equal(s.english().name, 'English name');
   });
+  await t.test('parallel worker lanes on independent connections deliver one product exactly once', async () => {
+    await pool.query('UPDATE magento_auto_sync_activation SET enabled=TRUE,installation_key=$1,actor_user_id=$2', [installationKey, actorUserId]);
+    const pools = [new Pool({ connectionString: TEST_DATABASE_URL, max: 10 }), new Pool({ connectionString: TEST_DATABASE_URL, max: 10 })];
+    try {
+      const s = await scenario({ create: true });
+      const { createAutomaticSyncWorker } = require('../src/services/magento/automatic-sync-worker');
+      const workers = pools.map((db) => createAutomaticSyncWorker(config, { databasePool: db, jobOptions: s.options, concurrency: 2 }));
+      const identity = s.product.public_product_identity_id;
+      // Both workers race for the same product; the public-identity session lock admits one.
+      await Promise.all(workers.map((worker) => worker.runProduct(identity)));
+      await workers[0].runProduct(identity); // settles a pass that only lost the lock
+      const request = (await pool.query('SELECT * FROM magento_product_sync_requests WHERE product_id=$1', [s.product.id])).rows[0];
+      assert.equal(request.state, 'synced', JSON.stringify(request));
+      assert.equal((await pool.query('SELECT count(*)::int n FROM magento_sync_jobs WHERE sku=$1', [s.input.sku])).rows[0].n, 1);
+      assert.equal(s.writes.filter((w) => w.route === 'products' && w.scope !== 'en').length, 1, 'CREATE is dispatched once');
+      assert.equal((await pool.query(`SELECT count(*)::int n FROM magento_sync_steps st JOIN magento_sync_jobs j ON j.id=st.job_id
+        WHERE j.sku=$1 AND st.state<>'verified'`, [s.input.sku])).rows[0].n, 0);
+    } finally {
+      await pool.query('UPDATE magento_auto_sync_activation SET enabled=FALSE');
+      await Promise.all(pools.map((db) => db.end()));
+    }
+  });
   await t.test('acceptance shared names establish CREATE common baseline and discover external edits without Magento writes', async () => {
     await pool.query('UPDATE magento_auto_sync_activation SET enabled=TRUE,installation_key=$1,actor_user_id=$2', [installationKey, actorUserId]);
     try {
