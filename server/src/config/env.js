@@ -168,6 +168,7 @@ function loadConfig(env = process.env) {
     nbuRateOverride: parseOptionalPositiveNumber(env, 'NBU_RATE_OVERRIDE'),
     googleTranslationApiKey: readValue(env, 'GOOGLE_TRANSLATION_API_KEY'),
     magento: parseMagentoConfig(env),
+    magentoAutoSyncConcurrency: parseInteger(env, 'MAGENTO_AUTO_SYNC_CONCURRENCY', 1, { min: 1, max: 4 }),
     nbuMaxStaleMs: parseInteger(env, 'NBU_MAX_STALE_MS', DEFAULT_NBU_MAX_STALE_MS, {
       min: 1,
     }),

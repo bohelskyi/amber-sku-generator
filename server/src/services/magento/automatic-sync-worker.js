@@ -11,7 +11,7 @@ const stale = (code) => ['MAGENTO_SYNC_AMBER_CHANGED', 'MAGENTO_SYNC_BINDING_CHA
 
 // One lane per process; session locks also serialize replicas. No product/request
 // row lock spans HTTP. This pool must be separate from the request-serving pool.
-function createAutomaticSyncWorker(config, { databasePool: db, jobOptions = {}, logger = { error() {} }, intervalMs = 5000,
+function createAutomaticSyncWorker(config, { databasePool: db, jobOptions = {}, logger = { error() {} }, intervalMs = 5000, concurrency = 1,
   now = () => performance.now() } = {}) {
   let stopping = false; let timer; let active;
   async function runProduct(publicIdentityId) {
@@ -38,7 +38,8 @@ function createAutomaticSyncWorker(config, { databasePool: db, jobOptions = {}, 
         WHERE public_product_identity_id=$1`, [publicIdentityId])).rows[0];
       if (!request || request.state === 'synced') return;
       if (!config.configured) { await attention('configuration'); return; }
-      const options = { ...jobOptions, logger, databasePool: db, actorUserId: Number(gate.actor_user_id), apply: true,
+      // schemaReuse lets this product's APPLY reuse the schema read by its own enqueue.
+      const options = { ...jobOptions, logger, databasePool: db, actorUserId: Number(gate.actor_user_id), apply: true, schemaReuse: {},
         automatic: { publicIdentityId, productId: Number(request.product_id), generation: request.desired_generation,
           installationKey: gate.installation_key } };
       require('./sync-performance').recordRequestClaim(options, request);
@@ -116,7 +117,14 @@ function createAutomaticSyncWorker(config, { databasePool: db, jobOptions = {}, 
       WHERE (state IN ('pending','syncing') AND next_attempt_at<=CURRENT_TIMESTAMP)
         OR (state='needs_attention' AND EXISTS(SELECT 1 FROM magento_sync_jobs j WHERE j.id=active_job_id AND j.state='succeeded'))
       ORDER BY next_attempt_at,public_product_identity_id LIMIT 10`)).rows;
-    for (const row of rows) { if (stopping) break; await runProduct(row.public_product_identity_id); }
+    // Lanes take distinct products from this pass. The public-identity and SKU
+    // session locks still serialize any product shared with another worker.
+    let next = 0;
+    const lane = async () => {
+      while (!stopping && next < rows.length) await runProduct(rows[next++].public_product_identity_id);
+    };
+    const lanes = Math.max(1, Math.min(4, Number.isInteger(concurrency) ? concurrency : 1, rows.length));
+    await Promise.all(Array.from({ length: lanes }, lane));
   }
   function start() {
     if (timer || active || stopping) return;
@@ -125,7 +133,7 @@ function createAutomaticSyncWorker(config, { databasePool: db, jobOptions = {}, 
       const startedAt = now();
       active = tick().catch(() => logger.error('magento.auto_sync.poll_failed', { code: 'LOCAL_WORKER_FAILURE' }))
         .finally(() => { active = null; if (!stopping) {
-          // Keep one lane and the idle cadence; long batches no longer add an
+          // Passes never overlap and keep the idle cadence; long batches no longer add an
           // unnecessary five-second sleep before selecting newly due work.
           timer = setTimeout(loop, Math.max(0, intervalMs - (now() - startedAt))); timer.unref();
         } });
