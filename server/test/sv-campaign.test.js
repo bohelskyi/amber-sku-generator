@@ -87,6 +87,27 @@ async function seal(fixture) {
     encode([{ kind: 'start', ...fixture.header }, ...fixture.rows, { kind: 'complete', ...fixture.manifest }]));
 }
 
+async function reclassify(fixture, mutateRows) {
+  mutateRows(fixture.rows);
+  fixture.manifest.subsets = [];
+  for (const route of ['ordinary', 'history', 'initial_names', 'create', 'review']) {
+    const rows = fixture.rows.filter(row => row.route === route);
+    fixture.manifest.counts[route] = rows.length;
+    if (!rows.length) continue;
+    const common = { bindingRevisionId: binding, expectedDefinitionHash: definition, installationKey: 'synthetic' };
+    const subset = ['history', 'initial_names'].includes(route) ? { ...common,
+      ...(route === 'initial_names' ? { choice: 'magento' } : {}),
+      items: rows.map(row => ({ sku: row.sku, productId: row.productId, remoteProductId: row.observedRemoteProductId })) }
+      : { ...common, route, requiresFreshActionPreview: true, items: rows.map(row => ({ sku: row.sku,
+        productId: row.productId, category: row.category, expectedRemoteProductId: row.expectedRemoteProductId,
+        observedRemoteProductId: row.observedRemoteProductId, inputIndex: row.inputIndex })) };
+    const bytes = bytesFor(subset), file = route + '-scope.json';
+    await fs.writeFile(path.join(fixture.classification, file), bytes);
+    fixture.manifest.subsets.push({ route, file, sha256: rawHash(bytes), count: rows.length });
+  }
+  await seal(fixture);
+}
+
 const load = (fixture, count = fixture.count) => runner.loadClassification(fixture.inputFile, rawHash(fixture.inputBytes),
   fixture.classification, rawHash(fixture.manifestBytes), count, runtime);
 
@@ -316,9 +337,12 @@ test('zero-progress journal writes poison the run and preserve its reconciliatio
   await assert.rejects(journals.openJournal({ directory: f.directory, mode: 'resume', header: f.header, runtime }));
 });
 
-async function productRun(t, { io = fs } = {}) {
-  const f = await sealedClassification(t), loaded = await load(f), directory = path.join(f.directory, 'run');
-  const header = journalHeader(), journal = await journals.openJournal({ directory, mode: 'run', header, runtime, io });
+async function productRun(t, { io = fs, count = 2, classifierBlockedPolicy, mutateRows } = {}) {
+  const f = await sealedClassification(t, count);
+  if (mutateRows) await reclassify(f, mutateRows);
+  const loaded = await load(f), directory = path.join(f.directory, 'run');
+  const header = { ...journalHeader(), expectedCount: count, ...(classifierBlockedPolicy === undefined ? {} : { classifierBlockedPolicy }) };
+  const journal = await journals.openJournal({ directory, mode: 'run', header, runtime, io });
   resources.get(t).push(() => journal.close());
   const state = { actions: [], localActions: [], events: [], verified: [], printed: [], stopped: false };
   const run = { databasePool: {}, actorUserId: 7, installation: 'synthetic', sensitiveValues: [], runId: journal.runId,
@@ -351,7 +375,7 @@ async function productRun(t, { io = fs } = {}) {
       state.verified.push(saved); state.events.push('verify-handoff:' + item.sku);
     },
   };
-  const hooks = { journal, stages, outbound, authority: async () => { state.events.push('authority'); }, stopping: () => state.stopped,
+  const hooks = { journal, stages, outbound, classifierBlockedPolicy, authority: async () => { state.events.push('authority'); }, stopping: () => state.stopped,
     print: value => { const row = JSON.parse(value); state.printed.push(row); state.events.push('progress:' + row.sku); } };
   return { ...f, loaded, journal, directory, header, run, config, state, stages, outbound, hooks,
     execute: () => runner.runProducts(runtime, config, loaded, run, hooks) };
@@ -579,4 +603,205 @@ for (const stage of ['prepared', 'receipt']) test('failed ' + stage + ' journal 
   await f.journal.close();
   await assert.rejects(journals.openJournal({ directory: f.directory, mode: 'resume', header: f.header, runtime }));
   assert.equal(f.state.actions.length, stage === 'prepared' ? 0 : 1);
+});
+
+const SKIP_KNOWN = 'skip-known-v1';
+const blockedExamples = [
+  { label: 'ordinary blocker', reason: 'SYNTHETIC_ORDINARY_BLOCKER', apply: row => Object.assign(row, {
+    ordinarySendable: false, ordinaryBlockers: [{ code: 'SYNTHETIC_ORDINARY_BLOCKER', target: 'synthetic-field', evidence: { fixture: true } }],
+  }) },
+  { label: 'history blocker beyond the permitted name baseline', reason: 'SYNTHETIC_HISTORY_BLOCKER', apply: row => Object.assign(row, {
+    route: 'history', eligibilityMode: 'review', inspectionMode: 'review', ordinarySendable: false,
+    ordinaryBlockers: [{ code: 'NAME_BASELINE_REQUIRED' }, { code: 'SYNTHETIC_HISTORY_BLOCKER', fixture: true }],
+    historyReviewAssessment: { status: 'available', code: 'FIRST_SYNC_LEGACY_SNAPSHOT_FLAG_REVIEW_AVAILABLE' },
+  }) },
+  ...['FIRST_SYNC_RETAINED_FILE_REVIEW_REQUIRED', 'FIRST_SYNC_DELIVERY_HISTORY_CHANGED'].map(code => ({
+    label: code, reason: code, apply: row => Object.assign(row, {
+      route: 'review', eligibilityMode: 'review', inspectionMode: 'review', reviewKind: 'history',
+      historyReviewAssessment: { status: 'blocked', code, fixture: { exact: true } },
+    }),
+  })),
+];
+
+async function originalArtifacts(fixture) {
+  const result = { input: await fs.readFile(fixture.inputFile) };
+  for (const name of await fs.readdir(fixture.classification)) result[name] = await fs.readFile(path.join(fixture.classification, name));
+  return result;
+}
+
+test('classifier blocked policy is explicit, versioned and rejected when missing, unknown or repeated', () => {
+  assert.equal(runner.argumentsFor(cliArguments()).classifierBlockedPolicy, undefined);
+  assert.equal(Object.hasOwn(runner.argumentsFor(cliArguments()), 'classifierBlockedPolicy'), false);
+  assert.equal(runner.argumentsFor([...cliArguments(), '--classifier-blocked-policy', SKIP_KNOWN]).classifierBlockedPolicy, SKIP_KNOWN);
+  for (const extra of [
+    ['--classifier-blocked-policy'], ['--classifier-blocked-policy', 'skip-known-v2'],
+    ['--classifier-blocked-policy', 'skip-all'], ['--classifier-blocked-policy', ''],
+    ['--classifier-blocked-policy', SKIP_KNOWN, '--classifier-blocked-policy', SKIP_KNOWN],
+  ]) assert.throws(() => runner.argumentsFor([...cliArguments(), ...extra]), { code: 'SV_CAMPAIGN_ARGUMENTS' });
+});
+
+for (const example of blockedExamples) test('skip-known records exact sealed evidence without action for ' + example.label, async t => {
+  const f = await productRun(t, { count: 1, classifierBlockedPolicy: SKIP_KNOWN, mutateRows: rows => example.apply(rows[0]) });
+  const original = await originalArtifacts(f), expected = clone(f.loaded.rows[0]), summary = await f.execute();
+  assert.deepEqual(summary.counts, { total: 1, queued: 0, already_pending: 0, review: 1, uncertain: 0, notChecked: 0 });
+  assert.equal(summary.complete, true);
+  const terminal = f.journal.records.find(row => row.type === 'terminal');
+  assert.equal(terminal.status, 'review'); assert.equal(terminal.reason, example.reason);
+  assert.equal(terminal.classificationDecision, SKIP_KNOWN);
+  assert.equal(terminal.classificationRowHash, c.hash(expected));
+  assert.deepEqual(terminal.classification, expected);
+  assert.deepEqual(await originalArtifacts(f), original);
+  assert.deepEqual(f.state.actions, []);
+  assert.ok(!f.state.events.some(event => /^(acquire|inspect|handoff):/.test(event)));
+  assert.deepEqual(f.state.printed, [{ sku: expected.sku, status: 'review', inputIndex: 0, checked: 1, total: 1, resumed: false }]);
+});
+
+const freshExamples = [
+  ['history with only name baseline', row => Object.assign(row, { route: 'history', eligibilityMode: 'review', inspectionMode: 'review',
+    ordinaryBlockers: [{ code: 'NAME_BASELINE_REQUIRED' }], historyReviewAssessment: { status: 'available' } })],
+  ['general review', row => Object.assign(row, { route: 'review', eligibilityMode: 'review', inspectionMode: 'review',
+    historyReviewAssessment: { status: 'blocked', code: 'SYNTHETIC_OTHER_REVIEW' } })],
+  ['first-sync field conflict', row => Object.assign(row, { route: 'review', eligibilityMode: 'first', inspectionMode: 'first',
+    fieldBlockers: [{ code: 'FIRST_SYNC_FIELD_CONFLICT', target: 'price' }] })],
+  ['pristine initial names', row => Object.assign(row, { route: 'initial_names', eligibilityMode: 'first', inspectionMode: 'first',
+    ordinaryBlockers: [{ code: 'NAME_BASELINE_REQUIRED' }], historyReviewAssessment: null })],
+  ['unknown assessment status', row => Object.assign(row, { route: 'review', eligibilityMode: 'review', inspectionMode: 'review',
+    historyReviewAssessment: { status: 'unknown', code: 'FIRST_SYNC_RETAINED_FILE_REVIEW_REQUIRED' } })],
+  ['first eligibility with review inspection', row => Object.assign(row, { route: 'review', eligibilityMode: 'first', inspectionMode: 'review',
+    historyReviewAssessment: { status: 'blocked', code: 'FIRST_SYNC_DELIVERY_HISTORY_CHANGED' } })],
+  ['review eligibility with first inspection', row => Object.assign(row, { route: 'review', eligibilityMode: 'review', inspectionMode: 'first',
+    historyReviewAssessment: { status: 'blocked', code: 'FIRST_SYNC_RETAINED_FILE_REVIEW_REQUIRED' } })],
+  ['invalid blocker codes', row => Object.assign(row, { ordinaryBlockers: [{ code: 'lowercase_invalid' }, { code: '' }, { code: 1 }] })],
+];
+
+for (const [label, mutate] of freshExamples) test('skip-known still performs fresh action stages for ' + label, async t => {
+  const f = await productRun(t, { count: 1, classifierBlockedPolicy: SKIP_KNOWN, mutateRows: rows => mutate(rows[0]) });
+  const summary = await f.execute();
+  assert.equal(summary.counts.queued, 1); assert.deepEqual(f.state.actions, [f.input.items[0].sku]);
+  assert.ok(f.state.events.includes('inspect:' + f.input.items[0].sku));
+  assert.ok(f.journal.records.filter(row => row.type === 'terminal').every(row => !Object.hasOwn(row, 'classificationDecision')));
+});
+
+test('omitting classifier blocked policy preserves fresh processing for every otherwise-skippable pattern', async t => {
+  const f = await productRun(t, { count: blockedExamples.length,
+    mutateRows: rows => rows.forEach((row, index) => blockedExamples[index].apply(row)) });
+  const summary = await f.execute();
+  assert.equal(summary.counts.queued, blockedExamples.length); assert.equal(summary.counts.review, 0);
+  assert.deepEqual(f.state.actions, f.input.items.map(row => row.sku));
+  assert.equal(Object.hasOwn(f.journal.records[0], 'classifierBlockedPolicy'), false);
+});
+
+test('exact 746-item synthetic scope records 444 skips and freshly processes all remaining 302 with complete progress', async t => {
+  const f = await productRun(t, { count: 746, classifierBlockedPolicy: SKIP_KNOWN,
+    mutateRows: rows => rows.slice(0, 444).forEach((row, index) => blockedExamples[index % blockedExamples.length].apply(row)) });
+  const before = await originalArtifacts(f), summary = await f.execute();
+  assert.deepEqual(summary.counts, { total: 746, queued: 302, already_pending: 0, review: 444, uncertain: 0, notChecked: 0 });
+  assert.equal(summary.complete, true); assert.equal(summary.deliveryConfirmed, false);
+  assert.deepEqual(f.state.actions, f.input.items.slice(444).map(row => row.sku));
+  const terminals = f.journal.records.filter(row => row.type === 'terminal');
+  assert.equal(terminals.length, 746); assert.equal(terminals.filter(row => row.classificationDecision === SKIP_KNOWN).length, 444);
+  for (let index = 0; index < 746; index++) {
+    assert.deepEqual(f.state.printed[index], { sku: f.input.items[index].sku, status: index < 444 ? 'review' : 'queued',
+      inputIndex: index, checked: index + 1, total: 746, resumed: false });
+    if (index < 444) assert.deepEqual(terminals[index].classification, f.loaded.rows[index]);
+  }
+  assert.deepEqual(await originalArtifacts(f), before);
+});
+
+for (const [saved, requested, code] of [
+  [undefined, SKIP_KNOWN, 'SV_CAMPAIGN_CLASSIFIER_BLOCKED_POLICY_CHANGED'],
+  [SKIP_KNOWN, undefined, 'SV_CAMPAIGN_CLASSIFIER_BLOCKED_POLICY_CHANGED'],
+  [SKIP_KNOWN, 'skip-known-v2', 'SV_CAMPAIGN_CLASSIFIER_BLOCKED_POLICY_INVALID'],
+]) test('direct runner rejects changed or unsupported classifier policy before authority or any journal/action work: ' + String(saved) + ' to ' + String(requested), async t => {
+    const f = await productRun(t, { classifierBlockedPolicy: saved });
+    f.hooks.classifierBlockedPolicy = requested;
+    const before = clone(f.journal.records);
+    await assert.rejects(f.execute(), { code });
+    assert.deepEqual(f.state.events, []); assert.deepEqual(f.journal.records, before);
+  });
+
+for (const initialPolicy of [undefined, SKIP_KNOWN]) test('real main and journal pin ' + String(initialPolicy) + ' policy across resume in both directions', async t => {
+  const f = await sealedClassification(t, 1); await reclassify(f, rows => blockedExamples[0].apply(rows[0]));
+  const output = path.join(f.directory, 'main-run'), errors = [], actions = [];
+  const deployed = { ...runtime, first: { applyWithPreparedValidation() {} }, controlled: { handoffExclusivityVersion: 1 },
+    initialNames: { pristineFirstVersion: 1 }, pool: { databaseSecrets: () => [] } };
+  const dependencies = { env: {}, runtime: deployed, config: { configured: true, baseUrl: 'https://synthetic-main.invalid' },
+    pool: { query: async sql => { assert.equal(sql, 'SELECT current_database() AS name'); return { rows: [{ name: 'sv_campaign_test' }] }; } },
+    readAuthority: async () => clone(publication), implementationHash: async () => '9'.repeat(64),
+    stages: { advance: async () => { actions.push('fresh'); return { status: 'review', reason: 'SYNTHETIC_FRESH_REVIEW' }; } },
+    outbound: { acquireLane: async () => { actions.push('acquire'); return { status: 'acquired', publicIdentityId: '1', release: async () => {} }; },
+      handoff: () => assert.fail('Synthetic main fixture stops at fresh review') },
+    fetchImpl: () => assert.fail('Synthetic main must never use a network'), print: () => {}, printError: value => errors.push(JSON.parse(value)) };
+  const args = (mode, policy) => ['--mode', mode, '--server-root', path.join(__dirname, '..'), '--input', f.inputFile,
+    '--input-sha256', rawHash(f.inputBytes), '--classification', f.classification, '--classification-sha256', rawHash(f.manifestBytes),
+    '--expected-count', '1', '--output', output, '--expected-database', 'sv_campaign_test', '--actor-id', '7', '--installation-key', 'synthetic',
+    ...(policy === undefined ? [] : ['--classifier-blocked-policy', policy])];
+  assert.equal(await runner.main(args('run', initialPolicy), dependencies), 2, JSON.stringify(errors));
+  const file = path.join(output, 'journal.jsonl'), bytes = await fs.readFile(file);
+  const records = journals.parseJournal(bytes, runtime).map(row => row.record);
+  assert.equal(Object.hasOwn(records[0], 'classifierBlockedPolicy'), initialPolicy !== undefined);
+  assert.equal(records[0].classifierBlockedPolicy, initialPolicy);
+  assert.deepEqual(actions, initialPolicy === undefined ? ['acquire', 'fresh'] : []);
+  actions.length = 0;
+  assert.equal(await runner.main(args('resume', initialPolicy === undefined ? SKIP_KNOWN : undefined), dependencies), 1);
+  assert.equal(errors.at(-1).code, 'SV_CAMPAIGN_RUN_CHANGED');
+  assert.deepEqual(actions, []); assert.deepEqual(await fs.readFile(file), bytes);
+  assert.equal(await runner.main(args('resume', initialPolicy), dependencies), 2);
+  assert.deepEqual(actions, []);
+});
+
+test('a successful local receipt is verified and continued freshly despite a skippable historical classifier row', async t => {
+  const f = await productRun(t, { count: 1, classifierBlockedPolicy: SKIP_KNOWN, mutateRows: rows => blockedExamples[0].apply(rows[0]) });
+  const sku = f.input.items[0].sku, prepared = { proof: 'synthetic-local-proof' };
+  await f.journal.append({ type: 'prepared', stage: 'names', sku, prepared });
+  await f.journal.append({ type: 'receipt', stage: 'names', sku, prepared, receipt: { status: 'recorded' } });
+  const summary = await f.execute();
+  assert.equal(summary.counts.queued, 1); assert.deepEqual(f.state.actions, [sku]);
+  assert.ok(f.state.events.indexOf('verify-local:' + sku) < f.state.events.indexOf('inspect:' + sku));
+  assert.equal(f.state.verified.length, 1);
+  assert.equal(Object.hasOwn(f.journal.records.find(row => row.type === 'terminal'), 'classificationDecision'), false);
+});
+
+for (const prior of ['handoff', 'pending', 'blocked']) test('classifier skip preserves existing ' + prior + ' resume semantics', async t => {
+  const f = await productRun(t, { count: 1, classifierBlockedPolicy: SKIP_KNOWN, mutateRows: rows => blockedExamples[0].apply(rows[0]) });
+  const sku = f.input.items[0].sku, stage = prior === 'handoff' ? 'handoff' : 'names', prepared = { command: 'synthetic' };
+  await f.journal.append({ type: 'prepared', stage, sku, prepared });
+  if (prior !== 'pending') await f.journal.append({ type: 'receipt', stage, sku, prepared,
+    receipt: prior === 'blocked' ? { status: 'blocked', code: 'SYNTHETIC_PRIOR_BLOCK' } : { status: 'queued' } });
+  const summary = await f.execute(), terminal = f.journal.records.find(row => row.type === 'terminal');
+  assert.equal(terminal.status, prior === 'handoff' ? 'queued' : prior === 'pending' ? 'uncertain' : 'review');
+  assert.equal(Object.hasOwn(terminal, 'classificationDecision'), false);
+  assert.equal(summary.counts.notChecked, 0); assert.deepEqual(f.state.actions, []);
+  assert.ok(!f.state.events.some(event => /^(acquire|inspect):/.test(event)));
+  assert.equal(f.state.verified.length, prior === 'handoff' ? 1 : 0);
+  if (prior === 'blocked') assert.equal(terminal.reason, 'SYNTHETIC_PRIOR_BLOCK');
+});
+
+test('authority failure after a classified skip stops the untouched tail and counts only that durable skip', async t => {
+  const f = await productRun(t, { classifierBlockedPolicy: SKIP_KNOWN, mutateRows: rows => rows.forEach(blockedExamples[0].apply) });
+  let calls = 0;
+  f.hooks.authority = async () => { if (++calls === 2) throw Object.assign(Error('Synthetic authority loss'), { code: 'ECONNRESET' }); };
+  const summary = await f.execute();
+  assert.equal(summary.globalFailure, 'ECONNRESET'); assert.equal(summary.counts.review, 1); assert.equal(summary.counts.notChecked, 1);
+  assert.equal(f.state.printed.length, 1); assert.equal(f.state.printed[0].checked, 1); assert.deepEqual(f.state.actions, []);
+});
+
+test('classified skip fsync failure never reports durable progress or processes the tail', async t => {
+  let failed = false;
+  const io = { ...fs, open: async (...args) => {
+    const handle = await fs.open(...args); if (!String(args[0]).endsWith('journal.jsonl')) return handle;
+    return wrapHandle(handle, {
+      write: async (buffer, offset, length, position) => {
+        if (buffer.subarray(offset, offset + length).toString().includes('"classificationDecision":"skip-known-v1"')) failed = true;
+        return handle.write(buffer, offset, length, position);
+      },
+      sync: async () => { if (failed) throw Object.assign(Error('Synthetic skip fsync failure'), { code: 'EIO' }); await handle.sync(); },
+    });
+  } };
+  const f = await productRun(t, { io, classifierBlockedPolicy: SKIP_KNOWN, mutateRows: rows => rows.forEach(blockedExamples[0].apply) });
+  await assert.rejects(f.execute(), error => error.journalFailure === true);
+  assert.deepEqual(f.state.actions, []); assert.deepEqual(f.state.printed, []);
+  assert.equal(f.state.events.filter(event => event === 'authority').length, 1);
+  await f.journal.close();
+  await assert.rejects(journals.openJournal({ directory: f.directory, mode: 'resume', header: f.header, runtime }));
 });

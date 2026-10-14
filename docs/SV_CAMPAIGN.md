@@ -114,8 +114,39 @@ state and authorize automatic full-product delivery. Its own Magento transport
 accepts GET only. There is no campaign preview mode; the separate classifier is
 the read-only command.
 
+Optionally add `--classifier-blocked-policy skip-known-v1` to retain known
+negative sealed-classifier evidence as terminal review without a fresh product
+read. Omitting this pair preserves the default processing behavior. The opt-in
+matches only these three cases:
+
+- `route: ordinary` with a valid code in `ordinaryBlockers`.
+- `route: history` with a valid code in `ordinaryBlockers` other than
+  `NAME_BASELINE_REQUIRED`.
+- `route: review`, both `eligibilityMode` and `inspectionMode` equal to `review`,
+  and `historyReviewAssessment.status: blocked` with code exactly
+  `FIRST_SYNC_RETAINED_FILE_REVIEW_REQUIRED` or
+  `FIRST_SYNC_DELIVERY_HISTORY_CHANGED`.
+
+For the first two cases a valid code matches `[A-Z0-9_]{1,160}`; the first
+matching code becomes the original review reason. This check follows saved
+receipt verification and recovery handling, applies only when the product has
+no prior receipts, and precedes product-lane acquisition. Its terminal record
+keeps `status: review`, the original reason, `classificationDecision: skip-known-v1`,
+the full copied `classification` row and its
+`classificationRowHash`. It performs no product action. These review outcomes
+remain in the original input accounting and advance `checked`; candidates that
+do not match still require every fresh guard. Neither result establishes
+readiness or adds price, weight or source-repair authority.
+
+This standalone-helper delta uses the required PR80 runtime capabilities above;
+it requires no additional runtime change. Review the new helper and start it
+with a new output directory. The implementation hash is pinned: do not replace
+the helper in a started run or use a new run to replay unresolved prior work.
+
 Resume a clean interrupted checkpoint with the original files, hashes, runtime,
-actor, policy and output directory. Change only the mode:
+actor, policy and output directory. If the original command included
+`--classifier-blocked-policy skip-known-v1`, include the same pair on resume;
+otherwise leave it omitted. Change only the mode:
 
 ```sh
 node /private/reviewed-checkout/server/scripts/sv-campaign.js \
@@ -136,7 +167,8 @@ The run directory contains `scope.json`, `classifier-manifest.json`,
 `journal.jsonl` and an exclusive `run.lock` while open. The journal start record
 pins the raw input and classifier manifest hashes, classifier journal hash,
 publication, actor, database, installation, expected count, policy version and
-implementation hash. Every JSONL envelope has `seq`, `previousHash`, `record` and
+implementation hash, plus the optional classifier-blocked policy. Every JSONL
+envelope has `seq`, `previousHash`, `record` and
 `hash`; every write is fsynced. Maximum journal size is 64 MiB and maximum record
 size is 4 MiB. POSIX also fsyncs directory entries. Windows does not provide that
 directory-fsync guarantee here.

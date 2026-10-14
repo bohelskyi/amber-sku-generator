@@ -7,6 +7,7 @@ const discovery = require('./first-sync-local-discovery');
 const journalFiles = require('./sv-campaign-journal');
 const stagesDefault = require('./sv-campaign-stages');
 const POLICY = 'sv-manager-v1';
+const SKIP_KNOWN = 'skip-known-v1';
 const ROUTES = ['ordinary', 'history', 'initial_names', 'create', 'review'];
 const STAGES = ['history', 'names', 'fields', 'equal', 'handoff'];
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -19,7 +20,8 @@ const safeCode = error => typeof error?.code === 'string' && /^[A-Z0-9_]{1,160}$
   ? error.code : 'SV_CAMPAIGN_FAILED';
 const HELP = 'node sv-campaign.js --mode run|resume --server-root /app --input ORIGINAL.json --input-sha256 RAW_SHA256 '
   + '--classification CLASSIFIER_DIRECTORY --classification-sha256 RAW_MANIFEST_SHA256 --expected-count 746 '
-  + '--output RUN_DIRECTORY --expected-database amber --actor-id 1 --installation-key amber\n'
+  + '--output RUN_DIRECTORY --expected-database amber --actor-id 1 --installation-key amber '
+  + '[--classifier-blocked-policy skip-known-v1]\n'
   + 'Exact SV workflow: fresh scoped history, initial Magento names, Manager price and proven rounded physical weight, '
   + 'then canonical controlled outbound handoff. Local writes and automatic delivery are possible. '
   + 'No direct Magento writes, no unresolved-work replay, no worker or application startup.';
@@ -27,7 +29,8 @@ function argumentsFor(args) {
   if (args.length === 1 && args[0] === '--help') return { help: true };
   const names = { '--mode': 'mode', '--server-root': 'serverRoot', '--input': 'input', '--input-sha256': 'inputHash',
     '--classification': 'classification', '--classification-sha256': 'classificationHash', '--expected-count': 'count',
-    '--output': 'output', '--expected-database': 'database', '--actor-id': 'actor', '--installation-key': 'installation' }, out = {};
+    '--output': 'output', '--expected-database': 'database', '--actor-id': 'actor', '--installation-key': 'installation',
+    '--classifier-blocked-policy': 'classifierBlockedPolicy' }, out = {};
   for (let index = 0; index < args.length; index += 2) {
     const key = names[args[index]], value = args[index + 1];
     if (!key || Object.hasOwn(out, key) || typeof value !== 'string' || !value.trim()
@@ -36,6 +39,7 @@ function argumentsFor(args) {
   }
   if (!['run', 'resume'].includes(out.mode) || !out.serverRoot || !out.input || !out.classification || !out.output
     || !out.database || !out.installation || !hex(out.inputHash) || !hex(out.classificationHash)
+    || (out.classifierBlockedPolicy !== undefined && out.classifierBlockedPolicy !== SKIP_KNOWN)
     || !/^[1-9][0-9]*$/.test(out.count || '') || !Number.isSafeInteger(Number(out.count)) || Number(out.count) > 2000
     || !/^[1-9][0-9]*$/.test(out.actor || '') || !Number.isSafeInteger(Number(out.actor))) fail('SV_CAMPAIGN_ARGUMENTS');
   out.count = Number(out.count); out.actor = Number(out.actor); out.serverRoot = path.resolve(out.serverRoot);
@@ -137,8 +141,27 @@ function progress(records, input, runtime) {
   }
   return result;
 }
+function knownClassifierBlocker(row) {
+  // Negative sealed evidence only: this never establishes present readiness.
+  // In particular, other review routes can still contain actionable first-sync work.
+  if (['ordinary', 'history'].includes(row.route) && Array.isArray(row.ordinaryBlockers)) {
+    return row.ordinaryBlockers.find(blocker => typeof blocker?.code === 'string'
+      && /^[A-Z0-9_]{1,160}$/.test(blocker.code)
+      && (row.route === 'ordinary' || blocker.code !== 'NAME_BASELINE_REQUIRED'))?.code;
+  }
+  const assessment = row.historyReviewAssessment;
+  if (row.route === 'review' && row.eligibilityMode === 'review' && row.inspectionMode === 'review'
+    && assessment?.status === 'blocked'
+    && ['FIRST_SYNC_RETAINED_FILE_REVIEW_REQUIRED', 'FIRST_SYNC_DELIVERY_HISTORY_CHANGED'].includes(assessment.code))
+    return assessment.code;
+  return undefined;
+}
 async function runProducts(runtime, config, loaded, run, { journal, authority, stopping = () => false,
-  stages = stagesDefault, outbound, print = () => {} }) {
+  stages = stagesDefault, outbound, print = () => {}, classifierBlockedPolicy }) {
+  if (classifierBlockedPolicy !== undefined && classifierBlockedPolicy !== SKIP_KNOWN)
+    fail('SV_CAMPAIGN_CLASSIFIER_BLOCKED_POLICY_INVALID');
+  if (journal.records[0]?.classifierBlockedPolicy !== classifierBlockedPolicy)
+    fail('SV_CAMPAIGN_CLASSIFIER_BLOCKED_POLICY_CHANGED');
   const scope = { bindingRevisionId: loaded.input.bindingRevisionId, expectedDefinitionHash: loaded.input.expectedDefinitionHash,
     installationKey: run.installation, publicationHash: loaded.manifest.publication.publicationHash },
     states = progress(journal.records, loaded.input, runtime);
@@ -182,6 +205,14 @@ async function runProducts(runtime, config, loaded, run, { journal, authority, s
       if (prior.pending.size) {
         await terminal({ type: 'terminal', sku: item.sku, status: 'uncertain', reason: 'SV_CAMPAIGN_UNRESOLVED_INTENT',
           stages: [...prior.pending.keys()] });
+        continue;
+      }
+      const classifiedBlocker = classifierBlockedPolicy === SKIP_KNOWN && prior.receipts.length === 0
+        ? knownClassifierBlocker(classified) : undefined;
+      if (classifiedBlocker) {
+        await terminal({ type: 'terminal', sku: item.sku, status: 'review', reason: classifiedBlocker,
+          classificationDecision: SKIP_KNOWN, classificationRowHash: runtime.c.hash(classified),
+          classification: structuredClone(classified) });
         continue;
       }
       if (!Number.isSafeInteger(item.remoteProductId) || item.remoteProductId < 1 || classified.route === 'create'
@@ -302,6 +333,7 @@ async function main(args = process.argv.slice(2), dependencies = {}) {
     const header = { contract: 'sv-campaign-v1', scopeSha256: cli.inputHash, classifierSha256: cli.classificationHash,
       classifierJournalSha256: loaded.classifierJournalSha256, actorUserId: cli.actor, database: cli.database,
       installationKey: cli.installation, policyVersion: POLICY, expectedCount: cli.count, publication: loaded.manifest.publication,
+      ...(cli.classifierBlockedPolicy ? { classifierBlockedPolicy: cli.classifierBlockedPolicy } : {}),
       implementationSha256: await (dependencies.implementationHash || implementationHash)(cli.serverRoot, runtime, io) };
     journal = await journalFiles.openJournal({ directory: cli.output, mode: cli.mode, header, runtime, io });
     run.runId = journal.runId; run.requestId = journal.runId;
@@ -317,7 +349,7 @@ async function main(args = process.argv.slice(2), dependencies = {}) {
     await journalFiles.syncDirectory(io, cli.output);
     process.on('SIGINT', stop); process.on('SIGTERM', stop);
     const summary = await runProducts(runtime, config, loaded, run, { journal, authority, stopping: () => interrupted,
-      stages: dependencies.stages || stagesDefault, outbound, print });
+      stages: dependencies.stages || stagesDefault, outbound, print, classifierBlockedPolicy: cli.classifierBlockedPolicy });
     print(JSON.stringify({ output: cli.output, ...summary }));
     await journal.close(); journal = null;
     return summary.complete && !summary.counts.review && !summary.counts.uncertain ? 0 : 2;
