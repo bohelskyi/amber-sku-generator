@@ -488,9 +488,17 @@ async function previewProduct(config, { databasePool, fetchImpl, storeCode = 'al
   let raw = null;
   try { raw = await client.findProductBySku(publicSku); }
   catch (cause) { if (cause.code !== 'MAGENTO_PRODUCT_NOT_FOUND') throw cause; }
-  const { trees, categoryFailures } = categoryObservation || await readCategoryObservation(client, schema);
-  const domainEvidence = await readDomains(config, { client, schema, sku: publicSku, raw,
-    expected: evaluate(amber, amber.product), fetchImpl });
+  // Categories and domains depend only on this fresh schema/product observation.
+  // One category GET plus at most three domain GETs stays within four in flight.
+  // Drain both branches and retain category-first failure precedence.
+  const reads = await Promise.allSettled([
+    Promise.resolve().then(() => categoryObservation || readCategoryObservation(client, schema)),
+    Promise.resolve().then(() => readDomains(config, { client, schema, sku: publicSku, raw,
+      expected: evaluate(amber, amber.product), fetchImpl })),
+  ]);
+  const failed = reads.find(read => read.status === 'rejected');
+  if (failed) throw failed.reason;
+  const [{ trees, categoryFailures }, domainEvidence] = reads.map(read => read.value);
   const report = planPreview(amber, schema, raw, indexTrees(trees), { storeCode, generatedAt: now(), domainEvidence });
   if (categoryFailures.length) {
     report.categories.readFailures = categoryFailures;

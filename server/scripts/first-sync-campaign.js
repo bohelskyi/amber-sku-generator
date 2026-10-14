@@ -53,7 +53,7 @@ function expectedReceipt(runtime, command, result) {
     && runtime.c.hash(result.receipt.fields) === runtime.c.hash(command.choices.map(field => ({
       target: field.target, scope: field.scope, state: 'pending_outward_confirmation' })));
 }
-async function validateDecision(runtime, config, selected, base, report, choices, run) {
+function validateDecisionFacts(runtime, selected, base, report, choices) {
   if (runtime.c.hash(choices) !== runtime.c.hash(selected.command.choices) || base.previewToken !== selected.command.previewToken)
     fail('CAMPAIGN_CHOICE_CHANGED');
   runtime.batch.validatePacketDecision(base, report, selected.request, selected.item, choices);
@@ -66,7 +66,8 @@ async function validateDecision(runtime, config, selected, base, report, choices
     if (rows.length !== 1 || rows[0].local?.known !== true || rows[0].local.present !== true
       || rows[0].remote?.known !== true || rows[0].remote.present !== true) fail('CAMPAIGN_EMPTY_OR_UNKNOWN_FIELD');
   }
-  const { prepared } = await runtime.first.prepareDecision(config, base, choices, run);
+}
+function validatePreparedDecision(choices, prepared) {
   if (!Array.isArray(prepared?.rows) || prepared.blockers?.length || prepared.readyForOutbound !== true || prepared.complete !== false)
     fail('CAMPAIGN_REMAINING_BLOCKERS');
   if (prepared.rows.some(row => !row.received && ['imported', 'name_received'].includes(row.record.state)))
@@ -77,8 +78,13 @@ async function validateDecision(runtime, config, selected, base, report, choices
       || rows[0].record.source?.decision !== 'keep_local') fail('CAMPAIGN_SELECTED_TRANSITION_CHANGED');
   }
 }
+async function validateDecision(runtime, config, selected, base, report, choices, run) {
+  validateDecisionFacts(runtime, selected, base, report, choices);
+  const { prepared } = await runtime.first.prepareDecision(config, base, choices, run);
+  validatePreparedDecision(choices, prepared);
+}
 async function runItem(runtime, config, selected, run, { append, authority, stopping = () => false }) {
-  let entered = false, validated = false, authorityChecked = false;
+  let entered = false, factsValidated = false, validated = false, authorityChecked = false;
   try {
     if (stopping()) fail('CAMPAIGN_INTERRUPTED');
     await authority(); authorityChecked = true;
@@ -87,12 +93,23 @@ async function runItem(runtime, config, selected, run, { append, authority, stop
       return { sku: selected.item.sku, commandSha256: selected.commandSha256, status: 'blocked', code: 'CAMPAIGN_INTERRUPTED' };
     }
     entered = true;
-    const result = await runtime.first.apply(config, selected.command, { ...run, validateFirstSyncDecision: async (base, report, choices) => {
-      await validateDecision(runtime, config, selected, base, report, choices, run);
+    const preparedValidation = typeof runtime.first.applyWithPreparedValidation === 'function';
+    const validate = async (base, report, choices) => {
+      if (preparedValidation) validateDecisionFacts(runtime, selected, base, report, choices);
+      else await validateDecision(runtime, config, selected, base, report, choices, run);
       if (stopping()) fail('CAMPAIGN_INTERRUPTED');
-      validated = true;
-    } });
-    if (!validated || !expectedReceipt(runtime, selected.command, result)) throw Error('Unconfirmed canonical receipt');
+      factsValidated = true;
+      if (!preparedValidation) validated = true;
+    };
+    const result = await (preparedValidation ? runtime.first.applyWithPreparedValidation : runtime.first.apply)(config, selected.command,
+      { ...run, validateFirstSyncDecision: validate,
+        ...(preparedValidation ? { validatePreparedFirstSyncDecision: prepared => {
+          if (!factsValidated) fail('CAMPAIGN_FRESH_VALIDATION_REQUIRED');
+          validatePreparedDecision(selected.command.choices, prepared);
+          if (stopping()) fail('CAMPAIGN_INTERRUPTED');
+          validated = true;
+        } } : {}) });
+    if (!factsValidated || !validated || !expectedReceipt(runtime, selected.command, result)) throw Error('Unconfirmed canonical receipt');
     return { sku: selected.item.sku, commandSha256: selected.commandSha256, status: 'recorded', result };
   } catch (error) {
     if (error.journalFailure) throw error;

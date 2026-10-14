@@ -33,10 +33,10 @@ function fixture(id = 1) {
     fields: [{ target: 'price', scope: 'all', state: 'pending_outward_confirmation' }] }, complete: false, readyForOutbound: true };
   return { product, selected, base, report, prepared, result };
 }
-function runtimeFor(fixtures = [fixture()]) {
-  const state = { applied: [], callbacks: 0, events: [] };
+function runtimeFor(fixtures = [fixture()], { preparedValidation = false } = {}) {
+  const state = { applied: [], callbacks: 0, preparations: 0, events: [] };
   const runtime = { c, batch, audit, pool: { databaseSecrets: () => [] }, first: {
-    prepareDecision: async (_config, base) => ({ prepared: fixtures.find(f => f.base === base).prepared }),
+    prepareDecision: async (_config, base) => { state.preparations++; return { prepared: fixtures.find(f => f.base === base).prepared }; },
     apply: async (_config, command, options) => {
       const f = fixtures.find(f => f.selected.command.sku === command.sku);
       state.events.push('apply:' + command.sku);
@@ -45,6 +45,18 @@ function runtimeFor(fixtures = [fixture()]) {
       if (state.failure) throw state.failure;
       state.applied.push(command.sku); state.afterApply?.(); return f.result;
     } } };
+  if (preparedValidation) runtime.first.applyWithPreparedValidation = async (_config, command, options) => {
+    const f = fixtures.find(f => f.selected.command.sku === command.sku);
+    assert.equal(typeof options.validateFirstSyncDecision, 'function');
+    assert.equal(typeof options.validatePreparedFirstSyncDecision, 'function');
+    state.events.push('apply:' + command.sku);
+    if (state.already) return { ...f.result, receipt: { ...f.result.receipt, alreadyApplied: true } };
+    await options.validateFirstSyncDecision(f.base, f.report, command.choices);
+    state.preparations++;
+    await options.validatePreparedFirstSyncDecision(clone(f.prepared)); state.callbacks++;
+    if (state.failure) throw state.failure;
+    state.applied.push(command.sku); state.afterApply?.(); return f.result;
+  };
   return { runtime, state, fixtures };
 }
 const preparedRecord = f => ({ type: 'prepared', sku: f.selected.item.sku, commandSha256: f.selected.commandSha256, command: f.selected.command });
@@ -109,6 +121,39 @@ test('fresh hook preserves canonical approved price rules and records only selec
   assert.equal(result.status, 'recorded'); assert.equal(state.callbacks, 1);
   assert.deepEqual(events, ['authority', 'durable-prepared', 'apply:' + f.selected.item.sku]);
 });
+test('new runtime prepares once and campaign validates the detached canonical plan without another preparation', async () => {
+  const f = fixture(), { runtime, state } = runtimeFor([f], { preparedValidation: true });
+  runtime.first.prepareDecision = async () => assert.fail('Campaign must consume the already prepared plan');
+  runtime.first.apply = async () => assert.fail('Use the supported prepared-validation capability');
+  const result = await runner.runItem(runtime, config, f.selected, {}, { authority: async () => {}, append: async () => {} });
+  assert.equal(result.status, 'recorded'); assert.equal(state.preparations, 1); assert.equal(state.callbacks, 1);
+  assert.deepEqual(state.applied, [f.selected.item.sku]);
+});
+test('older runtime retains pre-prepare validation and never receives an unsupported hook', async () => {
+  const f = fixture(), { runtime, state } = runtimeFor([f]), oldApply = runtime.first.apply;
+  runtime.first.apply = async (cfg, command, options) => {
+    assert.equal(options.validatePreparedFirstSyncDecision, undefined);
+    assert.equal(typeof options.validateFirstSyncDecision, 'function');
+    return oldApply(cfg, command, options);
+  };
+  const result = await runner.runItem(runtime, config, f.selected, {}, { authority: async () => {}, append: async () => {} });
+  assert.equal(result.status, 'recorded'); assert.equal(state.preparations, 1); assert.equal(state.callbacks, 1);
+});
+for (const invalid of ['missing callbacks', 'missing pre-hook', 'missing post-hook', 'already applied', 'missing preparation'])
+  test('prepared runtime fails closed: ' + invalid, async () => {
+  const f = fixture(), { runtime, state } = runtimeFor([f], { preparedValidation: true });
+  if (invalid === 'already applied') state.already = true;
+  else runtime.first.applyWithPreparedValidation = async (_config, command, options) => {
+    if (invalid === 'missing preparation' || invalid === 'missing post-hook')
+      await options.validateFirstSyncDecision(f.base, f.report, command.choices);
+    if (invalid === 'missing preparation') await options.validatePreparedFirstSyncDecision();
+    if (invalid === 'missing pre-hook') await options.validatePreparedFirstSyncDecision(clone(f.prepared));
+    return f.result;
+  };
+  const result = await runner.runItem(runtime, config, f.selected, {}, { authority: async () => {}, append: async () => {} });
+  assert.equal(result.status, ['missing preparation', 'missing pre-hook'].includes(invalid) ? 'blocked' : 'unconfirmed');
+  assert.equal(state.callbacks, 0); assert.equal(state.preparations, 0); assert.deepEqual(state.applied, []);
+});
 function changeSelectedField(f, { target, scope = 'all', local, remote, persistence }) {
   f.selected.item.fields = [{ target, scope, local, remote }];
   f.selected.command.choices = [{ target, scope, choice: 'keep_local' }]; f.selected.commandSha256 = c.hash(f.selected.command);
@@ -141,8 +186,9 @@ test('length remains outside the campaign approved choice scope', async () => {
   const { runtime } = runtimeFor([f]);
   await assert.rejects(runner.validateDecision(runtime, config, f.selected, f.base, f.report, f.selected.command.choices, {}), { code: 'BATCH_PLAN_CHANGED' });
 });
-for (const importedState of ['imported', 'name_received']) test('fresh decision rejects new ' + importedState + ' before mutation', async () => {
-  const f = fixture(), { runtime, state } = runtimeFor([f]);
+for (const preparedValidation of [false, true]) for (const importedState of ['imported', 'name_received'])
+  test('fresh decision rejects new ' + importedState + ' before mutation, prepared hook=' + preparedValidation, async () => {
+  const f = fixture(), { runtime, state } = runtimeFor([f], { preparedValidation });
   f.prepared.rows.push({ target: 'name', scope: 'all', received: false, record: { state: importedState } });
   const result = await runner.runItem(runtime, config, f.selected, {}, { authority: async () => {}, append: async () => {} });
   assert.equal(result.status, 'blocked'); assert.equal(result.code, 'CAMPAIGN_UNAPPROVED_INITIAL_IMPORT'); assert.deepEqual(state.applied, []);
@@ -152,7 +198,7 @@ test('already received imported field does not authorize a new local patch', asy
   f.prepared.rows.push({ target: 'name', scope: 'all', received: true, record: { state: 'name_received' } });
   await runner.validateDecision(runtime, config, f.selected, f.base, f.report, f.selected.command.choices, {});
 });
-for (const [label, change] of [
+for (const preparedValidation of [false, true]) for (const [label, change] of [
   ['source price', f => { f.product.total_price_uah = '101'; }],
   ['test product', f => { f.product.is_test_product = true; }],
   ['lifecycle', f => { f.product.exportState.route = 'hold'; }],
@@ -162,8 +208,8 @@ for (const [label, change] of [
   ['remaining conflict', f => { f.prepared.blockers.push({ code: 'FIRST_SYNC_FIELD_CONFLICT' }); }],
   ['selected state', f => { f.prepared.rows[0].record.state = 'outward_verified'; }],
   ['duplicate selected field', f => { f.prepared.rows.push(clone(f.prepared.rows[0])); }],
-]) test('fresh canonical callback blocks drift: ' + label, async () => {
-  const f = fixture(); change(f); const { runtime, state } = runtimeFor([f]);
+]) test('fresh canonical callback blocks drift: ' + label + ', prepared hook=' + preparedValidation, async () => {
+  const f = fixture(); change(f); const { runtime, state } = runtimeFor([f], { preparedValidation });
   const result = await runner.runItem(runtime, config, f.selected, {}, { authority: async () => {}, append: async () => {} });
   assert.equal(result.status, 'blocked'); assert.deepEqual(state.applied, []);
 });
@@ -179,6 +225,13 @@ test('signal after durable prepared does not enter apply', async () => {
   const result = await runner.runItem(runtime, config, f.selected, {}, { authority: async () => {},
     append: async () => { stopping = true; }, stopping: () => stopping });
   assert.equal(result.status, 'blocked'); assert.equal(result.code, 'CAMPAIGN_INTERRUPTED'); assert.deepEqual(state.events, []);
+});
+test('signal during canonical preparation stops the new hook before a write', async () => {
+  const f = fixture(), { runtime, state } = runtimeFor([f], { preparedValidation: true });
+  const result = await runner.runItem(runtime, config, f.selected, {}, { authority: async () => {}, append: async () => {},
+    stopping: () => state.preparations > 0 });
+  assert.equal(result.status, 'blocked'); assert.equal(result.code, 'CAMPAIGN_INTERRUPTED');
+  assert.equal(state.preparations, 1); assert.equal(state.callbacks, 0); assert.deepEqual(state.applied, []);
 });
 test('canonical alreadyApplied shortcut cannot impersonate a freshly validated action', async () => {
   const f = fixture(), { runtime, state } = runtimeFor([f]); state.already = true;

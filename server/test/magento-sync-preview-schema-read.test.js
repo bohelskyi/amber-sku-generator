@@ -21,9 +21,12 @@ const schemaRoute = route => route.startsWith('store/') || route.startsWith('pro
 
 // Synthetic source and schema reuse the ordinary-preview contract fixture. No DB,
 // app startup, production input, or real HTTP is involved in these tests.
-function fixture() {
+function fixture({ inventory = false } = {}) {
   const definition = structuredClone(bindingFixture.definition());
   definition.groups[0].rows[0].cells.categories = { op: 'literal', value: 'Default/Amber/Gifts' };
+  if (inventory) Object.assign(definition.groups[0].rows[0].cells, {
+    qty: { op: 'literal', value: '1' }, is_in_stock: { op: 'literal', value: '1' },
+  });
   const compiled = compileDefinition(definition), schema = bindingFixture.schema();
   schema.attributeSets[0].attribute_set_name = 'Historical CSV name';
   schema.attributes.find(a => a.attribute_code === 'kolir').options.find(option => option.value === 'red-id').label = 'Red output';
@@ -49,6 +52,11 @@ function fixture() {
     categories: { id: 803, parent_id: 1, name: 'Default', children_data: [
       { id: 901, parent_id: 803, name: 'Amber', children_data: [
         { id: 902, parent_id: 901, name: 'Gifts', children_data: [] }] }] },
+    'inventory/stock-resolver/website/base': { stock_id: 1,
+      extension_attributes: { sales_channels: [{ type: 'website', code: 'base' }] } },
+    'inventory/get-sources-assigned-to-stock-ordered-by-priority/1': [{ source_code: 'default', enabled: true }],
+    'inventory/source-items': { total_count: 1,
+      items: [{ sku: amber.product.full_sku, source_code: 'default', quantity: 1, status: 1 }] },
   };
   for (const set of sets) routes['products/attribute-sets/' + set.attribute_set_id + '/attributes'] = schema.attributes;
   for (const a of schema.attributes) routes['products/attributes/' + a.attribute_code + '/options'] = structuredClone(a.options);
@@ -246,4 +254,115 @@ test('client timeout and whole-audit deadline abort and drain actual preview rea
       assert.deepEqual(calls, ['store/websites', 'store/storeGroups', 'store/storeViews']);
     });
   }
+});
+
+test('fresh category and domain reads overlap with at most four GETs and preserve the report', async t => {
+  const f = fixture({ inventory: true }), calls = [], signals = [];
+  const categoryObservation = { trees: [f.routes.categories], categoryFailures: [] };
+  const expected = await preview(f, { categoryObservation });
+  let release, active = 0, peak = 0, settled = false;
+  const barrier = new Promise(resolve => { release = resolve; });
+  const read = transport(f, { calls });
+  const pending = preview(f, { fetchImpl: async (url, options) => {
+    active++; peak = Math.max(peak, active); signals.push(options.signal);
+    try {
+      const route = routeOf(url), scope = new URL(url).pathname.split('/')[2];
+      if (route === 'categories' || route === 'products' && scope === 'en'
+        || route.startsWith('inventory/') && !route.includes('stock-resolver')) await barrier;
+      return await read(url, options);
+    } finally { active--; }
+  } }).finally(() => { settled = true; });
+  t.after(release);
+  await tick();
+  const beforeDrain = { active, peak, settled };
+  release();
+  assert.deepEqual(await pending, expected);
+  assert.deepEqual(beforeDrain, { active: 4, peak: 4, settled: false });
+  assert.equal(peak, 4); assert.equal(active, 0);
+  assert.equal(calls.filter(route => route === 'categories').length, 1);
+  assert.equal(calls.filter(route => route === 'products').length, 2);
+  assert.equal(calls.filter(route => route.startsWith('inventory/')).length, 3);
+  assert.equal(signals.every(signal => signal.aborted), true);
+});
+
+test('fatal category evidence drains a started English read before rejecting and produces no observation', async t => {
+  const f = fixture(), calls = [], signals = [];
+  let release, settled = false, failure, observed = false, englishStarted = false;
+  const barrier = new Promise(resolve => { release = resolve; });
+  const pending = preview(f, { onObservation: () => { observed = true; },
+    fetchImpl: transport(f, { calls, before: async (route, options, parsed) => {
+      signals.push(options.signal);
+      if (route === 'categories') return json({ ...f.routes.categories, id: 999 });
+      if (route === 'products' && parsed.pathname.includes('/en/')) {
+        englishStarted = true; await barrier;
+      }
+    } }) }).then(() => { settled = true; }, cause => { settled = true; failure = cause; });
+  t.after(release);
+  await tick();
+  const beforeDrain = { settled, englishStarted };
+  release(); await pending;
+  assert.deepEqual(beforeDrain, { settled: false, englishStarted: true });
+  assert.equal(failure.code, 'MAGENTO_PREVIEW_CATEGORIES_INVALID');
+  assert.equal(observed, false);
+  assert.equal(calls.filter(route => route === 'categories').length, 1);
+  assert.equal(signals.every(signal => signal.aborted), true);
+});
+
+test('fatal category evidence also waits for a pending English response body', async t => {
+  const f = fixture(); let body, englishSignal, settled = false, failure;
+  const pending = preview(f, { fetchImpl: transport(f, { before: async (route, options, parsed) => {
+    if (route === 'categories') return json({ ...f.routes.categories, id: 999 });
+    if (route === 'products' && parsed.pathname.includes('/en/')) {
+      englishSignal = options.signal;
+      return new Response(new ReadableStream({ start(controller) { body = controller; } }),
+        { headers: { 'content-type': 'application/json' } });
+    }
+  } }) }).then(() => { settled = true; }, cause => { settled = true; failure = cause; });
+  const finishBody = () => { if (body) { body.enqueue(Buffer.from(JSON.stringify(f.routes.products))); body.close(); body = null; } };
+  t.after(finishBody);
+  await tick();
+  const beforeDrain = { settled, bodyStarted: !!body, aborted: englishSignal?.aborted };
+  finishBody(); await pending;
+  assert.deepEqual(beforeDrain, { settled: false, bodyStarted: true, aborted: false });
+  assert.equal(failure.code, 'MAGENTO_PREVIEW_CATEGORIES_INVALID');
+  assert.equal(englishSignal.aborted, true);
+});
+
+test('category and domain failures keep stable blocker order without retries', async () => {
+  const f = fixture({ inventory: true }), calls = [];
+  const report = await preview(f, { fetchImpl: transport(f, { calls, before: async (route, _options, parsed) => {
+    if (route === 'categories' || route.startsWith('inventory/')
+      || route === 'products' && parsed.pathname.includes('/en/')) return json({}, 429);
+  } }) });
+  const codes = new Set(['INVENTORY_READ_UNAVAILABLE', 'STORE_VIEW_READ_UNAVAILABLE', 'CATEGORY_TREE_UNAVAILABLE']);
+  assert.deepEqual(report.blockers.filter(blocker => codes.has(blocker.code)).map(blocker => blocker.code),
+    ['INVENTORY_READ_UNAVAILABLE', 'STORE_VIEW_READ_UNAVAILABLE', 'CATEGORY_TREE_UNAVAILABLE']);
+  assert.equal(report.sendable, false);
+  assert.equal(calls.filter(route => route === 'categories').length, 1);
+  assert.equal(calls.filter(route => route.startsWith('inventory/')).length, 1);
+  assert.equal(calls.filter(route => route === 'products').length, 2);
+});
+
+test('supplied category observation retains its contract and performs no new category GET', async () => {
+  const f = fixture(), calls = [];
+  const categoryObservation = { trees: [f.routes.categories], categoryFailures: [] };
+  const report = await preview(f, { categoryObservation, fetchImpl: transport(f, { calls }) });
+  assert.equal(calls.includes('categories'), false);
+  assert.equal(calls.filter(route => route === 'products').length, 2);
+  assert.equal(report.identity.observedMagentoId, 123);
+});
+
+test('later observations reread category, product and English values without sharing evidence', async () => {
+  const f = fixture(), calls = [], observations = [];
+  const options = { fetchImpl: transport(f, { calls }), onObservation: value => observations.push(value) };
+  await preview(f, options);
+  f.routes.categories = { ...f.routes.categories, name: 'Changed root' };
+  f.routes.products = { total_count: 1, items: [{ ...f.routes.products.items[0], name: 'Changed remote name' }] };
+  await preview(f, options);
+  assert.notDeepEqual(observations[0].categoryNodes, observations[1].categoryNodes);
+  assert.equal(observations[0].raw.name, 'Fixture name');
+  assert.equal(observations[1].raw.name, 'Changed remote name');
+  assert.equal(observations[1].domainEvidence.english.fields.name, 'Changed remote name');
+  assert.equal(calls.filter(route => route === 'categories').length, 2);
+  assert.equal(calls.filter(route => route === 'products').length, 4);
 });

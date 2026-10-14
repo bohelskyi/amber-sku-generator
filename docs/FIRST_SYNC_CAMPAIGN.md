@@ -16,6 +16,14 @@
 
 ## Файли пакета
 
+На runtime з `applyWithPreparedValidation` campaign перевіряє точні факти через
+чинний callback, а відокремлену копію єдиної канонічної decision preparation —
+через додатковий callback перед commit. Це прибирає одну повторну read-only
+preparation у тому самому apply; для choices без імпортів зазвичай економить
+тільки `BEGIN`/`COMMIT`. Старий runtime зберігає попередній шлях з окремою
+preparation. Свіжі preview/apply, locked revalidation, immutable receipt verification
+та послідовний fsync журналу залишаються. Ця зміна не доводить прискорення в секундах.
+
 Збережіть поруч п'ять helpers:
 
 - `first-sync-campaign.js` — єдина точка входу та журнал choices;

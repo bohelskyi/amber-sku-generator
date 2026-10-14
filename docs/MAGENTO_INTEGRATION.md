@@ -1491,6 +1491,13 @@ The cohesive pipeline is:
    are never overwritten. Artifacts are ignored operational evidence. In a container,
    copy the file out before replacing the container.
 
+After the fresh schema and exact product read finish, category trees and
+EN/inventory evidence are read concurrently. Category roots remain sequential;
+one category GET plus at most three domain GETs keeps this phase bounded to four
+in flight. Both branches finish before a result or error leaves the observation,
+with the existing category-first fatal error and blocker ordering. Every later
+preview/apply reads fresh evidence; no category, schema or product cache is added.
+
 The terminal summary includes product, CREATE/UPDATE, set ID/name/authority, option
 and category counts, preserved/changed fields, warnings, explicit blockers,
 SENDABLE YES/NO and the artifact path. A successfully produced blocked preview exits
