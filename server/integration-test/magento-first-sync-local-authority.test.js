@@ -461,9 +461,13 @@ test('canonical local authority and atomic batch decisions',async t=>{
    assert.ok(selected.command.choices.every(choice=>targets.includes(choice.target)&&choice.choice==='keep_local'));
    const prior=await currentFields(f,p),before=await nonCampaignState(),callsBefore=f.calls.length,journal=[];
    let validated=0;
-   const guardedRuntime={...campaignRuntime,first:{...service,prepareDecision:async(...args)=>{
-    validated+=1;return service.prepareDecision(...args);
-   }}};
+   const guardedRuntime={...campaignRuntime,first:{...service,
+    prepareDecision:async()=>assert.fail('Campaign must not prepare the canonical decision twice'),
+    applyWithPreparedValidation:(config,input,options)=>service.applyWithPreparedValidation(config,input,{...options,
+     validatePreparedFirstSyncDecision:prepared=>{
+      validated+=1;return options.validatePreparedFirstSyncDecision(prepared);
+     }}),
+   }};
    const result=await campaign.runItem(guardedRuntime,f.config,selected,campaignRun,
     {append:async value=>journal.push(value),authority:async()=>{}});
    assert.equal(result.status,'recorded',JSON.stringify(result));assert.equal(validated,1);

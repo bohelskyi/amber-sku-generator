@@ -128,6 +128,94 @@ test('internal packet validation runs before any write, and exact receipt replay
   const retry=await service.apply(h.config,input,denied);assert.equal(retry.receipt.alreadyApplied,true);assert.equal(checks,2);assert.equal(h.calls.ledger,1);
 });
 
+test('prepared validator runs after one fresh decision preparation and retains the existing pre-prepare order', async t => {
+  const h = harness(t), input = await inputFor(h), before = { ...h.calls }, order = [];
+  const options = { ...h.options,
+    validateFirstSyncDecision: (base, report, choices) => {
+      order.push('before-prepare');
+      assert.equal(base.previewToken, input.previewToken);
+      assert.deepEqual(choices, [{ target: input.target, scope: input.scope, choice: input.choice }]);
+      assert.equal(h.calls.validated, before.validated + 1, 'fresh inspection is already validated');
+      assert.equal(h.calls.ledger, 0);
+    },
+    validatePreparedFirstSyncDecision: (...args) => {
+      assert.equal(args.length, 1, 'no schema or source observation is copied to the prepared hook');
+      const [prepared] = args;
+      order.push('after-prepare');
+      assert.equal(prepared.rows.find(row => row.target === input.target).record.state, 'imported');
+      assert.equal(h.calls.validated, before.validated + 2, 'only inspect plus one decision preparation');
+      assert.equal(h.calls.ledger, 0);
+    },
+  };
+  await service.applyWithPreparedValidation(h.config, input, options);
+  assert.deepEqual(order, ['before-prepare', 'after-prepare']);
+  assert.equal(h.calls.observed, before.observed + 1);
+  assert.equal(h.calls.validated, before.validated + 2);
+  assert.equal(h.calls.ledger, 1);
+});
+
+test('prepared validator can neither mutate nor replace the committed preparation', async t => {
+  const h = harness(t), input = await inputFor(h), original = structuredClone(h.observed);
+  let retained;
+  await service.applyWithPreparedValidation(h.config, input, { ...h.options,
+    validatePreparedFirstSyncDecision: prepared => {
+      retained = prepared;
+      const row = prepared.rows.find(row => row.target === input.target);
+      row.record.after = '999'; row.record.source.decision = 'keep_local';
+      prepared.rows.length = 0; prepared.manifest.length = 0;
+      prepared.complete = true; prepared.readyForOutbound = true;
+      return { rows: [], manifest: [], complete: true, readyForOutbound: true };
+    },
+  });
+  assert.deepEqual(h.observed, original);
+  const field = h.ledgerInput.fields.find(field => field.target === input.target);
+  assert.equal(field.after, '18'); assert.equal(field.source.decision, 'accept_remote');
+  assert.ok(h.ledgerInput.requiredScopes.length > 0);
+  assert.equal(h.ledgerInput.complete, false); assert.equal(h.ledgerInput.readyForOutbound, false);
+  retained.rows.push({ target: 'other' });
+  assert.deepEqual(h.observed, original);
+});
+
+test('prepared validation failure or invalid selection cannot reach a commit', async t => {
+  const h = harness(t), input = await inputFor(h); let callbacks = 0;
+  const options = { ...h.options, validatePreparedFirstSyncDecision: () => {
+    callbacks++; throw c.error(409, 'CAMPAIGN_UNAPPROVED_INITIAL_IMPORT', 'New import');
+  } };
+  await assert.rejects(service.applyWithPreparedValidation(h.config, input, options), { code: 'CAMPAIGN_UNAPPROVED_INITIAL_IMPORT' });
+  assert.equal(callbacks, 1); assert.equal(h.calls.ledger, 0); assert.equal(h.calls.local, 0);
+  await assert.rejects(service.applyWithPreparedValidation(h.config, { ...input, target: 'unmapped' }, options),
+    { code: 'MAGENTO_FIRST_SYNC_FIELD_NOT_MAPPED' });
+  assert.equal(callbacks, 1); assert.equal(h.calls.ledger, 0);
+});
+
+test('prepared validation cannot bypass a stale preview or final commit revalidation', async t => {
+  const h = harness(t), input = await inputFor(h); let callbacks = 0;
+  const options = { ...h.options, validatePreparedFirstSyncDecision: () => { callbacks++; } };
+  h.observed.amber.product.details.answers.other = 'changed';
+  await assert.rejects(service.applyWithPreparedValidation(h.config, input, options), { code: 'MAGENTO_FIRST_SYNC_PREVIEW_STALE' });
+  assert.equal(callbacks, 0); assert.equal(h.calls.ledger, 0);
+  const fresh = await inputFor(h);
+  t.mock.method(require('../src/services/magento/sync-job-transaction'), 'revalidate', async () => {
+    throw c.error(409, 'MAGENTO_SYNC_AMBER_CHANGED', 'Concurrent source change');
+  });
+  await assert.rejects(service.applyWithPreparedValidation(h.config, fresh, options), { code: 'MAGENTO_SYNC_AMBER_CHANGED' });
+  assert.equal(callbacks, 1); assert.equal(h.calls.ledger, 0); assert.equal(h.calls.local, 0);
+});
+
+test('prepared capability requires a validator and exact receipt replay does not repeat it', async t => {
+  const h = harness(t), input = await inputFor(h), before = { ...h.calls }; let callbacks = 0;
+  for (const value of [undefined, null, true, {}]) {
+    await assert.rejects(service.applyWithPreparedValidation(h.config, input,
+      { ...h.options, validatePreparedFirstSyncDecision: value }), { code: 'MAGENTO_FIRST_SYNC_PREPARED_VALIDATOR_REQUIRED' });
+  }
+  assert.deepEqual(h.calls, before);
+  const options = { ...h.options, validatePreparedFirstSyncDecision: () => { callbacks++; } };
+  await service.applyWithPreparedValidation(h.config, input, options);
+  h.failObservation = true;
+  const retry = await service.applyWithPreparedValidation(h.config, input, options);
+  assert.equal(retry.receipt.alreadyApplied, true); assert.equal(callbacks, 1); assert.equal(h.calls.ledger, 1);
+});
+
 test('public apply recovers a lost response exactly and retains blocked whole-product readiness', async t => {
   const h = harness(t), input = await inputFor(h);
   const originalAmber = h.observed.amber;

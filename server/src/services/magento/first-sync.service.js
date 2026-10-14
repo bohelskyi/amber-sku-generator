@@ -177,6 +177,8 @@ async function review(config,input,options={}) {
 }
 async function apply(config,input,options={}) {
   command(input,true);options={...options,databasePool:options.databasePool||require('../../db/pool'),actorUserId:options.mutationContext?.actorUserId||options.actorUserId};
+  if(Object.hasOwn(options,'validatePreparedFirstSyncDecision') && typeof options.validatePreparedFirstSyncDecision!=='function')
+    fail('PREPARED_VALIDATOR_REQUIRED',422);
   const boundary=require('./sync-job.service').recoveryBoundary;
   return boundary.guard(config,input,options,async state=>{
     const authority=await options.databasePool.connect();
@@ -202,6 +204,12 @@ async function apply(config,input,options={}) {
     if(options.validateFirstSyncDecision)await options.validateFirstSyncDecision(base,report,choices);
     // Reuse the fresh observation and captured external evidence for this exact decision.
     const {prepared}=await prepareDecision(config,base,decision,options);
+    if(options.validatePreparedFirstSyncDecision) {
+      // The existing pre-hook owns fresh facts validation. Share only a detached
+      // plan here, never the observation/schema or canonical preparation itself.
+      // The validator's return value cannot replace the owned preparation.
+      await options.validatePreparedFirstSyncDecision(structuredClone(prepared));
+    }
     const selected=choices.map(d=>prepared.rows.find(row=>fieldKey(row)===fieldKey(d)));
     if(selected.some(row=>!row||row.received||!['pending_outward_confirmation','imported','name_received','seo_pending_initial_readback'].includes(row.record.state))) fail('DECISION_NOT_AVAILABLE');
     const inspection={...base,prepared,previewToken:receiptHash};
@@ -211,4 +219,10 @@ async function apply(config,input,options={}) {
       readyForOutbound:result.readyForOutbound,complete:result.complete};
   });
 }
-module.exports={inspect,commit,review,apply,response,decisions,prepareDecision};
+// An explicit capability lets standalone campaigns retain their existing safe
+// validation path against older installed runtimes that lack this hook.
+async function applyWithPreparedValidation(config,input,options={}) {
+  if(typeof options.validatePreparedFirstSyncDecision!=='function')fail('PREPARED_VALIDATOR_REQUIRED',422);
+  return apply(config,input,options);
+}
+module.exports={inspect,commit,review,apply,applyWithPreparedValidation,response,decisions,prepareDecision};
