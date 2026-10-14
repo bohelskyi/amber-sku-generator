@@ -34,6 +34,12 @@ async function inspect(client,config,input){
       WHERE j.public_product_identity_id=$1 AND j.origin_hash=$2 AND j.state NOT IN ('succeeded','superseded')
         AND (j.automatic_generation IS NULL OR j.state='uncertain' OR EXISTS(SELECT 1 FROM magento_sync_steps s WHERE s.job_id=j.id)) LIMIT 1`,[product.public_product_identity_id,revision.originHash])).rowCount>0;
     if(protectedWork)blockers.push({productId:id,code:'RECONCILIATION_REQUIRED'});
+    // APPLY repeats this read under the existing binding/product transaction
+    // locks. A different reviewed command cannot create a second outstanding
+    // obligation; replay of the same preview keeps its immutable receipt.
+    if((await client.query(`SELECT 1 FROM magento_binding_handoff_items
+      WHERE (product_id=$1 OR public_product_identity_id=$2) AND state IN ('pending','protected') LIMIT 1`,
+    [id,product.public_product_identity_id])).rowCount)blockers.push({productId:id,code:'EXISTING_HANDOFF'});
     if(input.kind==='name_rule' && ['conflict','baseline_required'].includes(amber.nameState?.state))blockers.push({productId:id,code:'NAME_CONFLICT_OR_BASELINE_REQUIRED'});
     const mapped=evaluate(amber,product),raw=Object.assign(Object.create(Object.getPrototypeOf(product)),product);
     // Keep the supported product's historical source association: temporarily
@@ -118,4 +124,4 @@ async function apply(config,input,options={}){
       return {handoffId,alreadyApplied:false};
     }});
 }
-module.exports={preview,apply,candidates};
+module.exports={preview,apply,candidates,handoffExclusivityVersion:1};

@@ -142,6 +142,86 @@ test('ordinary NAME_BASELINE_REQUIRED is explicitly disclosed while canonical na
   assert.equal(selected.preview.initialImports.length, 2);
 });
 
+test('pristine first names require explicit opt-in and retain a null admission root', () => {
+  const f = fixture(); f.base.first.historyAdmission = null; f.base.first.historyAdmissionHash = null;
+  f.report.blockers = [{ code: 'NAME_BASELINE_REQUIRED' }]; f.report.sendable = false;
+  f.runtime.admission = { allows: () => assert.fail('No admission proof may be invented'),
+    rootId: () => assert.fail('No admission root exists') };
+  const before = clone(f.base);
+  assert.throws(() => f.select(), { code: 'INITIAL_NAMES_HISTORY_ADMISSION_REQUIRED' });
+  const selected = core.selectionFor(f.runtime, f.scope, f.item, f.base, f.report, run, { allowPristineFirst: true });
+  assert.equal(selected.historyRoot, null);
+  assert.deepEqual(selected.report.applyInput.choices, []);
+  assert.deepEqual(selected.preview.initialImports.map(row => key(row)).sort(), ['all/name', 'en/name']);
+  assert.deepEqual(core.selectionFor(f.runtime, f.scope, f.item, f.base, f.report, run,
+    { expected: selected, allowPristineFirst: true }), selected);
+  assert.deepEqual(f.base, before);
+});
+
+for (const [label, mutate] of [
+  ['existing progress without admission', f => { f.base.first.progress = { session: { revision: '1' }, fields: [] }; }],
+  ['missing progress evidence', f => { delete f.base.first.progress; }],
+  ['missing admission evidence', f => { delete f.base.first.historyAdmission; }],
+  ['forged admission', f => { f.base.first.historyAdmission = {}; }],
+  ['protected work', f => { f.base.first.admissionGuards.protectedWork = true; }],
+  ['other origin', f => { f.base.first.admissionGuards.otherOrigin = true; }],
+  ['canonical review mode', f => { f.base.first.mode = 'review'; }],
+  ['unready evaluation', f => { f.report.evaluation.ready = false; }],
+  ['ineligible lifecycle', f => { f.report.syncEligibility.eligible = false; }],
+  ['unknown local names', f => { f.base.prepared.rows[0].local = { known: false }; }],
+  ['incomplete manifest', f => { f.base.prepared.manifest.pop(); }],
+  ['non-name import', f => { f.base.prepared.rows.find(row => row.target === 'price').record.state = 'imported'; }],
+  ['extra ordinary blocker', f => { f.report.blockers = [{ code: 'NAME_READ_UNAVAILABLE' }]; }],
+]) test(`pristine opt-in still rejects ${label}`, () => {
+  const f = fixture(); f.base.first.historyAdmission = null; f.base.first.historyAdmissionHash = null; mutate(f);
+  assert.throws(() => core.selectionFor(f.runtime, f.scope, f.item, f.base, f.report, run, { allowPristineFirst: true }));
+});
+
+test('pristine opt-in is strict and does not replace an existing admitted root', () => {
+  const f = fixture();
+  assert.equal(core.selectionFor(f.runtime, f.scope, f.item, f.base, f.report, run,
+    { allowPristineFirst: true }).historyRoot, f.root);
+  f.base.first.historyAdmission = null;
+  for (const value of [false, 1, 'true']) assert.throws(() => core.selectionFor(f.runtime, f.scope, f.item, f.base, f.report, run,
+    { allowPristineFirst: value }), { code: 'INITIAL_NAMES_HISTORY_ADMISSION_REQUIRED' });
+});
+
+test('pristine preview and commit opt-in both require fresh validation before durable intent', async () => {
+  const f = fixture(); f.base.first.historyAdmission = null; f.base.first.historyAdmissionHash = null;
+  const records = [], events = [], runtime = { ...f.runtime,
+    preview: async (_config, options) => { options.onObservation(f.observation); return f.report; },
+    first: { inspect: async () => f.base },
+    boundary: { guard: async (_config, _input, _run, callback) => callback({}),
+      observe: async () => ({ observation: f.observation, report: f.report }) },
+  };
+  const authority = async () => {}, stopping = () => false;
+  assert.equal(runner.pristineFirstVersion, 1);
+  assert.equal((await runner.previewItem(runtime, config, f.scope, f.item, run, authority, stopping)).code,
+    'INITIAL_NAMES_HISTORY_ADMISSION_REQUIRED');
+  const preview = await runner.previewItem(runtime, config, f.scope, f.item, run, authority, stopping, { allowPristineFirst: true });
+  assert.equal(preview.status, 'available'); assert.equal(preview.selection.historyRoot, null);
+  const append = async value => { events.push('prepared'); records.push(value); };
+  const commit = async (_runtime, _config, _state, base, options) => {
+    assert.strictEqual(base, f.base); assert.deepEqual(events, ['prepared']); events.push('commit');
+    const proof = names.commitProof(runtime, base, options);
+    return { sessionId: session, revision: proof.expectedRevision, completed: proof.complete, complete: proof.complete,
+      readyForOutbound: proof.readyForOutbound, alreadyApplied: false, localChanged: true,
+      changedFields: clone(proof.changedFields), terminalScopes: clone(proof.terminalScopes) };
+  };
+  const defaultResult = await runner.runItem(runtime, config, f.scope, preview.selection, run, { append, authority, commit });
+  assert.equal(defaultResult.status, 'blocked'); assert.equal(defaultResult.code, 'INITIAL_NAMES_HISTORY_ADMISSION_REQUIRED');
+  assert.deepEqual(records, []);
+  const result = await runner.runItem(runtime, config, f.scope, preview.selection, run,
+    { append, authority, commit, allowPristineFirst: true });
+  assert.equal(result.status, 'recorded'); assert.deepEqual(events, ['prepared', 'commit']);
+  assert.equal(records.length, 1); assert.equal(records[0].proof.commandHash, result.proof.commandHash);
+  f.base.first.progress = { session: { revision: '1' }, fields: [] };
+  const changed = await runner.runItem(runtime, config, f.scope, preview.selection, run,
+    { append, authority, commit, allowPristineFirst: true });
+  assert.equal(changed.status, 'blocked'); assert.equal(changed.code, 'INITIAL_NAMES_HISTORY_ADMISSION_REQUIRED');
+  assert.deepEqual(events, ['prepared', 'commit']);
+});
+
 for (const [name, change] of [
   ['ordinary identity not found', f => { f.report.identity.state = 'missing'; }],
   ['ordinary wrong Magento ID', f => { f.report.identity.observedMagentoId++; }],
