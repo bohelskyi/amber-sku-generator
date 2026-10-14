@@ -72,7 +72,7 @@ async function preview(options) {
     } else {
       rows = (await client.query(`SELECT p.id,sv_weight_repair_candidate(p) source FROM products p
         WHERE p.category='SV' AND p.status='active' AND p.corrected_to_product_id IS NULL
-          AND p.details#>>'{answers,souvenir}'='5' ORDER BY p.id LIMIT 1001`)).rows;
+        ORDER BY p.id LIMIT 1001`)).rows;
     }
     if (rows.length > manifest.LIMIT) fail('SCOPE_LIMIT');
     for (const row of rows) {
