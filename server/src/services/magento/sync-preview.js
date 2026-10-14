@@ -15,7 +15,8 @@ const { readDomains, planDomains } = require('./sync-preview-domains');
 const { sourceSupportChecker } = require('../export-templates/source-support');
 const { upgradeRequirement } = require('./native-characteristic-upgrade');
 const { normalizeDecimal } = require('./first-sync-field-plan');
-const { getExactLengthComparison } = require('./first-sync-projection');
+const { getExactLengthComparison, getSvDimensionsComparison } = require('./first-sync-projection');
+const svDimensions = require('./sv-dimensions');
 
 const MERCHANDISING = ['description', 'short_description', 'meta_title', 'meta_description'];
 const NATIVE = { sku: 'sku', name: 'name', price: 'price', weight: 'weight', product_type: 'type_id',
@@ -108,6 +109,7 @@ function planPreview(amber, schema, raw, categoryNodes, { storeCode = 'all', gen
   const { product, revision } = amber;
   const publicSku = product.public_sku || product.full_sku;
   const expected = evaluate(amber, product);
+  const dimensionsComparison = getSvDimensionsComparison({ amber, schema, raw, domainEvidence });
   const base = expected.base; const mode = raw ? 'update' : 'create';
   const blockers = []; const warnings = [];
   const block = (code, details = {}) => blockers.push({ code, operation: blockerOperation(code, details), ...details });
@@ -321,6 +323,9 @@ function planPreview(amber, schema, raw, categoryNodes, { storeCode = 'all', gen
     const compared = exactLengthScope && target === 'dovzhyna_namysta_tochna'
       ? !populated(rawValue) ? 'absent' : exactLength ? exactLengthComparison(candidate ?? value, rawValue, exactLength)
         : equal(candidate ?? value, rawValue) ? 'exact' : 'semantic_difference'
+      : dimensionsComparison && target === 'rozmir_suveniriv' && attributeCode === target
+        && svDimensions.equivalent(candidate ?? value, rawValue) ? equal(candidate ?? value, rawValue)
+          ? 'exact' : 'numeric_equivalent_formatting'
       : isOption ? comparison(option?.label ?? value, labels?.map((l) => l.label).join(',') ?? null, true)
         : comparison(candidate ?? value, rawValue);
     const same = ['exact', 'numeric_equivalent_formatting'].includes(compared)

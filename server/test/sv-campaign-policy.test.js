@@ -36,7 +36,7 @@ function fixture({ sku = 'SV-fixture', price = '42.00', remotePrice = 40, weight
   const compiled = compileDefinition(definition), rawSchema = structuredClone(fixtures.schema());
   rawSchema.attributes.find(row => row.attribute_code === 'name').scope = 'store';
   Object.assign(rawSchema.attributes.find(row => row.attribute_code === 'decor_weight'), { frontend_input: 'text', options: [] });
-  rawSchema.attributes.push({ attribute_id: 999, attribute_code: 'rozmir_suveniriv', frontend_input: 'text', options: [] });
+  rawSchema.attributes.push({ attribute_id: 999, attribute_code: 'rozmir_suveniriv', frontend_input: 'text', backend_type: 'varchar', scope: 'global', options: [] });
   rawSchema.attributeSets[0].attributeCodes.push('rozmir_suveniriv');
   const schema = normalizeSchema(rawSchema), binding = fixtures.approvedBindings(compiled.definition, schema, 'SV');
   for (const row of binding.attributes) if (row.strategy === 'transport_control') {
@@ -145,6 +145,48 @@ test('approved published missing-remote fills pass while populated material diff
     assert.doesNotThrow(() => policy.assertObservation(config, f));
   }
   fails(() => policy.assertObservation(config, fixture({ size: 'Large', remoteSize: 'Small' })), 'OTHER_FIELD_CHANGE');
+});
+test('proven SV dimensions accept only exact ordered decimal formatting in preview, receipts, policy and readback', () => {
+  for (const [size, remoteSize] of [['8/4/3,5', '8/4/3.5'], ['9/3,5/2', '9/3.5/2']]) {
+    const f = fixture({ size, remoteSize, remotePrice: 42, remoteWeight: '5.4' });
+    const before = JSON.stringify(f.observation.amber.product);
+    const diff = f.report.diff.find(row => row.target === 'rozmir_suveniriv');
+    assert.equal(diff.action, 'unchanged');
+    assert.equal(diff.comparison, 'numeric_equivalent_formatting');
+    assert.doesNotThrow(() => policy.assertObservation(config, f));
+    const base = namedBase(f), row = base.prepared.rows.find(field => field.target === 'rozmir_suveniriv');
+    assert.equal(row.record.state, 'equal');
+    assert.deepEqual(policy.selectChoices(base), []);
+    assert.equal(policy.assertPrepared(base.prepared, { base, stage: 'equal' }), true);
+    const operation = { domain: 'coreProduct', payload: { product: { sku: f.observation.raw.sku,
+      custom_attributes: [{ attribute_code: 'rozmir_suveniriv', value: size }] } } };
+    assert.equal(jobPlan.matches(operation, f.observation), true);
+    assert.equal(JSON.stringify(f.observation.amber.product), before);
+  }
+});
+test('genuinely different SV dimensions retain policy conflict and failed worker readback', () => {
+  for (const [size, remoteSize] of [['16,2/9', '1.6/0.8'], ['11,1', '1'], ['7,5/9', '0.9/0.8'],
+    ['16,2/9,1', '1,5/0,8'], ['15,8/9,2', '1,6/0,7'], ['8/4/3.5', '4/8/3.5'], ['8/4', '8/4/1']]) {
+    const f = fixture({ size, remoteSize, remotePrice: 42, remoteWeight: '5.4' });
+    fails(() => policy.assertObservation(config, f), 'OTHER_FIELD_CHANGE');
+    const base = namedBase(f), row = base.prepared.rows.find(field => field.target === 'rozmir_suveniriv');
+    assert.equal(row.record.state, 'conflict');
+    const operation = { domain: 'coreProduct', payload: { product: { sku: f.observation.raw.sku,
+      custom_attributes: [{ attribute_code: 'rozmir_suveniriv', value: size }] } } };
+    assert.equal(jobPlan.matches(operation, f.observation), false);
+  }
+});
+test('SV dimension formatting equivalence does not apply to derived sources or unproven text metadata', () => {
+  const derived = fixture({ size: '8/4/3,5', remoteSize: '8/4/3.5', changeDefinition: (_definition, sv) => {
+    sv.rows[0].cells.rozmir_suveniriv = literal('8/4/3,5');
+  } });
+  fails(() => policy.assertObservation(config, derived), 'OTHER_FIELD_CHANGE');
+  const drift = fixture({ size: '8/4/3,5', remoteSize: '8/4/3.5' });
+  drift.observation.schema = structuredClone(drift.observation.schema);
+  drift.observation.schema.attributes.find(row => row.attribute_code === 'rozmir_suveniriv').backend_type = 'text';
+  const projection = projectFirstSyncFields({ observation: { amber: drift.observation.amber, raw: drift.observation.raw,
+    schema: drift.observation.schema, domainEvidence: drift.observation.domainEvidence }, currencyEvidence });
+  assert.equal(projection.fields.find(row => row.target === 'rozmir_suveniriv')?.comparison, undefined);
 });
 test('ordinary names are exact; only the separate initial-name stage can inspect a name baseline', () => {
   const f = fixture(); f.report.sendability.operations.coreProduct.candidatePayload.product.name = 'Changed';
