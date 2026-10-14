@@ -199,7 +199,7 @@ test('bounded initial names uses genuine legacy admission despite the ordinary b
     assert.notEqual(result.code, 0); assert.equal(await f.fields(p), null);
     assert.ok(f.calls.every(call => call.method === 'GET'));
   });
-  await t.test('ordinary name acceptance before history really advances the CSV floor and closes initial admission', async () => {
+  await t.test('ordinary name acceptance before history advances the CSV floor and keeps admission available while legacy CSV is disabled', async () => {
     const p = f.products[10], resolution = require('../src/services/magento/name-resolution.service');
     const input = { productId: p.id, choice: 'magento' }, options = { ...f.run, config: f.config };
     assert.equal((await first.review(f.config, f.request(p), f.run)).historyReviewAssessment?.status, 'available');
@@ -208,7 +208,9 @@ test('bounded initial names uses genuine legacy admission despite the ordinary b
     const state = await f.state(p), checked = await first.review(f.config, f.request(p), f.run);
     assert.equal(BigInt(state.revision), BigInt(before.revision) + 1n);
     assert.equal(state.csv_retired_revision, state.revision); assert.equal(await f.fields(p), null);
-    assert.equal(checked.mode, 'review'); assert.equal(checked.historyReviewAssessment?.code, 'FIRST_SYNC_DELIVERY_HISTORY_CHANGED');
+    // A revision retired at birth while legacy CSV is disabled cannot have been exported (approved 2026-10-14).
+    assert.equal(checked.mode, 'review'); assert.equal(checked.historyReviewAssessment?.status, 'available');
+    assert.ok(checked.historyReview, 'admission is still offered'); assert.equal(await f.fields(p), null);
     assert.ok(f.calls.every(call => call.method === 'GET'));
   });
   await t.test('no-session AR baseline conflict imports only two names and atomically captures the advanced CSV floor', async () => {
