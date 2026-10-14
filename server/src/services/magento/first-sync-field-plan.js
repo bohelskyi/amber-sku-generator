@@ -21,7 +21,7 @@ const TYPES = new Set(['text', 'decimal', 'boolean', 'option']);
 const STATUSES = ['imported', 'equal', 'optional_empty', 'pending_outward_confirmation',
   'conflict', 'unknown', 'review_required', 'seo_pending_initial_readback'];
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/;
-const RECEIPTS = new Set(['imported', 'equal', 'optional_empty', 'outward_verified', 'name_received', 'seo_received']);
+const RECEIPTS = new Set(['imported', 'equal', 'optional_empty', 'outward_verified', 'name_received', 'seo_received', 'remote_retained']);
 const CONTROL = /[\u0000-\u001f\u007f]/;
 const NM_EXACT_LENGTH_COMPARISON = 'nm-exact-length-cm-v1';
 const svDimensions = require('./sv-dimensions');

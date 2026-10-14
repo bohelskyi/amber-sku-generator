@@ -5,7 +5,7 @@ const { randomUUID } = require('node:crypto');
 const { hash } = require('./binding-contract');
 const { writeAuditEvent } = require('../../audit/audit-events');
 
-const TERMINAL = new Set(['imported', 'equal', 'optional_empty', 'outward_verified', 'name_received', 'seo_received']);
+const TERMINAL = new Set(['imported', 'equal', 'optional_empty', 'outward_verified', 'name_received', 'seo_received', 'remote_retained']);
 const STATES = new Set([...TERMINAL, 'conflict', 'unknown', 'pending_outward_confirmation', 'review_required', 'seo_pending_initial_readback']);
 const HEX = /^[a-f0-9]{64}$/;
 const UUID = /^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;

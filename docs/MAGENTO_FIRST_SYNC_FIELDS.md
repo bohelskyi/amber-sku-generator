@@ -568,6 +568,11 @@ Administrator correction/recount work. The UI links to the ordinary reviewed
 workflow; it neither creates a successor nor chooses answers or changes a receipt
 automatically. These repository tests do not establish production acceptance.
 
+Temporary exception (2026-10-14): when such a legacy SV characteristic is empty in
+Amber, Magento has a value and the published output is verified empty, an
+Administrator may record `retain_remote` (terminal state `remote_retained`, no Amber
+or Magento write). See [temporary legacy SV remote retention](FIRST_SYNC_RETAIN_REMOTE.md).
+
 ## Actual conditional SV acceptance coverage
 
 Approved routes sharing one remote attribute set are selected by exactly one
