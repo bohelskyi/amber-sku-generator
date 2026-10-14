@@ -1,7 +1,7 @@
 'use strict';
 // Re-approves, in a binding successor draft, decisions that still await review but are
 // identical to the approved decision of the current publication: same binding key, same
-// Magento attribute/option ID, same evaluated output and same ownership policy. Typical
+// Magento attribute/option ID, same evaluated output; policies re-approve the source policy. Typical
 // case: a template change that only made a field optional (empty when Amber has no answer).
 // Scope is limited to explicit --targets of one --group. Each approval goes through the
 // existing binding-review decision (draft CAS, actor permission, audit) with an explicit
@@ -35,7 +35,10 @@ function argumentsFor(args) {
   return out;
 }
 
-const identityOf = entry => JSON.stringify({ kind: entry.kind, identity: entry.identity, label: entry.kind === 'option' ? null : entry.label,
+// A pending policy's value is only the candidate default (often magento_managed), not a
+// reviewed choice; its identity is the binding key and store scope, and the previously
+// approved source policy is what gets re-approved (reported as restoredPolicy).
+const identityOf = entry => JSON.stringify({ kind: entry.kind, identity: entry.kind === 'policy' ? null : entry.identity, label: entry.kind === 'option' ? null : entry.label,
   evaluated: entry.kind === 'option' ? entry.evaluated ?? null : null, transport: entry.decision.transportTarget ?? null });
 
 // Pure planning: which pending draft decisions equal an approved source decision.
@@ -50,7 +53,9 @@ function plan(review, source, draft, { group, targets }) {
     if (!before) result.missingInSource.push(row);
     else if (before.decision.reviewState !== 'approved') result.notApprovedInSource.push(row);
     else if (identityOf(before) !== identityOf(entry)) result.different.push({ ...row, sourceIdentity: before.identity });
-    else result.identical.push({ ...row, policy: entry.kind === 'policy' ? before.identity : undefined });
+    else result.identical.push({ ...row, ...(entry.kind === 'policy'
+      ? { policy: before.identity, ...(entry.identity !== before.identity ? { restoredPolicy: { candidate: entry.identity, approved: before.identity } } : {}) }
+      : {}) });
   }
   return result;
 }

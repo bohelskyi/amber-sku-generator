@@ -27,6 +27,10 @@ test('only pending decisions identical to the approved source decision are plann
   const changed = revision({ id: 'draft', state: 'draft', reviewState: 'proposed', optionId: '6' });
   const differing = script.plan(review, source, changed, common);
   assert.deepEqual(differing.different.map((d) => d.kind), ['option'], 'a different Magento option ID is never auto-approved');
+  const defaulted = revision({ id: 'draft', state: 'draft', reviewState: 'review_required', policy: 'magento_managed' });
+  const restored = script.plan(review, source, defaulted, common).identical.find((d) => d.kind === 'policy');
+  assert.equal(restored.policy, 'authoritative_create_update', 'the approved source policy is re-approved, not the candidate default');
+  assert.deepEqual(restored.restoredPolicy, { candidate: 'magento_managed', approved: 'authoritative_create_update' });
   const sourceBlocked = revision({ id: 'source', state: 'published', reviewState: 'blocked' });
   assert.equal(script.plan(review, sourceBlocked, draft, common).notApprovedInSource.length, 3);
 });
