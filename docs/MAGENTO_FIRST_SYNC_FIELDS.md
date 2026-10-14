@@ -346,6 +346,23 @@ The first-sync routes are:
 
 The cutover-only review requires the exact canonical approval, applied batch and linked baseline receipt; the baseline must explicitly say delivery was not proven. Recounts, exclusions, identity changes, snapshots (including parsed unindexed legacy CSV membership), actual external delivery and protected work remain outside this lane. Apply rechecks current publication, administrator authority, local state and the fresh remote observation before its short local transaction.
 
+Before any admission, local revisions after the baseline are accepted only in one case. They must be retired at birth while legacy product CSV is disabled:
+
+- `csv_retired_revision` equals the current `revision`;
+- that revision is newer than `cutover_baseline_revision`;
+- `legacy_product_csv_enabled` is false.
+
+An example is UA/EN names completed from Magento after cutover. Such revisions could not have been exported.
+
+These cases still reject with `FIRST_SYNC_DELIVERY_HISTORY_CHANGED`:
+
+- any external delivery revision;
+- a confirmed revision;
+- a retired counter that does not cover the latest revision;
+- enabled or missing CSV gate state.
+
+Delivery jobs, retained-file membership and the other checks above are unchanged. The admission still binds the current revision counters.
+
 An admitted session keeps its root audit ID in every immutable progress command. Its latest progress/audit receipt records revision and CSV-retirement counters after legitimate local imports, including when legacy product CSV is disabled. Unrelated counter changes cannot be sealed by another progress command. An incomplete session must keep a valid admission at commit, dispatch and acknowledgement; a new publication requires an explicit fresh review when protected work is clear, preserving terminal field receipts. Completed sessions return to ordinary rules. No field conflict is resolved by history admission.
 
 Both retain authenticated active-user, CSRF and the existing manage/publish/export

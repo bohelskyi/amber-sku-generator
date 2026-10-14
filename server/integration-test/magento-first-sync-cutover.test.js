@@ -157,7 +157,7 @@ test('explicit cutover-only first-sync admission preserves history and field dec
       (SELECT jsonb_agg(a ORDER BY id) FROM audit_events a) audits`)).rows[0]);
 
     const products=[];
-    for(let n=0;n<18;n++) products.push(await product());
+    for(let n=0;n<19;n++) products.push(await product());
     const svAcceptance=(await insertProductFixture(db,`INSERT INTO products(id,full_sku,category,weight,total_price_uah,details,
       magento_name_subject_ua,magento_name_subject_en)
       VALUES(1488,'SV11500004','SV',132.300,2950,'{"answers":{"weight":"132,3"},"manualPriceUah":2950}',
@@ -442,6 +442,17 @@ test('explicit cutover-only first-sync admission preserves history and field dec
       const changed=await service.inspect(config,await observation(p,{size:'18',en:'Remote EN'}),options);
       assert.equal(changed.mode,'review');assert.ok(changed.blockers.some(b=>b.code==='FIRST_SYNC_HISTORY_REVIEW_REQUIRED'));
       assert.equal(changed.first.historyAdmission,null);assert.equal(changed.historyReview,undefined);
+    });
+    await t.test('a CSV-retired local revision after the baseline still offers a fresh admission',async()=>{
+      // Mirrors an accepted local change (e.g. names completed from Magento) while legacy CSV is disabled.
+      const p=products[18],before=await counter(p);assert.equal(before.csv_retired_revision,'0');
+      await write(tx=>require('../src/services/full-product-export.service').advanceFullProductRevision(tx,p.id,before.revision));
+      const after=await counter(p);
+      assert.equal(after.csv_retired_revision,after.revision);assert.ok(BigInt(after.revision)>BigInt(after.cutover_baseline_revision));
+      assert.equal(after.externally_delivered_revision,'0');assert.equal(after.confirmed_revision,'0');
+      const {result}=await admit(p);assert.ok(result.receipt.auditEventId);
+      const admitted=await service.inspect(config,await observation(p,remote),options);
+      assert.ok(admitted.first.historyAdmission,JSON.stringify(admitted.blockers));
     });
     await t.test('current administrator authority is required and denied apply is side-effect free',async()=>{
       const p=products[5],plan=await review(p),command={...selection(p),previewToken:plan.historyReview.previewToken};

@@ -88,6 +88,16 @@ async function baseline(client,i,history) {
   return {row, proof:{manifestHash:contentSha256,entryHash:digest(entry),approvalEventId:String(approvals[0].id),
     batchEventId:String(receipt.id),baselineEventId:row.cutover_baseline_event_id,deliveryVersion:row.delivery_version,evidenceHash:digest(row.evidence)}};
 }
+// Before admission the CSV-retired counter may only show local revisions made after
+// the baseline while legacy product CSV is permanently disabled: such revisions are
+// retired at birth and cannot have been exported. Actual delivery, confirmations and
+// retained-file membership stay separately checked and still reject.
+async function csvUndelivered(client,row) {
+  if(row.csv_retired_revision==='0') return true;
+  if(row.csv_retired_revision!==row.revision || BigInt(row.revision)<=BigInt(row.cutover_baseline_revision)) return false;
+  const gate=(await client.query('SELECT legacy_product_csv_enabled FROM magento_auto_sync_activation WHERE singleton')).rows[0];
+  return gate?.legacy_product_csv_enabled===false;
+}
 async function capture(client,observation,history,progress,reject=()=>null) {
   return require('./sync-performance').measureLocalPhase(null,'retained_capture',
     ()=>captureCurrent(client,observation,history,progress,reject));
@@ -108,7 +118,7 @@ async function captureCurrent(client,observation,history,progress,reject) {
     if(audit?.event_key!=='magento.first_sync_progress_recorded' || audit.subject_type!=='magento_first_sync'
       || audit.subject_id!==progress.session.id || audit.details?.commandHash!==p.command_hash
       || !sameIdentity(audit.details.result,p.result)) return reject('FIRST_SYNC_REVIEW_PROGRESS_CHANGED');
-  } else if(row.csv_retired_revision!=='0' || row.externally_delivered_revision!=='0') return reject('FIRST_SYNC_DELIVERY_HISTORY_CHANGED');
+  } else if(row.externally_delivered_revision!=='0' || !await csvUndelivered(client,row)) return reject('FIRST_SYNC_DELIVERY_HISTORY_CHANGED');
   const input=await repair.readRepairInput(client), retained=buildHistoricalIndex(input);
   const legacySnapshotFlag=input.revisions.some(r=>Number(r.product_id)===i.productId && r.has_product_snapshot===true);
   // Unknown bytes/membership can hide this SKU. Never infer absence from an
@@ -256,4 +266,4 @@ async function apply(config,input,options={}) {
     finally{await gate.release(client).catch(()=>{});client.release();}
   });
 }
-module.exports={proposal,assessProposal,readOnClient,allows,assertOnClient,assertCommitOnClient,rootId,captureState,descriptor,apply};
+module.exports={csvUndelivered,proposal,assessProposal,readOnClient,allows,assertOnClient,assertCommitOnClient,rootId,captureState,descriptor,apply};
