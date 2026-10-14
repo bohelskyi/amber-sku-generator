@@ -204,13 +204,13 @@ test('attested legacy SV completion preserves both admitted and changed-delivery
       assert.equal(replay.alreadyApplied,true);assert.equal(await snapshot(),committed);
     });
 
-    await t.test('real retired-CSV mutation remains history-blocked after local-only completion and creates no admission or session',async()=>{
+    await t.test('real retired-CSV mutation keeps admission available; local-only completion creates no admission or session',async()=>{
       const product=products[1],runtime=runtimeFor(product),selection={sku:product.full_sku,bindingRevisionId:binding.id};
       await write(async client=>{await client.query('SELECT id FROM products WHERE id=$1 FOR UPDATE',[product.id]);
         const state=(await lifecycle.readFullProductStates(client,[product.id],{lock:true}))[0];
         await lifecycle.advanceFullProductRevision(client,product.id,state.revision);});
       const diagnosis=await firstSync.review(runtimeConfig,selection,runtime);
-      assert.equal(diagnosis.mode,'review');assert.equal(diagnosis.historyReviewAssessment.code,'FIRST_SYNC_DELIVERY_HISTORY_CHANGED');
+      assert.equal(diagnosis.mode,'review');assert.equal(diagnosis.historyReviewAssessment.status,'available');
       const baseline=await immutable(product),original=await actual(product),state=await full(product),input=inputFor(product);
       const before=await snapshot(),review=await completion.review(runtimeConfig,input,runtime);
       assert.equal(review.historyMode,'review');assert.equal(await snapshot(),before);
@@ -222,7 +222,7 @@ test('attested legacy SV completion preserves both admitted and changed-delivery
       assert.equal(post.revision,String(BigInt(state.revision)+1n));assert.equal(post.csv_retired_revision,post.revision);
       assert.deepEqual(await immutable(product),baseline);
       const fresh=await firstSync.review(runtimeConfig,selection,runtime);
-      assert.equal(fresh.mode,'review');assert.equal(fresh.historyReviewAssessment.code,'FIRST_SYNC_DELIVERY_HISTORY_CHANGED');
+      assert.equal(fresh.mode,'review');assert.equal(fresh.historyReviewAssessment.status,'available');
       assert.equal((await db.query('SELECT count(*)::int n FROM magento_first_sync_sessions WHERE public_product_identity_id=$1',[product.public_product_identity_id])).rows[0].n,0);
       assert.equal((await db.query(`SELECT count(*)::int n FROM audit_events WHERE event_key='product.magento_first_sync_cutover_reviewed'
         AND details->'admission'->'identity'->>'publicIdentityId'=$1`,[String(product.public_product_identity_id)])).rows[0].n,0);

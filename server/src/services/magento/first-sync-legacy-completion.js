@@ -48,9 +48,13 @@ async function administrator(client,options){
 function assertReview(first){
   if(first.mode==='ordinary'||first.progress?.session.completed_at)fail('ALREADY_RECEIVED');
   if(first.admissionGuards.protectedWork||first.admissionGuards.otherOrigin)fail('PROTECTED_WORK');
+  // Local-only completion is allowed before admission whether the history review is
+  // blocked by changed delivery history or still available after a CSV-retired local
+  // revision (first-sync-cutover-admission csvUndelivered); it never admits by itself.
   if(first.mode!=='first'&&!(first.mode==='review'&&first.blockers.length===1
     &&first.blockers[0].code==='FIRST_SYNC_HISTORY_REVIEW_REQUIRED'
-    &&first.historyReviewAssessment?.code==='FIRST_SYNC_DELIVERY_HISTORY_CHANGED'&&!first.progress))fail('HISTORY_REVIEW_REQUIRED');
+    &&(first.historyReviewAssessment?.code==='FIRST_SYNC_DELIVERY_HISTORY_CHANGED'
+      ||first.historyReviewAssessment?.status==='available')&&!first.progress))fail('HISTORY_REVIEW_REQUIRED');
 }
 async function prepareOnClient(client,{config,observation,state,input,options,lock=false}){
   await administrator(client,options);
