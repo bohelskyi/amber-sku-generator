@@ -10,7 +10,7 @@ const campaign = require('./first-sync-campaign');
 const { runNameCommit } = require('./first-sync-name-commit');
 const MAX_FILE = 4 * 1024 * 1024, MAX_JOURNAL = 32 * 1024 * 1024;
 const CONTRACT = 'first-sync-campaign-names-journal-v1';
-const TERMINAL = new Set(['imported', 'equal', 'optional_empty', 'outward_verified', 'name_received', 'seo_received']);
+const TERMINAL = new Set(['imported', 'equal', 'optional_empty', 'outward_verified', 'name_received', 'seo_received', 'remote_retained']);
 const RECORD_KEYS = ['target', 'scope', 'state', 'before', 'remote', 'after', 'source', 'mappingHash'];
 const deliveryEffect = Object.freeze({ directRemoteWrites: 0, directlyEnqueuedJobs: 0,
   ordinaryAutomaticRequest: 'Canonical name source updates may create or update an ordinary automatic sync request and generation when automatic sync is enabled.' });

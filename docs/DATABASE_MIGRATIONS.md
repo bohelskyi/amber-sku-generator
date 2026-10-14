@@ -10,7 +10,7 @@ Checksums canonicalize CRLF and lone CR to LF before hashing, so Windows and Lin
 
 ## Forward-only rule
 
-Checked-in migrations now span `000`–`079`. Migrations `000`–`078` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
+Checked-in migrations now span `000`–`080`. Migrations `000`–`079` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
 
 - never edit, reorder, rename, or replace an applied migration;
 - add the next lexically ordered forward migration;
@@ -450,3 +450,15 @@ It changes no product, receipt or delivery data, and 072's checksum is untouched
 The preview in [the canonical weight repair runbook](CANONICAL_WEIGHT_REPAIR.md)
 now scans all current active SV products; production application remains a
 separate reviewed run.
+
+## 080 — temporary legacy SV remote retention in first sync
+
+[080_first_sync_remote_retained.sql](../server/migrations/080_first_sync_remote_retained.sql)
+adds the terminal field state `remote_retained` for the explicit first-sync choice
+`retain_remote`, a shape constraint tying that state to its decision and evidence
+(`after` null, Amber absent, Magento present, scope `all`, semantic source), a
+trigger check that the product is a current legacy SV product, and includes the
+state in the terminal and completion sets by replacing `guard_first_sync_evidence`
+and `require_first_sync_progress`. It writes no product, receipt or delivery data;
+073/075/076 checksums are unchanged. See
+[temporary legacy SV remote retention](FIRST_SYNC_RETAIN_REMOTE.md).

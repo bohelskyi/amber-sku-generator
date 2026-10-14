@@ -23,7 +23,7 @@ const CONTROLS = new Set(['weight', 'sku', 'store_view_code', 'attribute_set_cod
   'use_config_manage_stock', 'manage_stock', 'out_of_stock_qty', 'weight']);
 const PHOTOS = new Set(['base_image', 'small_image', 'thumbnail_image', 'additional_images',
   'base_image_label', 'small_image_label', 'thumbnail_image_label', 'additional_image_labels']);
-const RECEIPT_STATES = new Set(['imported', 'equal', 'optional_empty', 'outward_verified', 'name_received', 'seo_received']);
+const RECEIPT_STATES = new Set(['imported', 'equal', 'optional_empty', 'outward_verified', 'name_received', 'seo_received', 'remote_retained']);
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/;
 const NM_EXACT_LENGTH_COMPARISON = 'nm-exact-length-cm-v1';
 const present = value => value !== null && value !== undefined
@@ -354,7 +354,7 @@ function projectFirstSyncFields(input) {
       && INFORMATION[category]?.includes(descriptor.key) && !descriptor.aliases.length && scope === 'all'
       && direct.wrappers.every(wrapper => wrapper === 'text'))) descriptor = null;
     let persistence = 'derived', local = { known: true, present: false }, kind = 'derived', type = 'text';
-    let unit, scale, constraints, prospective, reverseCandidates, comparison, importBlocker = null, semanticRequired = false;
+    let unit, scale, constraints, prospective, reverseCandidates, comparison, importBlocker = null, semanticRequired = false, remoteRetention = null;
     if (target === 'name') {
       persistence = 'name'; kind = 'name'; local = effectiveLocalName(product, evaluated, scope);
       descriptor = { kind: 'name', field: scope === 'all' ? 'magento_name_override.values.all' : 'magento_name_override.values.en' };
@@ -385,6 +385,10 @@ function projectFirstSyncFields(input) {
       const output = forward(target, scope);
       if (candidate && output.verified && output.value === candidate.evaluatedOutput) local.forwardOptionId = candidate.optionId;
       else if (local.present) reason ||= 'LOCAL_FORWARD_OPTION_NOT_PROVEN';
+      // Temporary legacy SV retention: Amber lacks the answer and the published
+      // output is verified empty, so ordinary delivery never sends this field.
+      if (isLegacySv(product) && local.known && !local.present && output.verified
+        && (output.value === '' || output.value == null)) remoteRetention = 'legacy-sv-empty-output-v1';
       importBlocker = descriptor?.key === 'is_calibrated' ? 'FIRST_SYNC_CANONICAL_CALIBRATION_REVIEW_REQUIRED'
         : isLegacySv(product) ? local.present ? 'FIRST_SYNC_LEGACY_MISSING_ONLY_REVIEW_REQUIRED' : null
         : product.characteristic_version_id != null && !product.full_sku ? null
@@ -523,7 +527,7 @@ function projectFirstSyncFields(input) {
       requiresRuntimeValidation: ['information', 'weight', 'price', 'characteristic', 'name'].includes(persistence),
       ...(persistence === 'weight' ? { mirrorAnswerKey: 'weight', setterContract: 'canonical-g-scale3-and-answer-coherence' } : {}),
       ...(persistence === 'price' ? { setterContract: 'manual-UAH-scale2-preserve-server-pricing-baseline' } : {}),
-      ...(importBlocker ? { importBlocker } : {}), ...(enReason && scope === 'en' ? { readReason: enReason } : {}),
+      ...(importBlocker ? { importBlocker } : {}), ...(remoteRetention ? { remoteRetention } : {}), ...(enReason && scope === 'en' ? { readReason: enReason } : {}),
       ...(reason ? { reason } : {}) });
     coverage.push({ target, scope, state: 'projected', persistence });
     if (reason) blockers.push({ code: reason, target, scope });
