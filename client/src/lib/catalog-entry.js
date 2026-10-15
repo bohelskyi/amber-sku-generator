@@ -8,9 +8,21 @@ export function getCatalogReturnTarget(value) {
     if (url.origin !== 'https://manager.local') return null;
     const rawPath = value.split('?')[0];
     if (rawPath !== url.pathname) return null;
-    if (url.pathname !== '/attention' && url.pathname !== '/admin/magento/prepare' && !/^\/admin\/magento\/categories\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\/?$/.test(url.pathname)) return null;
+    if (url.pathname !== '/attention' && url.pathname !== '/admin/catalog' && url.pathname !== '/admin/magento/prepare' && !/^\/admin\/magento\/categories\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\/?$/.test(url.pathname)) return null;
     return value;
   } catch { return null; }
+}
+
+export function getLegacyMagentoCatalogTarget(pathname, search = '', hash = '') {
+  const params = new URLSearchParams(search);
+  const match = pathname.match(/^\/admin\/magento\/categories\/([^/]+)$/);
+  if (match && ['products', 'legacy'].includes(params.get('tab')) && match[1] !== 'new') return null;
+  if (!['/admin/magento', '/admin/magento/categories'].includes(pathname) && !match) return null;
+  if (match?.[1] === 'new') params.set('action', 'new-category');
+  else if (match) {
+    try { params.set('category', decodeURIComponent(match[1])); } catch { return null; }
+  }
+  return { pathname: '/admin/catalog', search: params.toString(), hash };
 }
 
 export function resolveCatalogEntry(config, search, key) {

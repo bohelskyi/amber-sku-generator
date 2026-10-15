@@ -4,15 +4,17 @@ import { Link } from 'react-router-dom';
 import { AuthContext } from '../../auth/auth-context.js';
 import { api } from '../../lib/api.js';
 import { MagentoSyncStatus } from './MagentoSyncStatus.jsx';
-import { ProductMagentoAttention } from './ProductMagentoAttention.jsx';
-import { ProductNameConflict } from './ProductNameConflict.jsx';
-import { LifecycleReconciliationNotice } from './LifecycleReconciliationNotice.jsx';
+import { ProductMagentoNameReview } from './ProductMagentoNameReview.jsx';
+import { WorkspaceDialog } from '../workspace/WorkspaceDialog.jsx';
+import { attentionProblemGroups, problemTitle } from '../attention/sync-problem-presentation.js';
 
-export function ProductMagentoState({ product, onRepairCharacteristics, onSaved }) {
+export function ProductMagentoState({ product, onSaved }) {
   const { permissions = [], principalLifetime } = useContext(AuthContext) || {};
   const productId = product.productId;
   const [readState, setReadState] = useState({ productId: null, principalLifetime: null, current: null, error: '' });
   const [refresh, setRefresh] = useState(0);
+  const [reviewOwner, setReviewOwner] = useState(null);
+  const [reviewBusy, setReviewBusy] = useState(false);
   const readGeneration = useRef(0);
   const canRead = permissions.includes('products.view') && productId && principalLifetime?.valid !== false;
   const isCurrentRead = canRead
@@ -51,18 +53,30 @@ export function ProductMagentoState({ product, onRepairCharacteristics, onSaved 
     return () => { window.clearInterval(timer); window.removeEventListener('focus', update); };
   }, [canRead, waiting]);
   if (!canRead) return null;
-  const hasReadinessProblem = current?.problems?.some((problem) => problem.code === 'PRODUCT_EVALUATION_NOT_READY');
-  const lifecycleProblem = current?.problems?.find((problem) => problem.resolution === 'lifecycle_reconciliation');
+  const mainProblem = attentionProblemGroups(current?.problems || [])[0]?.problem;
+  const inheritedReview = product.status === 'active' && product.categoryCode === 'SV'
+    && product.magentoNameReviewRequired === true && !mainProblem && !current?.nameConflict;
+  const canReviewNames = inheritedReview && permissions.includes('exports.create');
+  const reviewOpen = reviewOwner?.productId === productId && reviewOwner?.principalLifetime === principalLifetime
+    && product.status === 'active' && permissions.includes('exports.create');
+  const needsAttention = current?.state === 'needs_attention';
+  const reason = inheritedReview ? 'Успадковані назви потребують підтвердження.' : needsAttention ? mainProblem ? problemTitle(mainProblem)
+    : current.reason || (current.nameConflict ? 'Потрібно узгодити назву товару.' : 'Причину ще не визначено. Перегляньте стан товару.') : null;
   return <div className="product-sync-state px-4 py-2" aria-live="polite">
-    <MagentoSyncStatus status={hasReadinessProblem || lifecycleProblem ? { ...current, reason: null } : current} />
-    {current?.state === 'needs_attention' && <Link className="text-xs underline" to={`/attention?problem=${encodeURIComponent(productId)}`}>Переглянути проблему</Link>}
-    {lifecycleProblem && <section className="mt-2"><h3 className="font-semibold">{lifecycleProblem.message}</h3>
-      <LifecycleReconciliationNotice problem={lifecycleProblem} article={product.publicSku} /></section>}
-    <ProductMagentoAttention key={`readiness-${productId}`} product={{ ...product, nameConflict: Boolean(current?.nameConflict) }} problems={current?.problems || []}
-      onRepairCharacteristics={onRepairCharacteristics}
-      onSaved={() => { setRefresh((value) => value + 1); onSaved?.(); }} />
-    <ProductNameConflict key={productId} productId={productId} available={Boolean(current?.nameConflict)} onSaved={() => { setRefresh((value) => value + 1); onSaved?.(); }} />
+    <div className="product-sync-summary">
+      {inheritedReview ? <p className="text-sm font-semibold text-amber-900">Потрібна перевірка назв</p>
+        : current && <MagentoSyncStatus status={{ ...current, reason: null }} />}
+      {reason && <p className="text-sm text-amber-900">{reason}</p>}
+      {!current && <p className="text-sm text-slate-600">{error || 'Читаємо стан Magento…'}</p>}
+    </div>
+    {inheritedReview ? canReviewNames
+      ? <button type="button" className="btn btn-outline btn-compact" onClick={() => setReviewOwner({ productId, principalLifetime })}>Перевірити назви</button>
+      : <p className="text-sm">Передайте перевірку назв оператору з дозволом на їх зміну.</p>
+      : needsAttention && <Link className="btn btn-outline btn-compact" to={`/attention?problem=${encodeURIComponent(productId)}`}>Переглянути проблему</Link>}
     <button className="sync-refresh" type="button" aria-label="Оновити стан Magento" onClick={() => setRefresh((value) => value + 1)}><RefreshCw size={14} aria-hidden="true" /></button>
-    {error && <span className="text-xs text-slate-500">{error}</span>}
+    {reviewOpen && <WorkspaceDialog title="Перевірка назв для Magento" onClose={() => setReviewOwner(null)} busy={reviewBusy}>
+      <ProductMagentoNameReview product={product} onBusyChange={setReviewBusy} onClose={() => setReviewOwner(null)}
+        onSaved={() => { setReviewOwner(null); setRefresh((value) => value + 1); onSaved?.(); }} />
+    </WorkspaceDialog>}
   </div>;
 }

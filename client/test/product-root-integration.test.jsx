@@ -62,6 +62,48 @@ function openWorkspace(permissions, initialEntry = '/products') {
   return router;
 }
 
+it('makes the register the only product search and opens category selection only after Create', async () => {
+  const originalGet = get.getMockImplementation();
+  get.mockImplementation((url, ...args) => url === '/products/register'
+    ? Promise.resolve({ data: { items: [], pageInfo: { hasMore: false, nextCursor: null }, filterOptions: { categories: [] } } })
+    : originalGet(url, ...args));
+  const router = openWorkspace(['products.view', 'products.decode', 'products.create', 'history.view']);
+  await screen.findByRole('heading', { name: 'Реєстр товарів' });
+  expect(screen.getAllByRole('textbox')).toHaveLength(1);
+  expect(screen.getByRole('textbox', { name: 'Пошук товарів' })).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: 'Оберіть категорію' })).toBeNull();
+  expect(screen.queryByRole('heading', { name: 'Знайти за артикулом' })).toBeNull();
+  expect(post).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('link', { name: 'Створити товар' }));
+  await waitFor(() => expect(router.state.location.pathname).toBe('/products/create'));
+  expect(screen.getByRole('heading', { name: 'Оберіть категорію' })).toBeTruthy();
+  expect(screen.queryByRole('textbox', { name: 'Пошук товарів' })).toBeNull();
+  expect(post).not.toHaveBeenCalled();
+});
+
+it('keeps exact opening for a user without register permission and never reads inventory', async () => {
+  openWorkspace(['products.view', 'products.decode']);
+  await screen.findByRole('heading', { name: 'Знайти за артикулом' });
+  expect(screen.queryByRole('heading', { name: 'Реєстр товарів' })).toBeNull();
+  expect(get.mock.calls.some(([url]) => url === '/products/register')).toBe(false);
+  expect(screen.queryByRole('link', { name: 'Створити товар' })).toBeNull();
+});
+
+it('shows the final saved price before optional calculation evidence without recalculating it', async () => {
+  decoded.pricing = { totalPriceUah: 1270, totalPrice: 31.75, calculatedPriceUah: 1258,
+    pricePerGramUah: 99, pricePerGram: 2.475, matrixName: 'Тестова матриця', source: 'stored' };
+  const { formatUah } = await import('../src/lib/formatters.js');
+  openWorkspace(['products.view', 'products.decode', 'products.recount'], '/products/open?article=AG-000091');
+  await screen.findByRole('heading', { level: 1, name: 'Товар AG-000091' });
+  const price = screen.getByText(formatUah(1270));
+  expect(price.closest('details')).toBeNull();
+  const calculation = screen.getByText('Розрахунок ціни', { selector: 'summary' }).closest('details');
+  expect(calculation.open).toBe(false);
+  expect(within(calculation).getByText('Тестова матриця')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Змінити характеристики' })).toBeTruthy();
+  expect(post.mock.calls.map(([url]) => url)).toEqual(['/decode']);
+});
+
 it.each([
   { permissions: ['products.view', 'products.archive'], capability: true, offered: true },
   { permissions: ['products.view'], capability: true, offered: false },
@@ -405,7 +447,8 @@ it('shows a separate deferred-size review before local save even when native eva
   const save = await screen.findByRole('button', { name: 'Зберегти товар' });
   expect(save.disabled).toBe(false);
   const review = screen.getByRole('link', { name: 'Перевірити значення та відповідність у новій вкладці' });
-  expect(review.href).toContain('/admin/magento/categories/AR?question=size');
+  expect(new URL(review.href).pathname).toBe('/admin/catalog');
+  expect(Object.fromEntries(new URL(review.href).searchParams)).toMatchObject({ category: 'AR', view: 'attributes', question: 'size', returnTo: '/products/create?category=AR' });
   expect(review.href).toContain('value=29');
   expect(screen.getByText('«Розмір»: значення «Двадцять дев’ятий розмір» відкладено в правилах')).toBeTruthy();
   expect(screen.getByText('Можна зберегти лише в менеджері.')).toBeTruthy();

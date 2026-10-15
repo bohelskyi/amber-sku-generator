@@ -8,6 +8,7 @@ import { Workspace } from '../src/router.jsx';
 const adminRender = vi.hoisted(() => vi.fn(({ mode }) => <h1>{mode}</h1>));
 vi.mock('../src/pages/AppPage.jsx', () => ({ default: () => <h1>Товари</h1> }));
 vi.mock('../src/pages/AdminPage.jsx', () => ({ default: adminRender }));
+vi.mock('../src/pages/CatalogPage.jsx', () => ({ default: () => <h1>Каталог</h1> }));
 vi.mock('../src/pages/CorrectionHistoryPage.jsx', () => ({ default: () => <h1>Історія товарів</h1> }));
 vi.mock('../src/pages/CorrectionRequestsPage.jsx', () => ({ default: () => <h1>Історичні запити</h1> }));
 vi.mock('../src/pages/MagentoIntegrationPage.jsx', () => ({ default: () => <h1>Інтеграція Magento</h1> }));
@@ -62,7 +63,8 @@ it('keeps current Magento template configuration independent of legacy export ac
   await screen.findByRole('heading', { name: 'Налаштування' });
   expect(screen.getByRole('link', { name: /^Ціноутворення/ }).getAttribute('href')).toBe('/admin/pricing');
   expect(screen.queryByRole('link', { name: /^Шаблони інтеграції/ })).toBeNull();
-  expect(screen.getByRole('link', { name: /^Інтеграція Magento/ }).getAttribute('href')).toBe('/admin/magento');
+  expect(screen.getByRole('link', { name: /^Каталог/ }).getAttribute('href')).toBe('/admin/catalog');
+  expect(screen.getByRole('link', { name: /^Підключення магазину/ }).getAttribute('href')).toBe('/admin/magento/overview');
   expect(document.querySelector('.workspace-directory a[href="/exports"]')).toBeNull();
   expect(screen.queryByRole('link', { name: /Історичний експорт/ })).toBeNull();
 });
@@ -86,6 +88,27 @@ it('opens old template deep links inside Magento with exact version and field co
   expect(router.state.location.search).toBe('?version=immutable&field=name');
   expect(router.state.location.hash).toBe('#evidence');
   expect(screen.getByRole('link', { name: 'Налаштування' }).getAttribute('aria-current')).toBe('page');
+});
+
+it.each([['catalog.view'], ['export_templates.view']])('opens unified catalog with either independent view capability: %s', async (permission) => {
+  mount('/admin/catalog?category=BR', [permission]);
+  await screen.findByRole('heading', { name: 'Каталог' });
+});
+
+it('redirects the old Magento category entrance while retaining exact task query and hash', async () => {
+  const router = mount('/admin/magento/categories/BR?question=color&value=0&draft=kept#field', ['catalog.view']);
+  await screen.findByRole('heading', { name: 'Каталог' });
+  expect(router.state.location.pathname).toBe('/admin/catalog');
+  expect(Object.fromEntries(new URLSearchParams(router.state.location.search))).toEqual({ question: 'color', value: '0', draft: 'kept', category: 'BR' });
+  expect(router.state.location.hash).toBe('#field');
+});
+
+it('keeps the historical SKU workspace and advanced Magento capability boundaries', async () => {
+  mount('/admin/catalog/structure?category=BR', ['catalog.view']);
+  await screen.findByRole('heading', { name: 'catalog' });
+  cleanup();
+  mount('/admin/magento/administrator', ['catalog.view']);
+  await screen.findByText('Немає доступу до цього розділу.');
 });
 
 it('keeps legacy product links while enforcing the independent decode boundary', async () => {

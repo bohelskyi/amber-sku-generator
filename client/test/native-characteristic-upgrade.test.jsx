@@ -23,7 +23,8 @@ for (const [category, question] of [['NM', 'extra'], ['AR', 'size']]) {
         returnTo="/attention?problem=42" />
     </MemoryRouter></AuthContext.Provider>);
     const link = new URL(screen.getByRole('link', { name: 'Підготувати підтримку нових товарів' }).href);
-    expect(link.pathname).toBe(`/admin/magento/categories/${category}`);
+    expect(link.pathname).toBe('/admin/catalog');
+    expect(link.searchParams.get('category')).toBe(category);
     expect(link.searchParams.get('productId')).toBe('42');
     expect(link.searchParams.get('question')).toBe(question);
     expect(link.searchParams.get('returnTo')).toBe('/attention?problem=42');

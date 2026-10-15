@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { repairContext, safeRepairReturn, withRepairContext } from '../src/lib/magento-repair-context.js';
-import { attentionProblemGroups, nextAction, problemRepairUrl, problemTitle } from '../src/components/attention/sync-problem-presentation.js';
+import { attentionProblemGroups, nextAction, problemRepairUrl, problemSubject, problemTitle } from '../src/components/attention/sync-problem-presentation.js';
+
+test('system product scope is not a characteristic, while explicit and mapped field labels remain', () => {
+  assert.equal(problemSubject({ target: 'product' }).field, null);
+  assert.equal(problemSubject({ target: 'product', fieldLabel: 'Колір каменю' }).field, 'Колір каменю');
+  assert.equal(problemSubject({ target: 'weight' }).field, 'Вага');
+  assert.equal(problemSubject({ target: 'name', resolutionKind: 'first_sync_fields' }).field, 'Назва');
+});
 
 test('attention grouping retains exact repair targets and all original evidence while prioritizing uncertain operations', () => {
   const mapping = { code: 'OPTION_BINDING_REVIEW_REQUIRED', resolution: 'integration_configuration', target: 'finish', value: 0 };
@@ -21,11 +28,12 @@ test('repair navigation keeps exact source and return context without treating t
   const returnTo = '/attention?category=SV&reason=integration&problem=42';
   const path = problemRepairUrl({ code: 'CATEGORY_PATH_MISSING', path: 'Default/Сувеніри/Птахи' }, { productId: 42, category: 'SV' }, returnTo);
   const url = new URL(path, 'http://local.test');
-  assert.equal(url.pathname, '/admin/magento/categories/SV');
+  assert.equal(url.pathname, '/admin/catalog');
   assert.equal(url.searchParams.get('view'), 'placement');
   assert.deepEqual(repairContext(url.searchParams), { productId: '42', category: 'SV', path: 'Default/Сувеніри/Птахи', returnTo });
-  const field = problemRepairUrl({ code: 'OPTION_UNRESOLVED', target: 'kamin_obrobka', question: 'finish', value: '0' }, { productId: 42, category: 'SV' }, returnTo);
+  const field = problemRepairUrl({ code: 'OPTION_UNRESOLVED', target: 'kamin_obrobka', question: 'finish', value: 0 }, { productId: 42, category: 'SV' }, returnTo);
   assert.equal(new URL(field, 'http://local.test').searchParams.get('value'), '0');
+  assert.deepEqual(repairContext(new URL(field, 'http://local.test').searchParams), { productId: '42', category: 'SV', field: 'kamin_obrobka', question: 'finish', value: '0', returnTo });
   assert.equal(nextAction({ code: 'OPTION_UNRESOLVED' }), 'Знайти або додати значення');
   assert.match(problemTitle({ code: 'CATEGORY_PATH_MISSING', path: 'Root/Child', message: 'Категорії немає' }), /Root\/Child/);
 });

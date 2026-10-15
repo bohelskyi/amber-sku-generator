@@ -592,27 +592,29 @@ function PriceSummary({
   return (
     <>
       <div className="builder-price-section">
-        <p className="builder-summary-section-title">Ціна</p>
-        <PriceRow
-          label="Розрахункова"
-          uah={formatPositivePrice(calculatedPriceUah, formatWholeUah)}
-          usd={formatPositivePrice(calculatedPriceUsd, formatUsd)}
-        />
-        <PriceRow
-          label="Фінальна"
-          uah={formatPositivePrice(finalPriceUah, formatUah)}
-          usd={formatPositivePrice(finalPriceUsd, formatUsd)}
-          strong
-        />
+        <p className="builder-summary-section-title">Фінальна ціна</p>
+        <p className="product-final-price">{formatPositivePrice(finalPriceUah, formatUah)}</p>
       </div>
-      <div className="builder-price-section">
-        <p className="builder-summary-section-title">За грам · ₴ / USD</p>
-        <PriceRow
-          label="Розрахункова"
-          uah={showPerGram ? formatPositivePrice(pricePerGramUah, formatUahPerGram) : '—'}
-          usd={showPerGram ? formatPositivePrice(pricePerGramUsd, formatUsd) : '—'}
-        />
-      </div>
+      <details className="decode-details">
+        <summary>Розрахунок ціни</summary>
+        <div className="decode-details-body">
+          <PriceRow
+            label="Розрахункова"
+            uah={formatPositivePrice(calculatedPriceUah, formatWholeUah)}
+            usd={formatPositivePrice(calculatedPriceUsd, formatUsd)}
+          />
+          <PriceRow
+            label="Фінальна"
+            uah={formatPositivePrice(finalPriceUah, formatUah)}
+            usd={formatPositivePrice(finalPriceUsd, formatUsd)}
+            strong
+          />
+          {showPerGram && <><p className="builder-summary-section-title">За грам · ₴ / USD</p>
+            <PriceRow label="Розрахункова" uah={formatPositivePrice(pricePerGramUah, formatUahPerGram)}
+              usd={formatPositivePrice(pricePerGramUsd, formatUsd)} />
+          </>}
+        </div>
+      </details>
     </>
   );
 }

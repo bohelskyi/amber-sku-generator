@@ -3,7 +3,8 @@ const editor = require('./integration-editor.service');
 const { getAppConfig } = require('../catalog/catalog-read-model');
 const { review } = require('./binding-review');
 
-const TEXT = new Set(['text', 'textarea']);
+// Presentation purpose only: an ordinary text attribute is still a characteristic.
+const TEXT = new Set(['name', 'description', 'short_description', 'meta_title', 'meta_description', 'meta_keyword']);
 const PROTECTED = new Set(['sku', 'store_view_code', 'product_type']);
 const EDITABLE = new Set(['text', 'textarea', 'select', 'multiselect', 'boolean', 'price', 'weight']);
 const LABELS = { name: 'Назва товару', description: 'Опис', short_description: 'Короткий опис',
@@ -100,8 +101,7 @@ function projectCategory(catalog, revision, definition, categoryCode, input = {}
     const entries = decisions.filter((e) => e.target === target);
     const unresolved = entries.filter((e) => !['approved', 'not_applicable', 'blocked'].includes(e.reviewState)).length;
     const policy = entries.find((e) => e.kind === 'policy');
-    const text = !['sku', 'weight', 'price', 'categories', 'attribute_set_code'].includes(code)
-      && (TEXT.has(remote?.frontend_input) || ['name', 'description', 'short_description', 'meta_title', 'meta_description', 'meta_keyword'].includes(code));
+    const text = TEXT.has(code);
     const service = PROTECTED.has(code) || SERVICE.has(code) || remote?.is_user_defined === false && !REGULAR_NATIVE.has(code);
     const empty = emptyLiteral(definition, expression);
     const reviewReasons = expression === undefined ? [] : fieldReview(binding, route, entries, remote, set?.attributeCodes.includes(code), empty);

@@ -74,7 +74,7 @@ it('the rendered recount field leaves conflicting history unresolved until an ex
   }
   render(<MemoryRouter><Harness/></MemoryRouter>);
   fireEvent.click(screen.getByRole('button', { name: 'Відкрити товар' }));
-  fireEvent.click(await screen.findByRole('button', { name: 'Переоблік' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Змінити характеристики' }));
   const input = screen.getByRole('textbox', { name: /Вага виробу/ });
   expect(input.value).toBe(''); expect(screen.getByRole('button', { name: 'Продовжити' }).disabled).toBe(true);
   expect(screen.getByText(/Збережена вага товару: 12.3 г; характеристика: 14,2 г/)).toBeTruthy();

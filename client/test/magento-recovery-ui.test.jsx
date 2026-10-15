@@ -72,7 +72,10 @@ it('blocked category review gives the exact new category workspace and requires 
   show(['exports.reconcile','export_templates.view'], { guided: true, categoryCode: 'KL' });
   fireEvent.click(screen.getByRole('button', { name: 'Перевірити товар у Magento' }));
   const link = await screen.findByRole('link', { name: 'Перевірити відповідність категорії' });
-  expect(link.getAttribute('href')).toContain('/admin/magento/categories/KL?view=placement');
+  const destination = new URL(link.href);
+  expect(destination.pathname).toBe('/admin/catalog');
+  expect(destination.searchParams.get('category')).toBe('KL');
+  expect(destination.searchParams.get('view')).toBe('placement');
   expect(link.getAttribute('href')).toContain('productId=7');expect(link.getAttribute('href')).toContain('returnTo=');
   expect(screen.queryByRole('checkbox')).toBeNull();expect(screen.queryByRole('button', { name: 'Підтвердити товар і дозволити оновлення' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Повторити перевірку після виправлення' }));

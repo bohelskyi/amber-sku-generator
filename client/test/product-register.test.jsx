@@ -69,13 +69,13 @@ it('shows public identity, preserves missing price, and opens historical evidenc
 it('keeps search and filters in the address so browser Back restores the register', async () => {
   const { router } = mount();
   await waitFor(() => expect(productsApi.listRegister).toHaveBeenCalledTimes(1));
-  fireEvent.change(screen.getByPlaceholderText('Артикул або внутрішній SKU'), { target: { value: 'AG-000021' } });
+  fireEvent.change(screen.getByRole('textbox', { name: 'Пошук товарів' }), { target: { value: 'AG-000021' } });
   fireEvent.click(screen.getByRole('button', { name: 'Знайти' }));
   await waitFor(() => expect(router.state.location.search).toBe('?search=AG-000021'));
   await waitFor(() => expect(productsApi.listRegister).toHaveBeenLastCalledWith(expect.objectContaining({ search: 'AG-000021' })));
 
   await router.navigate(-1);
-  await waitFor(() => expect(screen.getByPlaceholderText('Артикул або внутрішній SKU').value).toBe(''));
+  await waitFor(() => expect(screen.getByRole('textbox', { name: 'Пошук товарів' }).value).toBe(''));
   expect(router.state.location.search).toBe('');
 });
 

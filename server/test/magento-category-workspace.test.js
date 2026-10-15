@@ -31,6 +31,29 @@ test('category shows the complete selected set, unsupported/unmapped fields and 
   assert.deepEqual(f, before);
 });
 
+test('text-view purpose includes name and SEO fields while ordinary text characteristics remain in characteristics', () => {
+  const f = context();
+  const textFields = ['name', 'description', 'short_description', 'meta_title', 'meta_description', 'meta_keyword'];
+  for (const code of [...textFields.filter((item) => item !== 'name'), 'engraving', 'care_note']) {
+    f.revision.schema.attributes.push({ attribute_code: code, frontend_input: code === 'care_note' ? 'textarea' : 'text',
+      is_user_defined: true, default_frontend_label: code });
+    f.revision.schema.attributeSets[0].attributeCodes.push(code);
+  }
+  const before = structuredClone(f);
+  for (const rowId of ['base', 'english']) {
+    const result = workspace.projectCategory(f.catalog, f.revision, f.definition, 'XG', { rowId });
+    for (const code of textFields) assert.equal(result.attributes.find((a) => a.code === code).text, true, code);
+    for (const code of ['new_note', 'engraving', 'care_note']) {
+      const field = result.attributes.find((a) => a.code === code);
+      assert.equal(field.text, false, code);
+      assert.equal(field.editable, true, code);
+      assert.equal(field.service, false, code);
+    }
+    assert.deepEqual(result.template.definition, before.definition);
+  }
+  assert.deepEqual(f, before);
+});
+
 test('category includes unresolved decisions across the publication without option bodies or changing state', () => {
   const f = context();
   f.definition.groups.push({ route: 'OTHER' });

@@ -32,8 +32,8 @@ it('checks only the exact selected product explicitly and preserves repair conte
   await screen.findByText('Перевірка виявила перешкоди для доставки.');
   expect(api.post).toHaveBeenCalledWith('/admin/magento-integration/product-preview', { productId: 42 }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
   const link = new URL(screen.getByRole('link', { name: 'Знайти або додати значення' }).href);
-  expect(link.pathname).toBe('/admin/magento/categories/SV');
-  expect(Object.fromEntries(link.searchParams)).toMatchObject({ view: 'attributes', productId: '42', field: 'kamin_obrobka', question: 'finish', value: '0', returnTo });
+  expect(link.pathname).toBe('/admin/catalog');
+  expect(Object.fromEntries(link.searchParams)).toMatchObject({ category: 'SV', view: 'attributes', productId: '42', field: 'kamin_obrobka', question: 'finish', value: '0', returnTo });
   expect(screen.getByText('Полірований')).toBeTruthy();
   expect(screen.queryByRole('button', { name: /Надіслати|Застосувати/ })).toBeNull();
 });

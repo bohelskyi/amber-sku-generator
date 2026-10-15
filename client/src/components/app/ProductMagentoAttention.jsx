@@ -6,6 +6,7 @@ import { ProductMagentoNameReview } from './ProductMagentoNameReview.jsx';
 import { ProductInformationRepair } from './ProductInformationRepair.jsx';
 import { Notice } from './UiPrimitives.jsx';
 import { TechnicalDisclosure } from '../ui/index.js';
+import { problemRepairUrl } from '../attention/sync-problem-presentation.js';
 
 const FIELD_LABELS = Object.freeze({
   name: 'Назва українською та англійською',
@@ -49,10 +50,10 @@ export function ProductMagentoAttention({ product, problems = [], onRepairCharac
         {needsCharacteristics && canRepairCharacteristics && <button type="button" className="btn btn-primary" onClick={onRepairCharacteristics}>
           Виправити характеристики
         </button>}
-        {!compact && permissions.includes('export_templates.view') && product.categoryCode && mappingFields.map((field) => <Link key={field} className="btn btn-outline" to={`/admin/magento/categories/${encodeURIComponent(product.categoryCode)}?field=${encodeURIComponent(field)}`}>
+        {!compact && permissions.includes('export_templates.view') && product.categoryCode && mappingFields.map((field) => <Link key={field} className="btn btn-outline" to={problemRepairUrl({ ...readiness, field }, { productId: product.productId, category: product.categoryCode }, `/attention?problem=${product.productId}`)}>
           Відповідності: {FIELD_LABELS[field] || field}
         </Link>)}
-        {!compact && needsProtectedContractReview && permissions.includes('export_templates.view') && product.categoryCode && <Link className="btn btn-outline" to={`/admin/magento/categories/${encodeURIComponent(product.categoryCode)}`}>Перевірити правила інтеграції</Link>}
+        {!compact && needsProtectedContractReview && permissions.includes('export_templates.view') && product.categoryCode && <Link className="btn btn-outline" to={problemRepairUrl(readiness, { productId: product.productId, category: product.categoryCode }, `/attention?problem=${product.productId}`)}>Перевірити правила інтеграції</Link>}
       </div>
       {needsProtectedContractReview && <p className="mt-2">Захищені поля потребують перевірки правил інтеграції адміністратором.</p>}
       {((needsNameCompletion || inheritedNameReview) && !canEditName) || (needsSize && !canRepairInformation) || (needsCharacteristics && !canRepairCharacteristics)

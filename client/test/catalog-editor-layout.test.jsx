@@ -18,15 +18,15 @@ it.each(['BR', 'NM'])('keeps a filled optional new question intact beside a long
   const post = vi.spyOn(api, 'post').mockResolvedValue({ data: { success: true } });
   const router = createMemoryRouter([{ path: '*', element: <AdminPage mode="catalog" /> }], { initialEntries: ['/admin/catalog?category=' + code + '&action=new-question'] });
   render(<AuthContext.Provider value={{ permissions: ['catalog.view', 'catalog.manage'], roles: [], principalLifetime: { valid: true } }}><RouterProvider router={router} /></AuthContext.Provider>);
-  fireEvent.change(await screen.findByRole('textbox', { name: 'Назва питання' }), { target: { value: 'TEST layout optional' } });
+  fireEvent.change(await screen.findByRole('textbox', { name: 'Назва характеристики' }), { target: { value: 'TEST layout optional' } });
   const required = screen.getByRole('checkbox', { name: 'Обовʼязкове' }); if (required.checked) fireEvent.click(required);
   fireEvent.click(screen.getByText('Технічні параметри'));
   fireEvent.change(screen.getByRole('textbox', { name: 'Ключ' }), { target: { value: 'test_layout_optional' } });
-  expect(screen.getByRole('textbox', { name: 'Назва питання' }).value).toBe('TEST layout optional');
+  expect(screen.getByRole('textbox', { name: 'Назва характеристики' }).value).toBe('TEST layout optional');
   expect(screen.getByRole('textbox', { name: 'Ключ' }).value).toBe('test_layout_optional');
   expect(required.checked).toBe(false); expect(screen.getByText('Питання 30')).toBeTruthy();
   expect(post).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: 'Зберегти питання' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Зберегти характеристику' }));
   await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
   expect(post.mock.calls[0][0]).toBe('/admin/question');
   expect(post.mock.calls[0][1]).toMatchObject({ category_code: code, key: 'test_layout_optional', label: 'TEST layout optional', required: 0 });

@@ -69,9 +69,9 @@ export function ColumnDialog({ title, children, onCancel, firstInput = false, su
 }
 
 const emptyValue = () => ({ mode: 'literal', text: '', source: '', output: '', table: '' });
-export function NewColumnDialog({ integration = false, definition, registry, groupIndex, rowIndex, anchor, onCreate, onCancel, readOnly, onPendingChange, loadSource, suspended, initialTarget, initialQuestion }) {
+export function NewColumnDialog({ integration = false, definition, registry, groupIndex, rowIndex, anchor, onCreate, onCancel, readOnly, onPendingChange, loadSource, suspended, initialTarget, initialQuestion, initialLabel = '' }) {
   const group = definition.groups[groupIndex];
-  const [value, setValue] = useState({ name: '', code: integration && initialTarget && !codeError(initialTarget, group.columns) ? initialTarget : '', before: anchor ?? '' });
+  const [value, setValue] = useState({ name: integration ? initialLabel : '', code: integration && initialTarget && !codeError(initialTarget, group.columns) ? initialTarget : '', before: anchor ?? '' });
   const [rows, setRows] = useState(() => {
     const source = integration && initialQuestion ? columnSourceChoices(definition, registry, group.route).find((item) => item.descriptor.key === initialQuestion && item.descriptor.category === group.route) : null;
     return [0, 1].map((index) => index === rowIndex && source ? { ...emptyValue(), mode: 'source', source: source.id, output: source.descriptor.kind === 'semantic' ? '' : 'raw' } : emptyValue());

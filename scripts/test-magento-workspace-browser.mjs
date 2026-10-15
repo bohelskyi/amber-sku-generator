@@ -1,6 +1,7 @@
 // Built-client browser verification against local HTTP fixtures only.
 // Fixture auth is not a real login or human acceptance. No database or Magento is used.
 // node scripts/test-magento-workspace-browser.mjs <installed Chromium/Edge executable>
+// Add --resources-only for the current Catalog resource create/recovery journey.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -17,6 +18,7 @@ const { catalog } = require('../server/test/fixtures/magento-v1/contract');
 const definition = materializeMagentoV1(catalog());
 const template = { id: 'template', display_name: 'Правила Magento', draft: { revision: '4', definitionHash: 'fixture-hash', definition }, versions: [{ id: 'template-version', versionNumber: '3', definition }] };
 const executable = process.argv[2];
+const resourcesOnly = process.argv.includes('--resources-only');
 assert.ok(executable && existsSync(executable), 'Provide an installed Chromium/Edge executable');
 const directory = mkdtempSync(path.join(tmpdir(), 'amber-magento-browser-'));
 const profile = path.join(directory, 'profile');
@@ -71,7 +73,7 @@ const server = http.createServer(async (request, response) => {
       case 'GET /api/auth/me': data = { identity: { issuer: 'https://fixture.example.invalid', sub: 'local-fixture', name: 'Оператор' },
         applicationUser: { id: 1, status: 'active' }, csrfToken: 'fixture-only', permissions,
         roles: administrator ? [{ id: 1, key: 'administrator', displayName: 'Адміністратор' }] : [{ id: 2, key: 'operator', displayName: 'Administrator' }] }; break;
-      case 'GET /api/config': case 'GET /api/admin/magento-integration/creation-inputs': data = config; break;
+      case 'GET /api/config': case 'GET /api/admin/config': case 'GET /api/admin/magento-integration/creation-inputs': data = config; break;
       case 'GET /api/products': data = []; break;
       case 'POST /api/admin/category':
         assert.equal(createdCategory,null,'Category creation must not repeat during checkpoint reads');
@@ -103,6 +105,23 @@ const server = http.createServer(async (request, response) => {
       case 'POST /api/admin/magento-integration/attributes/reconcile':
         assert.equal(body.actionId,'attribute-assignment');data=attributeActions.find((action)=>action.id===body.actionId);
         data.state='verified';data.canReconcile=false;data.assignmentPlacementVerified=false;data.message='Атрибут доступний у вибраному наборі. Правила передачі ще потрібно підключити.';break;
+      case 'POST /api/admin/magento-integration/options/inspect':
+        assert.deepEqual(body,{bindingRevisionId:'draft',expectedRevision:'7',attributeCode:'fixture_choice',amberGroup:'SV',questionKey:'kind',valueId:'missing'});
+        data={target:{attributeCode:'fixture_choice',label:'Потрібне значення'},metadataFingerprint:'fixture-metadata',candidates:[],warning:'Створення потребує окремого підтвердження.'};break;
+      case 'POST /api/admin/magento-integration/options/attest':
+        assert.equal(body.metadataFingerprint,'fixture-metadata');assert.equal(body.confirmOrdinary,true);assert.equal(body.confirmHiddenLimit,true);
+        data={id:'option-attestation'};break;
+      case 'POST /api/admin/magento-integration/options/preview':
+        assert.equal(body.attestationId,'option-attestation');
+        data={label:'Потрібне значення',target:{attributeCode:'fixture_choice'},previewToken:'option-reviewed'};break;
+      case 'POST /api/admin/magento-integration/options/apply':
+        assert.equal(body.previewToken,'option-reviewed');assert.equal(body.valueId,'missing');assert.equal(body.attestationId,'option-attestation');
+        assert.equal(attributeActions.some(action=>action.kind==='option'),false,'Uncertain option create cannot be sent twice');
+        attributeActions.push({id:'option-create',kind:'option',state:'dispatched',attributeCode:'fixture_choice',label:'Потрібне значення',canReconcile:true,message:'Створення надіслано. Результат ще не підтверджено.'});
+        response.statusCode=409;data={error:'Створення надіслано. Перевірте збережений результат.',details:{actionId:'option-create'}};break;
+      case 'POST /api/admin/magento-integration/options/reconcile':
+        assert.deepEqual(body,{actionId:'option-create'});data=attributeActions.find(action=>action.id===body.actionId);
+        data.state='verified';data.canReconcile=false;data.remoteId='999';data.message='Створене значення підтверджено читанням. Відповідність ще потрібно перевірити.';break;
       case 'GET /api/products/register': data = { items: [], pageInfo: { hasMore: false, nextCursor: null },
         filterOptions: { categories: [{ code: 'SV', name: 'Сувеніри' }] } }; break;
       case 'GET /api/export/status': data = { delivery: { legacyProductCsvEnabled: false, automaticSyncEnabled: true } }; break;
@@ -197,6 +216,7 @@ try {
   await command('Page.addScriptToEvaluateOnNewDocument', { source: "window.fixtureCopies=[];Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>{window.fixtureCopies.push(text)}}});" });
   await command('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
   const checks = [];
+  if (!resourcesOnly) {
   for (const width of [1440, 390, 360]) {
     await command('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: 1, mobile: false });
     await navigate('/admin/magento'); await wait("document.body.textContent.includes('Проблеми поточної доставки')");
@@ -337,10 +357,13 @@ try {
   await wait("document.body.textContent.includes('Незбережена чернетка') && !document.querySelector('[aria-label=\"Розміщення товарів у магазині\"]')");
   assert.equal(requests.filter((item)=>item.method!=='GET').length,writesBeforePlacement,'Local placement apply cannot create Magento categories or publish');
   checks.push({subcategory:'observed parent, explicit name and semantic condition',application:'local draft only; no write or publication'});
+  }
 
   // Real built UI, local fixture commands only: create -> exact membership ->
   // lost response -> reload -> GET-only recovery -> contextual rules handoff.
-  const attributeRoute = '/admin/magento/prepare?category=SV&draft=draft&intent=attribute&step=1';
+  administrator = true;
+  await command('Emulation.setDeviceMetricsOverride', { width:390,height:1000,deviceScaleFactor:1,mobile:false });
+  const attributeRoute = '/admin/catalog?catalogTask=resource&category=SV&draft=draft&intent=attribute&step=1';
   await navigate(attributeRoute);
   await wait("!![...document.querySelectorAll('label')].find(l=>l.childNodes[0]?.textContent.trim()==='Назва англійською')");
   assert.equal(await evaluate("[...document.querySelectorAll('label')].find(l=>l.childNodes[0]?.textContent.trim()==='Обов’язкове заповнення').querySelector('select').value"),'');
@@ -377,7 +400,36 @@ try {
   await wait("location.pathname.includes('/admin/magento/rules/template') && new URLSearchParams(location.search).get('field')==='amber_fixture_texture'");
   checks.push({attributeCreation:'explicit reviewed profile',membership:'separate reviewed placement',recovery:'reload exact original action, no duplicate POST',rulesHandoff:'exact attribute context'});
 
-  await navigate('/'); await wait("!![...document.querySelectorAll('.home-category-option')].find(b=>b.textContent.includes('Сувеніри'))");
+  const optionRoute='/admin/catalog?catalogTask=resource&category=SV&draft=draft&intent=option&step=1&question=kind&value=missing&field=fixture_choice';
+  await navigate(optionRoute);
+  await wait("!![...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Перевірити значення Magento'&&!b.disabled)");
+  assert.equal(await evaluate("[...document.querySelectorAll('label')].find(l=>l.childNodes[0]?.textContent.trim()==='Значення Amber').querySelector('select').value"),'kind:missing');
+  await click('Перевірити значення Magento');
+  await wait("document.querySelectorAll('input[type=checkbox]').length===2");
+  assert.equal(requests.some(item=>item.path.endsWith('/options/apply')),false);
+  await evaluate("document.querySelectorAll('input[type=checkbox]').forEach(input=>input.click())");
+  await setField('Підстава перевірки','Перевірено звичайний select у локальній фікстурі');
+  await click('Підтвердити можливість і переглянути створення');
+  await wait("!![...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Створити значення в Magento')");
+  assert.equal(requests.some(item=>item.path.endsWith('/options/apply')),false,'Inspection and preview never create an option');
+  await noOverflow('Reviewed new option at390px');await screenshot('option-reviewed-390');
+  await click('Створити значення в Magento');
+  await wait("document.body.textContent.includes('Створення надіслано. Результат ще не підтверджено.')");
+  await navigate(optionRoute);
+  await wait("!![...document.querySelectorAll('summary')].find(s=>s.textContent==='Історія дій цього типу (1)')");
+  await click('Історія дій цього типу (1)');
+  await click('Перевірити результат читанням');
+  await wait("document.body.textContent.includes('Створене значення підтверджено читанням.')");
+  assert.equal(requests.filter(item=>item.path.endsWith('/options/apply')).length,1,'Uncertain option creation is not replayed after reload');
+  assert.equal(requests.filter(item=>item.path.endsWith('/options/reconcile')).length,1);
+  assert.equal(await evaluate("new URLSearchParams(location.search).get('refresh')"),'draft','A new resource requires a fresh observation before publication');
+  assert.equal(requests.some(item=>item.path.endsWith('/publish')),false);
+  await command('Emulation.setDeviceMetricsOverride',{width:360,height:1000,deviceScaleFactor:1,mobile:false});
+  await noOverflow('Recovered option at360px');await screenshot('option-recovered-360');
+  checks.push({optionCreation:'exact missing value, explicit attestation and preview',recovery:'uncertain result read after reload, no duplicate create',publication:'requires fresh observation; no publish call'});
+
+  if (!resourcesOnly) {
+  await navigate('/products/create'); await wait("!![...document.querySelectorAll('.home-category-option')].find(b=>b.textContent.includes('Сувеніри'))");
   await evaluate("[...document.querySelectorAll('.home-category-option')].find(b=>b.textContent.includes('Сувеніри')).click()");
   await click('Перевірити дані'); await wait("[...document.querySelectorAll('button')].some(b=>b.textContent==='Зберегти товар')");
   assert.equal(await evaluate("[...document.querySelectorAll('button')].some(b=>/Копіювати SKU|Копіювати артикул/.test(b.textContent))"), false);
@@ -386,17 +438,19 @@ try {
   await noOverflow('Saved article receipt overflow at 390px'); await screenshot('saved-article-390');
   await evaluate("[...document.querySelectorAll('.home-category-option')].find(b=>b.textContent.includes('Сувеніри')).click()");
   assert.equal(await evaluate("document.body.textContent.includes('AG-000021')"), false);
+  }
   assert.deepEqual(unexpected, [], 'All API requests must have explicit local fixtures');
   assert.deepEqual(blockedExternal, [], 'Application attempted external network access');
   assert.deepEqual(browserErrors, [], 'Browser runtime errors');
   const allowedPosts = ['/api/admin/category', '/api/admin/magento-integration/discovery', '/api/admin/magento-integration/structure-check', '/api/admin/magento-integration/option-labels/inspect', '/api/preview', '/api/price-preview', '/api/save',
-    ...['preview','apply','assignment-preview','assignment-apply','reconcile'].map((action)=>`/api/admin/magento-integration/attributes/${action}`)];
+    ...['preview','apply','assignment-preview','assignment-apply','reconcile'].map((action)=>`/api/admin/magento-integration/attributes/${action}`),
+    ...['inspect','attest','preview','apply','reconcile'].map(action=>`/api/admin/magento-integration/options/${action}`)];
   const unexpectedWrites = requests.filter((request) => request.method !== 'GET'
     && !(request.method === 'POST' && allowedPosts.includes(request.path)));
   assert.deepEqual(unexpectedWrites, []);
-  console.log(JSON.stringify({ result: 'passed', authentication: 'local fixture session only; no real login or human acceptance', checks,
-    categoryGrouping: 'one visual path, two distinct underlying uses', receipt: 'exact authoritative article copied and reset at next creation',
-    administrator: 'separate workflows, exact role gate, delegated label comparison, unavailable adapter has no attest/apply, uncertain product cannot be selected',
+  console.log(JSON.stringify({ result: 'passed', scope:resourcesOnly?'Catalog resource creation and uncertain-operation recovery':'full compatibility workspace', authentication: 'local fixture session only; no real login or human acceptance', checks,
+    ...(!resourcesOnly?{categoryGrouping: 'one visual path, two distinct underlying uses', receipt: 'exact authoritative article copied and reset at next creation',
+    administrator: 'separate workflows, exact role gate, delegated label comparison, unavailable adapter has no attest/apply, uncertain product cannot be selected'}:{}),
     requestCount: requests.length, runtimeErrors: browserErrors.length, externalRequests: blockedExternal.length,
     unexpectedFixtureRequests: unexpected.length, unexpectedWrites: unexpectedWrites.length, artifacts: directory }));
 } finally {

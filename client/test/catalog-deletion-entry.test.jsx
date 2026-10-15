@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import { CatalogDeletionEntry } from '../src/components/admin/CatalogDeletionEntry.jsx';
@@ -53,7 +53,9 @@ it('missing permissions or exact context disables the action with a reason and n
 it('archive remains separate; opening deletion makes only a receipt GET until explicit preview with exact IDs',async()=>{
   const proof={previewToken:'review',confirmationText:'DELETE OPTION 20 / shade#6001:701',localTarget:{label:'Синій'},remote:{attributeLabel:'Колір',selectedRemoteLabel:'Синій',products:[],sets:[]},
     affected:{products:[],options:[{id:20,valueId:0}],rules:[],pricing:[],templates:[],bindings:[],historicalSchemas:[]},blockers:[],futureSkuPublicationRequired:false};
-  const apiClient={get:vi.fn().mockResolvedValue({data:[]}),post:vi.fn().mockResolvedValue({data:proof})}; const onReviewChange=vi.fn();
+  let finishPreview;
+  const previewResponse=new Promise(resolve=>{finishPreview=resolve;});
+  const apiClient={get:vi.fn().mockResolvedValue({data:[]}),post:vi.fn().mockReturnValue(previewResponse)}; const onReviewChange=vi.fn();
   mount({optionEntry,apiClient,onReviewChange});
   const archive=screen.getByRole('link',{name:'Архівування лише у Manager'}); expect(archive.href).toContain('action=edit-option'); expect(archive.href).toContain('value=0');
   expect(archive.href).toContain('optionId=20'); expect(new URL(archive.href).searchParams.get('returnTo')).toBe('/admin/magento/categories/AA?tab=attributes&field=shade');
@@ -64,7 +66,9 @@ it('archive remains separate; opening deletion makes only a receipt GET until ex
   expect(onReviewChange).toHaveBeenCalledWith(JSON.stringify(expected)); expect(apiClient.post).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button',{name:'Перевірити наслідки'}));
   await waitFor(()=>expect(apiClient.post).toHaveBeenCalledWith('/admin/catalog-deletion/preview',expected));
-  expect(apiClient.post).toHaveBeenCalledTimes(1); expect(screen.getByRole('button',{name:'Підтвердити видалення з Manager і Magento'}).disabled).toBe(true);
+  expect(screen.queryByRole('button',{name:'Підтвердити видалення з Manager і Magento'})).toBeNull();
+  await act(async()=>{finishPreview({data:proof});});
+  expect(apiClient.post).toHaveBeenCalledTimes(1); expect((await screen.findByRole('button',{name:'Підтвердити видалення з Manager і Magento'})).disabled).toBe(true);
 });
 it('whole-question entry explicitly states its wider scope and sends null option IDs',async()=>{
   const apiClient={get:vi.fn().mockResolvedValue({data:[]}),post:vi.fn()}; mount({apiClient});

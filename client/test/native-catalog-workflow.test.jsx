@@ -30,12 +30,12 @@ function open(action = 'new-question', permissions = ['catalog.view', 'catalog.m
 
 it('creates a native optional characteristic from its name without a technical key or encoded SKU fields', async () => {
   open();
-  fireEvent.change(await screen.findByRole('textbox', { name: /Назва питання/ }), { target: { value: 'Розмір прикраси' } });
+  fireEvent.change(await screen.findByRole('textbox', { name: /Назва характеристики/ }), { target: { value: 'Розмір прикраси' } });
   fireEvent.click(screen.getByRole('checkbox', { name: 'Обовʼязкове' }));
   expect(screen.queryByRole('button', { name: 'Опублікувати V2' })).toBeNull();
   expect(screen.queryByRole('button', { name: 'Переіндексувати SKU' })).toBeNull();
   expect(screen.queryByLabelText('Ключ')).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: 'Зберегти питання' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Зберегти характеристику' }));
   await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
   expect(post.mock.calls[0][0]).toBe('/admin/question');
   const payload = post.mock.calls[0][1];
@@ -46,7 +46,7 @@ it('creates a native optional characteristic from its name without a technical k
 
 it('edits a native label while preserving the existing key and historical encoded parameters exactly', async () => {
   open('edit-question');
-  fireEvent.change(await screen.findByRole('textbox', { name: /Назва питання/ }), { target: { value: 'Колір прикраси' } });
+  fireEvent.change(await screen.findByRole('textbox', { name: /Назва характеристики/ }), { target: { value: 'Колір прикраси' } });
   expect(screen.queryByRole('checkbox', { name: 'Додавати значення в SKU' })).toBeNull();
   expect(screen.getByLabelText('Ключ').readOnly).toBe(true);
   fireEvent.click(screen.getByRole('button', { name: 'Зберегти зміни' }));
@@ -65,10 +65,10 @@ it('selects the authoritative created question so values and its exact Magento h
     return { data: { id: 85, key } };
   });
   open();
-  fireEvent.change(await screen.findByRole('textbox', { name: /Назва питання/ }), { target: { value: 'Форма прикраси' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Зберегти питання' }));
+  fireEvent.change(await screen.findByRole('textbox', { name: /Назва характеристики/ }), { target: { value: 'Форма прикраси' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Зберегти характеристику' }));
   await screen.findByRole('heading', { name: 'Форма прикраси' });
-  expect(screen.queryByRole('textbox', { name: /Назва питання/ })).toBeNull();
+  expect(screen.queryByRole('textbox', { name: /Назва характеристики/ })).toBeNull();
   expect(screen.getByRole('button', { name: 'Додати варіант' }).disabled).toBe(false);
   const link = screen.getByRole('link', { name: 'Підготувати характеристику для Magento' });
   expect(new URL(link.getAttribute('href'), 'http://synthetic.local').searchParams.get('question')).toBe(key);
@@ -77,7 +77,7 @@ it('selects the authoritative created question so values and its exact Magento h
 
 it('reveals historical schema controls only by an explicit disclosure and keeps publication separate', async () => {
   open('edit-question');
-  await screen.findByRole('textbox', { name: /Назва питання/ });
+  await screen.findByRole('textbox', { name: /Назва характеристики/ });
   await waitFor(() => expect(api.get).toHaveBeenCalledWith('/admin/sku-schema/BR'));
   const disclosure = document.querySelector('.catalog-category-context .catalog-history-details');
   expect(disclosure.open).toBe(false);
@@ -94,7 +94,7 @@ it('keeps legacy and unknown-mode SKU controls and editable key contract', async
   delete config.catalogWorkflow;
   config.productCreation = { identityMode: 'public_identity' }; // Other projection is not authoritative for catalog.
   open('edit-question');
-  await screen.findByRole('textbox', { name: /Назва питання/ });
+  await screen.findByRole('textbox', { name: /Назва характеристики/ });
   expect(screen.getByRole('checkbox', { name: 'Додавати значення в SKU' }).checked).toBe(true);
   expect(await screen.findByRole('button', { name: 'Опублікувати V2' })).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Переіндексувати SKU' })).toBeTruthy();
@@ -105,9 +105,9 @@ it.each(['legacy', 'native-without-generated-capability'])('preserves explicit n
   if (mode === 'legacy') config.catalogWorkflow = { identityMode: 'encoded_sku', serverGeneratedQuestionKeys: false };
   else config.catalogWorkflow.serverGeneratedQuestionKeys = false;
   open();
-  fireEvent.change(await screen.findByRole('textbox', { name: /Назва питання/ }), { target: { value: 'Текст менеджера' } });
+  fireEvent.change(await screen.findByRole('textbox', { name: /Назва характеристики/ }), { target: { value: 'Текст менеджера' } });
   fireEvent.change(screen.getByLabelText('Ключ'), { target: { value: 'manager_key' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Зберегти питання' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Зберегти характеристику' }));
   await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
   expect(post.mock.calls[0][1].key).toBe('manager_key');
   if (mode === 'legacy') expect(post.mock.calls[0][1]).toMatchObject({ include_in_sku: 0, sku_index: 0, sku_separator: '' });
@@ -115,7 +115,7 @@ it.each(['legacy', 'native-without-generated-capability'])('preserves explicit n
 
 it('native category edit keeps its stable code and hides only historical branch encoding', async () => {
   open('edit-question');
-  await screen.findByRole('textbox', { name: /Назва питання/ });
+  await screen.findByRole('textbox', { name: /Назва характеристики/ });
   const categoryButtons = screen.getAllByRole('button', { name: 'Категорія', exact: true });
   fireEvent.click(categoryButtons[1]);
   expect(screen.getByRole('textbox', { name: /Код категорії/ }).value).toBe('BR');
@@ -128,7 +128,7 @@ it('native category edit keeps its stable code and hides only historical branch 
 it('gates both catalog mutations and exact guided Magento handoff on effective permissions', async () => {
   open('edit-question', ['catalog.view']);
   await screen.findByText('Колір бурштину', { selector: 'strong' });
-  expect(screen.queryByRole('textbox', { name: /Назва питання/ })).toBeNull();
+  expect(screen.queryByRole('textbox', { name: /Назва характеристики/ })).toBeNull();
   expect(screen.queryByRole('link', { name: /Підготувати.*Magento/ })).toBeNull();
   expect(screen.queryByRole('button', { name: 'Переіндексувати SKU' })).toBeNull();
   expect(post).not.toHaveBeenCalled();
@@ -136,7 +136,7 @@ it('gates both catalog mutations and exact guided Magento handoff on effective p
 
 it('links the exact native characteristic to the guided review without executing any command', async () => {
   open('edit-question');
-  await screen.findByRole('textbox', { name: /Назва питання/ });
+  await screen.findByRole('textbox', { name: /Назва характеристики/ });
   const link = screen.getByRole('link', { name: 'Підготувати характеристику для Magento' });
   const url = new URL(link.getAttribute('href'), 'http://synthetic.local');
   expect(url.pathname).toBe('/admin/magento/prepare');

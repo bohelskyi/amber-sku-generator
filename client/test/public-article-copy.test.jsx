@@ -45,6 +45,7 @@ afterEach(() => {
 async function openPreview() {
   const router = createMemoryRouter([{ path: '*', element: <AppPage /> }], { initialEntries: ['/products'] });
   render(<RouterProvider router={router} />);
+  fireEvent.click(await screen.findByRole('link', { name: 'Створити товар' }));
   fireEvent.click(await screen.findByRole('button', { name: /Сувеніри/ }));
   await waitFor(() => expect(router.state.location.pathname).toBe('/products/create'));
   expect(router.state.location.search).toBe('?category=SV');

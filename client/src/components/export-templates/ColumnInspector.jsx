@@ -17,13 +17,13 @@ import MagentoFieldTargetReview from './MagentoFieldTargetReview.jsx';
 
 // One detached transaction across the normal, technical and advanced surfaces.
 // Opening/closing a surface never runs a definition adapter without an actual edit.
-export function ColumnInspector({ integration = false, embedded = false, localOnly = false, simple = false, textOnly = false, title, contextLabel, extraPanel, initialPanel, definition, groupIndex, rowIndex, column, registry, readOnly, loadSource, diagnostics, sourceId, overlay, suspended, onApply, onCancel, onRequestClose, onPendingChange }) {
+export function ColumnInspector({ integration = false, embedded = false, localOnly = false, simple = false, textOnly = false, title, contextLabel, extraPanel, renderPreview, initialPanel, initialPlacementRow, commitDisabled = false, definition, groupIndex, rowIndex, column, registry, readOnly, loadSource, diagnostics, sourceId, overlay, suspended, onApply, onCancel, onRequestClose, onPendingChange }) {
   const fieldTitle = integration ? 'Налаштування поля' : 'Налаштування колонки';
   const [base] = useState(definition);
   const [draft, setDraft] = useState(definition);
   const [secondary, setSecondary] = useState(null);
   const [panel, setPanel] = useState(initialPanel === 'mapping' ? 'mapping' : 'rule');
-  const panelId = useId(); const panelTabs = useRef(null); const mappingSurface = useRef(null);
+  const panelId = useId(); const panelTabs = useRef(null); const mappingSurface = useRef(null); const previewSurface = useRef(null);
   const [touched, setTouched] = useState(false);
   const [error, setError] = useState('');
   const [editingLabel, setEditingLabel] = useState(false);
@@ -75,7 +75,7 @@ export function ColumnInspector({ integration = false, embedded = false, localOn
   useEffect(() => { onPendingChange(pending); return () => onPendingChange(false); }, [pending, onPendingChange]);
   const valid = () => {
     const controls = [...(secondary ? secondarySurface : surface).current?.querySelectorAll('input,textarea,select') || []];
-    const invalid = controls.find((control) => !control.checkValidity());
+    const invalid = controls.find((control) => !previewSurface.current?.contains(control) && !control.checkValidity());
     if (!invalid) return true;
     if (!secondary && extraPanel && panel === 'mapping' && !mappingSurface.current?.contains(invalid)) {
       setPanel('rule'); setError('Перевірте заповнення правила значення.');
@@ -106,7 +106,7 @@ export function ColumnInspector({ integration = false, embedded = false, localOn
     } catch (e) { setError(e.message); }
   };
   const apply = () => {
-    if (!editable() || active.current.secondary !== secondary || !valid()) return false;
+    if (commitDisabled || !editable() || active.current.secondary !== secondary || !valid()) return false;
     try {
       const next = secondary === 'advanced' ? draft : materialized();
       const currentBase = JSON.stringify(base) === JSON.stringify(definition) ? definition : base;
@@ -133,7 +133,7 @@ export function ColumnInspector({ integration = false, embedded = false, localOn
   };
   useEffect(() => { if (!modal) surface.current?.focus(); }, [modal]);
   const capture = (origin) => { if (editable() && active.current.secondary === origin) setTouched(true); };
-  const footer = <footer className="et-inspector-footer et-actions">{!readOnly && <><button type="button" className="btn btn-primary px-3" onClick={apply}>{simple ? 'Готово' : 'Застосувати до чернетки'}</button><button type="button" className="btn btn-outline px-3" onClick={onCancel}>Скасувати</button></>}</footer>;
+  const footer = <footer className="et-inspector-footer et-actions">{!readOnly && <><button type="button" className="btn btn-primary px-3" disabled={commitDisabled} onClick={apply}>{simple ? 'Готово' : 'Застосувати до чернетки'}</button><button type="button" className="btn btn-outline px-3" disabled={commitDisabled} onClick={onCancel}>Скасувати</button></>}</footer>;
   const sources = [...new Set([...value?.source ? [value.source] : ruleSources(draft, at(draft, path)), ...sourceId ? [sourceId] : []])];
   const exceptional = sources.filter((id) => {
     const source = draft.sources[id]; const policy = draft.sourceSupport?.sources?.[`${source?.category}.${source?.key}`];
@@ -141,7 +141,7 @@ export function ColumnInspector({ integration = false, embedded = false, localOn
   });
   const statusSources = mode === 'condition' ? sourceId ? [sourceId] : [] : exceptional.length ? exceptional : sources.slice(0, 1);
   const approved = availableSources(registry, group.route, draft);
-  const content = <section ref={surface} tabIndex={-1} aria-label={fieldTitle} className="et-inspector-content et-intent-editor" onKeyDown={(e) => { if (!modal && !secondary && e.key === 'Escape') { e.preventDefault(); onRequestClose(); } }} onChangeCapture={(event) => { if (!mappingSurface.current?.contains(event.target)) capture(null); }}>
+  const content = <section ref={surface} tabIndex={-1} aria-label={fieldTitle} className="et-inspector-content et-intent-editor" onKeyDown={(e) => { if (!modal && !secondary && e.key === 'Escape') { e.preventDefault(); onRequestClose(); } }} onChangeCapture={(event) => { if (!mappingSurface.current?.contains(event.target) && !previewSurface.current?.contains(event.target)) capture(null); }}>
     <div className="et-field-heading"><header><div className="et-row"><h2>{title || group.columnLabels?.[column] || fieldLabels[column] || column}</h2><button type="button" className="et-link" onClick={onRequestClose}>Закрити налаштування</button></div>
       {simple ? <div className="et-field-context-row"><p className="et-field-context">{contextLabel || categoryNames[group.route] || group.name || group.route} · <strong>{rowIndex === 1 ? 'EN · англійською' : 'UA · українською'}</strong></p>{integration && draft.outputContract === COLUMN_CONTRACT && !requiredColumns.has(column) && !readOnly && <button type="button" className="et-link" disabled={suspended} onClick={() => openSecondary('target')}>Змінити атрибут Magento для цього поля</button>}{mode === 'condition' && <button type="button" className="et-link" onClick={() => {
         const fallback = surface.current?.querySelector('.et-conditions')?.querySelector(':scope > .et-condition-default');
@@ -174,12 +174,15 @@ export function ColumnInspector({ integration = false, embedded = false, localOn
       <p>Зміни ще не застосовано. «Скасувати» поверне початкове правило.</p>
       <button type="button" className="et-link" onClick={() => { refresh(transformation.definition); setTransformation(null); setIntentOverride(null); setError(''); }}>Скасувати зміну способу заповнення</button>
     </details>}
+    <div className={renderPreview ? 'grid gap-5 lg:grid-cols-2 items-start' : undefined}>
     <form id={secondary ? undefined : 'template-definition-form'} onSubmit={(e) => e.preventDefault()} className="et-column-form" aria-label="Налаштування правила">
-      {placementEditor ? <MagentoPlacementRuleEditor definition={draft} cellPath={path} registry={registry} loadSource={loadSource} readOnly={readOnly || suspended || Boolean(secondary)} onChange={(next) => change(next, null)} onEditing={() => capture(null)} /> : mode === 'empty' ? <p>{integration ? 'Поле матиме порожній текст у цій мові.' : 'Цей рядок матиме порожню клітинку.'}</p> : mode === 'complex' && !protectedCells.has(column) ? <div className="et-custom-rule"><p>{integration ? 'Це поле використовує складне правило.' : 'Ця колонка використовує складне правило.'}</p><p>Власне правило збережено без змін.</p><button type="button" className="et-link" onClick={() => openSecondary('advanced')}>Відкрити розширені правила</button></div>
+      {placementEditor ? <MagentoPlacementRuleEditor initialRow={initialPlacementRow} definition={draft} cellPath={path} registry={registry} loadSource={loadSource} readOnly={readOnly || suspended || Boolean(secondary)} onChange={(next) => change(next, null)} onEditing={() => capture(null)} /> : mode === 'empty' ? <p>{integration ? 'Поле матиме порожній текст у цій мові.' : 'Цей рядок матиме порожню клітинку.'}</p> : mode === 'complex' && !protectedCells.has(column) ? <div className="et-custom-rule"><p>{integration ? 'Це поле використовує складне правило.' : 'Ця колонка використовує складне правило.'}</p><p>Власне правило збережено без змін.</p><button type="button" className="et-link" onClick={() => openSecondary('advanced')}>Відкрити розширені правила</button></div>
         : simple && textOnly && ['literal', 'text'].includes(mode) ? <FieldInspector integration={integration} simple focused textOnly localOnly definition={draft} cellPath={path} registry={registry} readOnly={readOnly || suspended} loadSource={loadSource} diagnostics={diagnostics} onChange={(next) => { change(next, null); refresh(next); }} onAdvanced={() => openSecondary('advanced')} onTechnical={() => openSecondary('technical')} />
           : value ? <ColumnValueForm integration={integration} focused definition={draft} registry={registry} group={group.route} value={value} loadSource={loadSource} readOnly={readOnly} onChange={(next) => changeValue(next, null)} />
             : <FieldInspector integration={integration} simple={simple} textOnly={textOnly} focused localOnly={localOnly} definition={draft} cellPath={path} registry={registry} readOnly={readOnly} loadSource={loadSource} diagnostics={diagnostics} openSource={sourceId} onChange={(next) => change(next, null)} onAdvanced={() => openSecondary('advanced')} onTechnical={() => openSecondary('technical')} />}
     </form>
+    {renderPreview && <div ref={previewSurface} className="min-w-0">{renderPreview({ getDefinition: materialized, disabled: Boolean(readOnly || suspended || secondary), changeKey: JSON.stringify([draft, value]) })}</div>}
+    </div>
     {!simple && !placementEditor && !['literal', 'empty'].includes(mode) && <RuleSummary definition={draft} expression={at(draft, path)} registry={registry} loadSource={loadSource} value={value} />}
     {!simple && mode !== 'literal' && statusSources.map((id) => <SourceSupportStatus key={id} compact definition={draft} sourceId={id} diagnostics={diagnostics}
       confirmed={approved.some((entry) => ['kind', 'category', 'key', 'field'].every((key) => entry.descriptor[key] === draft.sources[id]?.[key]))} onDetails={() => openSecondary('technical')} />)}

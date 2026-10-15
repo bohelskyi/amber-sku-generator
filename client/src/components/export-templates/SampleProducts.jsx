@@ -18,7 +18,7 @@ function ProductIdentity({ product }) {
   </div>;
 }
 
-export function SampleProducts({ search, selected, onChange }) {
+export function SampleProducts({ search, selected, onChange, maxSelected = 100 }) {
   const [query, setQuery] = useState(''); const [offset, setOffset] = useState(0);
   const [result, setResult] = useState(null); const [error, setError] = useState(null); const [busy, setBusy] = useState(false);
   const generation = useRef(0); const controller = useRef(null);
@@ -35,15 +35,15 @@ export function SampleProducts({ search, selected, onChange }) {
   }, [query, offset, search]);
   const changeSearch = (q, page = 0) => { generation.current++; controller.current?.abort(); setQuery(q); setOffset(page); setResult(null); setError(null); setBusy(false); };
   return <section aria-label="Обрати товари" className="et-sample-picker">
-    <h3>Обрати товари</h3><label>Пошук за артикулом або внутрішнім SKU<input type="search" className="input" maxLength={160} value={query} onChange={(e) => changeSearch(e.target.value)} placeholder="Артикул, внутрішній SKU або щонайменше 2 символи" /></label>
-    <p>Оберіть до 100 товарів. Пошук не перевіряє готовність до експорту й показує також неповні та архівні товари.</p>
+    <h3>{maxSelected === 1 ? 'Товар для прикладу' : 'Обрати товари'}</h3><label>Пошук за артикулом або внутрішнім SKU<input type="search" className="input" maxLength={160} value={query} onChange={(e) => changeSearch(e.target.value)} placeholder="Артикул, внутрішній SKU або щонайменше 2 символи" /></label>
+    <p>{maxSelected === 1 ? 'Оберіть один товар цієї категорії.' : `Оберіть до ${maxSelected} товарів. Пошук не перевіряє готовність до експорту й показує також неповні та архівні товари.`}</p>
     {busy && <p role="status">Пошук…</p>}{error && <p role="alert">Не вдалося знайти товари: {getApiError(error)}</p>}
     {result && <><ul>{result.products.map((p) => { const article = publicArticle(p); return <li key={p.id}><div><ProductIdentity product={p} /><span>{p.category} · {({ active: 'Активний', archived: 'Архівний', corrected: 'Переоблікований', generated: 'Створений' })[p.status] || 'Статус не вказано'}</span></div>
-      <button type="button" disabled={selected.some((s) => s.id === p.id) || selected.length >= 100} onClick={() => onChange([...selected, p])}>Обрати {article || 'товар без артикулу'}</button></li>; })}</ul>
+      <button type="button" disabled={selected.some((s) => s.id === p.id) || selected.length >= maxSelected} onClick={() => onChange([...selected, p])}>Обрати {article || 'товар без артикулу'}</button></li>; })}</ul>
       {!result.products.length && <p>Товарів за цим запитом не знайдено.</p>}
       <div className="et-actions"><button type="button" disabled={!offset} onClick={() => changeSearch(query, Math.max(0, offset - 20))}>Попередні товари</button>
         <button type="button" disabled={result.nextOffset === null} onClick={() => changeSearch(query, result.nextOffset)}>Наступні товари</button></div></>}
-    <h4>Вибрано: {selected.length} / 100</h4>
+    <h4>Вибрано: {selected.length} / {maxSelected}</h4>
     <ul>{selected.map((p) => { const article = publicArticle(p); return <li key={p.id}><div><ProductIdentity product={p} />{p.category && <span>{p.category}</span>}</div><button type="button" aria-label={`Прибрати ${article || `товар #${p.id}`}`} onClick={() => onChange(selected.filter((s) => s.id !== p.id))}>Прибрати</button></li>; })}</ul>
   </section>;
 }

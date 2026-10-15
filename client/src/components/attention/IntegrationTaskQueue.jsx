@@ -40,7 +40,9 @@ function repairLink(task) {
     for (const [key, value] of [['question', task.questionKey], ['value', task.valueId]]) {
       if (value !== null ? url.searchParams.getAll(key).length !== 1 || url.searchParams.get(key) !== value : url.searchParams.has(key)) return null;
     }
-    return task.repairHref;
+    url.pathname = '/admin/catalog';
+    url.searchParams.set('catalogTask', 'resource');
+    return url.pathname + url.search;
   } catch { return null; }
 }
 function resumeLink(task) { return task.resumeHref === '/products/create?integrationTask=' + task.id ? task.resumeHref : null; }
@@ -152,7 +154,7 @@ export default function IntegrationTaskQueue({ selectedTaskId, onSelectTask, ref
     <p className="mt-2 text-sm">{administrator ? 'Задачі з точним контекстом товару, характеристики та значення.' : 'Ваші задачі налаштування. Введені дані товару залишаються у вашій спробі створення.'}</p>
     {page?.unavailable ? <p className="mt-2" role="status">Задачі інтеграції ще недоступні на сервері. Це не означає, що задач немає.</p> : page?.error ? <p className="mt-2" role="alert">{page.error}</p> : !page ? <p className="mt-2" role="status">Читаємо задачі…</p> : <>
       {!page.value.items.length && <p className="mt-2">Відкритих задач інтеграції немає.</p>}
-      <details className="mt-3" open={!selected}><summary className="min-h-[34px] cursor-pointer py-2">Відкриті задачі ({page.value.items.length})</summary>
+      <details className="mt-3" open={!selected}><summary className="min-h-[34px] cursor-pointer py-2">Показані задачі ({page.value.items.length})</summary>
       <ul className="mt-3 grid gap-2">{page.value.items.map((item) => <li key={item.id}><button type="button" className="btn btn-outline w-full min-w-0 whitespace-normal break-words text-left" aria-pressed={selected === item.id} onClick={() => select(item.id)}>
         <span className="min-w-0"><strong>{context(item)}</strong><span className="block text-sm">{item.message}</span></span>
       </button></li>)}</ul>

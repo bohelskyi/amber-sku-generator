@@ -1,6 +1,6 @@
 # Amber operations interface
 
-This guide describes the local full-application redesign of 2026-10-02. Its
+This guide describes the local full-application redesign, including the unified Catalog update of 2026-10-15. Its
 implementation waves 0–7 are distinct from historical production Wave 1 and
 Magento self-service Wave 2. It is not a deployment or real Magento acceptance
 receipt. Domain guides, current server code and migrations remain authoritative.
@@ -15,7 +15,7 @@ capabilities. Personas are acceptance fixtures, not authorization replacements.
 | Товари | `/products`; create at `/products/create?category=…`; open at `/products/open?article=…`; history at `/products/history`. |
 | Потребує уваги | `/attention` opens the synchronization problem queue directly; `/sync-problems` remains a compatible entrance to the same workspace. |
 | Переоцінка | `/admin/repricing`; preparation, review and batch history retain domain controllers. |
-| Налаштування | `/settings` links to Каталог (`/admin/catalog`), Ціноутворення (`/admin/pricing`) and Інтеграція Magento (`/admin/magento`). Integration rules belong inside Magento. |
+| Налаштування | `/settings` links to Каталог (`/admin/catalog`), Ціноутворення (`/admin/pricing`) and Підключення магазину (`/admin/magento/overview`). Category characteristics and shop rules share Catalog. |
 | Адміністрування | `/administration` links to `/admin/users`, `/admin/roles`, `/admin/audit`. |
 
 The product-owner correction of 2026-10-03 removes all export destinations from
@@ -98,13 +98,20 @@ reviewed inline for the exact product, with the original Administrator restricti
 | --- | --- |
 | Артикул | Authoritative `publicSku`; never an internal-SKU fallback. Legacy public articles remain valid. |
 | Внутрішній SKU | Configuration/history identity and permitted compatibility lookup input. |
-| Переоблік | Existing target-validated direct recount; historical request completion retains its separate contract. |
+| Змінити характеристики | Existing target-validated direct recount; historical request completion retains its separate contract. |
 | Незбережені зміни | Browser-local changes; no persistent product draft is implied. |
 | Чернетка збережена | A domain-specific persisted draft has been saved. |
 | Перевірка неактуальна | Reviewed evidence cannot authorize the next apply action. |
 | Опубліковано | The corresponding immutable schema, template or binding publication; these remain separate contracts. |
 | Очікує синхронізації | Recorded pending delivery, distinct from a committed Amber change. |
 | Дані недоступні | Missing/failed evidence, never a fabricated zero or success. |
+
+The product card shows one compact sync state/reason and the next permitted action.
+The Attention queue retains detailed repair controllers and original operation
+recovery. A historical inherited-name flag without a queue diagnostic retains a
+lazy permission-gated name review so existing work is not stranded. The ordinary
+product entrance has one register search; final saved price is distinct from its
+calculation details.
 
 ProductBuilder follows entry → **Перевірити дані** → server review →
 **Зберегти товар** → authoritative receipt and exact article copy. Recount, prices,
@@ -167,19 +174,31 @@ permission before opening the form; it never applies changes on navigation.
 The return target is restricted to the local attention workspace. Receipts say
 that Amber saved the change, while Magento delivery remains a separate state.
 
-Magento opens a category workspace with categories on the left, all fields of
-the applicable Magento set in the centre and a field editor on the right (a dialog
-on narrow screens). Characteristics and UA/EN text templates share this screen.
-The simple view separates **Характеристики / Назва й описи**, hides codes and
-secondary operations, and uses **Перевірити зміни → Застосувати зміни**. The first
-action saves/prepares work and requests product impact after required decisions;
-restoration alone never starts that check. System fields remain in a disclosure.
-Unused output sources, explicit option suggestions and human-readable ownership
-are visible. Delivery overview is separate at `/admin/magento/overview`.
+**Каталог** at `/admin/catalog?category=…` starts from the Manager category.
+Its tabs are **Характеристики / Категорії магазину / Назви та SEO**. The first
+lists local characteristics, including those used only in Manager. Direct
+attribute transfer is distinguished from use in text and conditions. Local
+creation/editing keeps the exact server receipt selected; it does not depend on
+Magento availability. Values and their shop identities can be searched and paged
+without changing section. Custom text attributes remain characteristics.
+
+Simple placement rules have a condition/path/actions table. Draft edit/delete
+preserves unsupported shared/complex branches; advanced editing remains available.
+Name/description/SEO editors show an explicit server example for a selected product
+alongside the current UA/EN rule. The example uses a separate unpublished template
+family and cannot apply or publish category work. Its result becomes stale after
+further edits. Existing product names still require separate Administrator review.
+
 The workspace reads the exact pinned binding/template, saves an isolated rules
-draft and prepares a successor before explicit review and application. Existing
-names use a separate Administrator confirmation, filtered to the category with
-the existing 100-product bound. See [the domain guide](MAGENTO_INTEGRATION.md).
+draft and prepares a successor before explicit review and application. Full
+package dependencies, including other categories, remain visible before applying.
+The primary command **Застосувати правила** queues affected products; only later
+Magento evidence confirms delivery. See [the domain guide](MAGENTO_INTEGRATION.md).
+Old Magento category links redirect to Catalog with query/hash context intact;
+legacy product detail and advanced operations remain compatible. Historical SKU
+structure is under `/admin/catalog/structure`. Shop connection status, history and
+special operations remain at `/admin/magento/overview` and its service routes.
+
 Advanced preparation
 opens with a task intent instead of demanding that an operator choose technical
 layers. Published current state and future drafts remain visibly separate;
@@ -198,9 +217,9 @@ separate existing-set membership action; it is not a generic EAV editor.
 
 | Task | Entry and visible result |
 | --- | --- |
-| New Amber category | `/admin/magento/categories/new` uses the existing catalog create contract and returns a resumable category receipt. Separate checkpoints open the exact category's characteristics, SKU publication, pricing and shop connection. A saved category never implies valid prices or delivery readiness. |
-| New shop subcategory | Category → **Розміщення в магазині** → prepare change → the pinned category placement rule. Choose an existing observed section or an observed parent plus a new name; explicitly choose all category products or a characteristic/value condition. The authoring form appends to the exact old rule, preserving existing placements, EN rules and shared references. Save/review/publication and remote category creation remain separate actions. |
-| New characteristic | Category → **Характеристики** → prepare change. An Amber question is edited in Catalog; an actual new Magento attribute uses explicit type/scope/visibility/requiredness settings, reviewed creation and a separate set assignment. The exact attribute then opens a suggested new field in the rule editor. Creating a rule column does not create an attribute. |
+| New Amber category | `/admin/catalog?action=new-category` uses the existing catalog create contract and opens the exact saved category. The old creation URL remains compatible. A saved category never implies valid prices or delivery readiness. |
+| New shop subcategory | Category → **Розміщення в магазині** → prepare change → the pinned category placement rule. Choose an existing observed section or an observed parent plus a new name; explicitly choose all category products or a characteristic/value condition. The authoring form adds or edits exact supported rows, preserving other placements, EN rules and shared references. Save/review/publication and remote category creation remain separate actions. |
+| New characteristic | Category → **Характеристики** → **Додати характеристику** saves the local question and values, then opens **Передавання в магазин** in the same category; an actual new Magento attribute uses explicit type/scope/visibility/requiredness settings, reviewed creation and a separate set assignment. The exact attribute then opens a suggested new field in the rule editor. Creating a rule column does not create an attribute. |
 | New characteristic value | The same category selects the exact question and semantic value, including `0`. Existing remote values can be connected; a missing value has reviewed creation. A fresh successor observes newly created resources before connections and publication. |
 | Existing product problem | Attention → exact product → explicit Magento check shows Amber's intended values versus observed Magento values and delivery policy. Field/value/path links retain the product, category, source context and safe return URL through diagnosis, rules, preparation and back to the product. Applying a configuration change is not proof of product delivery. |
 
@@ -239,10 +258,18 @@ it afterward. Browser harnesses use built assets, deterministic local API fixtur
 and remote-request blocking; screenshots are stored outside the repository.
 An earlier wave's passing run is not final acceptance of later edits.
 
-After building the client, run both fixture harnesses from the repository root
-with an installed Chromium/Edge executable as their sole argument:
-`node scripts/test-client-browser.mjs <browser-executable>` and
-`node scripts/test-magento-workspace-browser.mjs <browser-executable>`.
+After building the client, current acceptance uses these fixture harnesses from
+the repository root with an installed Chromium/Edge executable:
+
+```text
+node scripts/test-client-browser.mjs <browser-executable>
+node scripts/test-catalog-browser.mjs <browser-executable>
+node scripts/test-magento-workspace-browser.mjs <browser-executable> --resources-only
+```
+
+The resource mode covers explicit attribute/option creation and reconciliation
+after uncertain results. The older default Magento gallery assertions are retained
+as compatibility coverage; they are not the unified Catalog acceptance scenario.
 They serve built assets and fake API responses on loopback, block external browser
 requests, and print their acceptance report and temporary screenshot directory.
 The browser profile used for 200% acceptance has an actual browser zoom preference;
@@ -253,3 +280,13 @@ reduced motion, overflow, bounded row rendering and actual browser 200% zoom.
 A narrow viewport alone is not a zoom test. Fixture success does not establish
 human comprehension, screen-reader comfort, live OIDC, real multi-account
 collaboration or Magento acceptance; those need separate evidence.
+
+## Unified Catalog verification
+
+Focused regressions cover local mutation receipts, duplicate labels and semantic
+zero, permission-limited local access, source-first display, exact repair handoffs,
+value pagination, lossless placement editing, detached server examples and draft
+recovery. Browser fixture checks are separate from real-store acceptance; their
+screenshots exercise the built client with local fake API responses. Magento
+creation remains the existing explicit reviewed workflow. Existing attributes do
+not gain a new generic metadata editor in this change.

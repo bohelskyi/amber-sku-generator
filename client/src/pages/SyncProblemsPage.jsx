@@ -114,11 +114,14 @@ export default function SyncProblemsPage() {
   }, 0); };
 
   return <main className="app-page"><div className={`sync-problems-workspace ${selectedId ? 'has-selected-problem' : ''}`}>
-    <PageHeader title="Потребує уваги" description="Знайдіть товар, зрозумійте причину та виконайте наступну дію для синхронізації з Magento."
+    <PageHeader title="Потребує уваги" description="Виберіть товар і перегляньте, що потрібно виправити."
       actions={canRead && <Button size="compactMd" onClick={reload} busy={polling}><RefreshCw size={15} aria-hidden="true" />Оновити</Button>} />
     {!canRead ? <Notice>Перегляд проблем синхронізації недоступний для вашого рівня доступу.</Notice> : <>
-      <IntegrationTaskQueue selectedTaskId={params.get('integrationTask')} refreshKey={refresh}
-        onSelectTask={(id) => setLocationState({ integrationTask: id, problem: null })} />
+      <details className="ui-technical-disclosure" open={Boolean(params.get('integrationTask'))}>
+        <summary>Задачі налаштування для нових товарів</summary>
+        <IntegrationTaskQueue selectedTaskId={params.get('integrationTask')} refreshKey={refresh}
+          onSelectTask={(id) => setLocationState({ integrationTask: id, problem: null })} />
+      </details>
       <h2 className="font-semibold">Проблеми доставки товарів</h2>
       <form className="sync-problem-filters" onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget);
         setLocationState({ search: String(form.get('search') || '').trim(), category: form.get('category'), reason: form.get('reason'), offset: null, problem: null }); }}>
@@ -134,7 +137,7 @@ export default function SyncProblemsPage() {
       </form>
       {currentResult?.error && <Notice tone={items ? 'warning' : 'error'}>{currentResult.error}{items && ' Показано останні отримані дані.'}</Notice>}
       {!items && !currentResult?.error && <LoadingState label="Завантажуємо проблеми доставки…" />}
-      {items && <p className="sync-problem-count" role="status">Товарів у черзі: <strong>{Number.isInteger(pageInfo.total) ? pageInfo.total : 'невідомо'}</strong>. Оновлення читає збережений стан Amber.</p>}
+      {items && <p className="sync-problem-count" role="status">Товарів у черзі: <strong>{Number.isInteger(pageInfo.total) ? pageInfo.total : 'невідомо'}</strong>.</p>}
       {items?.length === 0 && !selectedId && !currentResult?.error && <EmptyState title={hasFilters ? 'За цими умовами товарів немає' : 'Зафіксованих проблем немає'}>{hasFilters ? 'Змініть пошук або фільтри.' : 'Amber не має поточних станів доставки, що потребують уваги.'}</EmptyState>}
       {(items?.length > 0 || selectedId) && <section className={`sync-problem-master-detail ${selectedId ? 'has-selection' : ''}`}>
         <aside ref={queueRef} tabIndex={-1} className="sync-problem-queue" aria-label="Черга проблем доставки">

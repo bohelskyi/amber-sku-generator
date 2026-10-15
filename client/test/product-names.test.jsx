@@ -266,10 +266,10 @@ for (const keys of [['products.recount'], ['products.recount', 'corrections.crea
     expect(screen.queryByRole('button', { name: 'Передати зміни на розгляд' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Підготувати запит' })).toBeNull();
     if (keys.includes('products.recount')) {
-      fireEvent.click(screen.getByRole('button', { name: 'Переоблік' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Змінити характеристики' }));
       expect(onStart).toHaveBeenCalledOnce();
     } else {
-      expect(screen.queryByRole('button', { name: 'Переоблік' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Змінити характеристики' })).toBeNull();
       expect(onStart).not.toHaveBeenCalled();
     }
     expect(useSkuManager).toHaveBeenCalledWith(expect.objectContaining({ submitMode: 'apply', canCreatePriceChangeRequest: false }));

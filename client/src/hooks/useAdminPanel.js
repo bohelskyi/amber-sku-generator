@@ -46,7 +46,7 @@ const formatMatchJson = (value) => {
   }
 };
 
-export function useAdminPanel({ mode = 'auto' } = {}) {
+export function useAdminPanel({ mode = 'auto', returnMutationReceipts = false, loadSchema = true } = {}) {
   const auth = useAuth();
   const { canManagePricing, canViewCatalog, canViewPricing } = getPermissionUiState(
     auth.permissions
@@ -87,7 +87,7 @@ export function useAdminPanel({ mode = 'auto' } = {}) {
     }), [effectiveMode]);
 
   const pricing = useAdminPricingController({ canViewPricing: pricingWorkspaceEnabled, formatMatchJson, onFeedback: showFeedback, selectedCat });
-  const schema = useAdminSchemaController({ canPublishSchema, canViewCatalog: catalogWorkspaceEnabled, config, fetchConfig, onFeedback: showFeedback, selectedCat });
+  const schema = useAdminSchemaController({ canPublishSchema, canViewCatalog: catalogWorkspaceEnabled && loadSchema, config, fetchConfig, onFeedback: showFeedback, selectedCat });
 
   const updateSelectedQuestionState = (question) => {
     if (!question) return;
@@ -170,8 +170,9 @@ export function useAdminPanel({ mode = 'auto' } = {}) {
 
   const addCategory = async () => {
     if (!newCat.code) return;
+    let response;
     try {
-      await api.post('/admin/category', {
+      response = await api.post('/admin/category', {
         ...newCat,
         requires_weight: newCat.requires_weight ? 1 : 0,
         skip_hidden_sku_questions: newCat.skip_hidden_sku_questions ? 1 : 0,
@@ -188,7 +189,7 @@ export function useAdminPanel({ mode = 'auto' } = {}) {
     } catch (error) {
       showRefreshWarning('Категорію створено', error);
     }
-    return true;
+    return returnMutationReceipts ? { kind: 'category', action: 'created', categoryCode: response.data?.id } : true;
   };
 
   const updateCategory = async () => {
@@ -230,16 +231,17 @@ export function useAdminPanel({ mode = 'auto' } = {}) {
     } catch (error) {
       showRefreshWarning('Категорію збережено', error);
     }
-    return true;
+    return returnMutationReceipts ? { kind: 'category', action: 'updated', categoryCode: savedCode } : true;
   };
 
   const addQuestion = async () => {
     if (!selectedCat) return;
     let createdQuestionId = null;
+    let createdQuestionKey = null;
     const isNewTextQuestion = newQuest.input_type === 'text';
     const shouldAddNewQuestionToSku = false;
     const parsedVisibleRule = parseVisibleRuleInput(newQuest.visible_if_json);
-    if (!parsedVisibleRule.ok) return showFeedback({ tone: 'error', title: 'Питання не створено', message: 'Перевірте умову показу.' });
+    if (!parsedVisibleRule.ok) return showFeedback({ tone: 'error', title: 'Характеристику не створено', message: 'Перевірте умову показу.' });
 
     try {
       const payload = {
@@ -264,20 +266,22 @@ export function useAdminPanel({ mode = 'auto' } = {}) {
       }
       if (hasGeneratedQuestionKeys(config) && !String(newQuest.key || '').trim()) delete payload.key;
       const response = await api.post('/admin/question', payload);
-      if (isNativeCatalog(config) && Number.isSafeInteger(Number(response.data?.id)) && Number(response.data.id) > 0) createdQuestionId = Number(response.data.id);
+      if (Number.isSafeInteger(Number(response.data?.id)) && Number(response.data.id) > 0) createdQuestionId = Number(response.data.id);
+      createdQuestionKey = response.data?.key || null;
     } catch (error) {
-      showFeedback({ tone: 'error', title: 'Не вдалося створити питання', message: getApiError(error) });
+      showFeedback({ tone: 'error', title: 'Не вдалося створити характеристику', message: getApiError(error) });
       return false;
     }
     setNewQuest(buildNewQuestionDefaults(currentCatQuestions));
-    showFeedback({ title: 'Питання створено' });
+    showFeedback({ title: 'Характеристику створено' });
     try {
       const nextConfig = await fetchConfig();
-      applyConfigWithSelection(nextConfig, selectedCat.code, createdQuestionId);
+      applyConfigWithSelection(nextConfig, selectedCat.code, isNativeCatalog(config) || returnMutationReceipts ? createdQuestionId : null);
     } catch (error) {
-      showRefreshWarning('Питання створено', error);
+      showRefreshWarning('Характеристику створено', error);
     }
-    return true;
+    return returnMutationReceipts ? { kind: 'question', action: 'created', categoryCode: selectedCat.code,
+      questionId: createdQuestionId, questionKey: createdQuestionKey } : true;
   };
 
   const updateQuestion = async () => {
@@ -285,7 +289,7 @@ export function useAdminPanel({ mode = 'auto' } = {}) {
     const isEditedTextQuestion = editQuestion.input_type === 'text';
     const shouldAddEditedQuestionToSku = !isEditedTextQuestion && editQuestion.include_in_sku;
     const parsedVisibleRule = parseVisibleRuleInput(editQuestion.visible_if_json);
-    if (!parsedVisibleRule.ok) return showFeedback({ tone: 'error', title: 'Питання не збережено', message: 'Перевірте умову показу.' });
+    if (!parsedVisibleRule.ok) return showFeedback({ tone: 'error', title: 'Характеристику не збережено', message: 'Перевірте умову показу.' });
 
     try {
       await api.post('/admin/question/update', {
@@ -306,32 +310,34 @@ export function useAdminPanel({ mode = 'auto' } = {}) {
         visible_if_json: parsedVisibleRule.value,
       });
     } catch (error) {
-      showFeedback({ tone: 'error', title: 'Не вдалося зберегти питання', message: getApiError(error) });
+      showFeedback({ tone: 'error', title: 'Не вдалося зберегти характеристику', message: getApiError(error) });
       return false;
     }
-    showFeedback({ title: 'Питання збережено' });
+    showFeedback({ title: 'Характеристику збережено' });
     try {
       const nextConfig = await fetchConfig();
       applyConfigWithSelection(nextConfig, selectedCat.code, selectedQuestion.q_db_id);
     } catch (error) {
-      showRefreshWarning('Питання збережено', error);
+      showRefreshWarning('Характеристику збережено', error);
     }
-    return true;
+    return returnMutationReceipts ? { kind: 'question', action: 'updated', categoryCode: selectedCat.code,
+      questionId: selectedQuestion.q_db_id, questionKey: editQuestion.key } : true;
   };
 
   const addOption = async () => {
     if (!selectedQuestion) return;
     if ((selectedQuestion.input_type || 'options') === 'text') {
-      return showFeedback({ tone: 'error', title: 'Варіант не створено', message: 'Для текстового питання варіанти не використовуються.' });
+      return showFeedback({ tone: 'error', title: 'Значення не створено', message: 'Для текстової характеристики список значень не використовується.' });
     }
 
     const parsedVisibleRule = parseVisibleRuleInput(newOpt.visible_if_json);
     const parsedHiddenRule = parseVisibleRuleInput(newOpt.hidden_if_json);
-    if (!parsedVisibleRule.ok) return showFeedback({ tone: 'error', title: 'Варіант не створено', message: 'Перевірте умову показу.' });
-    if (!parsedHiddenRule.ok) return showFeedback({ tone: 'error', title: 'Варіант не створено', message: 'Перевірте умову приховування.' });
+    if (!parsedVisibleRule.ok) return showFeedback({ tone: 'error', title: 'Значення не створено', message: 'Перевірте умову показу.' });
+    if (!parsedHiddenRule.ok) return showFeedback({ tone: 'error', title: 'Значення не створено', message: 'Перевірте умову приховування.' });
 
+    let response;
     try {
-      await api.post('/admin/option', {
+      response = await api.post('/admin/option', {
         question_id: selectedQuestion.q_db_id,
         sku_code: null,
         label: newOpt.label,
@@ -340,17 +346,19 @@ export function useAdminPanel({ mode = 'auto' } = {}) {
         hidden_if_json: parsedHiddenRule.value,
       });
     } catch (error) {
-      showFeedback({ tone: 'error', title: 'Не вдалося створити варіант', message: getApiError(error) });
+      showFeedback({ tone: 'error', title: 'Не вдалося створити значення', message: getApiError(error) });
       return false;
     }
     setNewOpt(emptyNewOption);
-    showFeedback({ title: 'Варіант створено' });
+    showFeedback({ title: 'Значення створено' });
     try {
       await fetchConfig();
     } catch (error) {
-      showRefreshWarning('Варіант створено', error);
+      showRefreshWarning('Значення створено', error);
     }
-    return true;
+    return returnMutationReceipts ? { kind: 'option', action: 'created', categoryCode: selectedCat.code,
+      questionId: selectedQuestion.q_db_id, questionKey: selectedQuestion.id,
+      optionId: response.data?.id, valueId: response.data?.value_id } : true;
   };
 
   const beginOptionEdit = (option) => {
@@ -371,8 +379,8 @@ export function useAdminPanel({ mode = 'auto' } = {}) {
 
     const parsedVisibleRule = parseVisibleRuleInput(editOpt.visible_if_json);
     const parsedHiddenRule = parseVisibleRuleInput(editOpt.hidden_if_json);
-    if (!parsedVisibleRule.ok) return showFeedback({ tone: 'error', title: 'Варіант не збережено', message: 'Перевірте умову показу.' });
-    if (!parsedHiddenRule.ok) return showFeedback({ tone: 'error', title: 'Варіант не збережено', message: 'Перевірте умову приховування.' });
+    if (!parsedVisibleRule.ok) return showFeedback({ tone: 'error', title: 'Значення не збережено', message: 'Перевірте умову показу.' });
+    if (!parsedHiddenRule.ok) return showFeedback({ tone: 'error', title: 'Значення не збережено', message: 'Перевірте умову приховування.' });
 
     try {
       await api.put('/admin/option', {
@@ -386,46 +394,53 @@ export function useAdminPanel({ mode = 'auto' } = {}) {
         archived: editOpt.archived,
       });
     } catch (error) {
-      showFeedback({ tone: 'error', title: 'Не вдалося зберегти варіант', message: getApiError(error) });
+      showFeedback({ tone: 'error', title: 'Не вдалося зберегти значення', message: getApiError(error) });
       return false;
     }
     setEditOpt(emptyEditOption);
-    showFeedback({ title: 'Варіант збережено' });
+    showFeedback({ title: 'Значення збережено' });
     try {
       await fetchConfig();
     } catch (error) {
-      showRefreshWarning('Варіант збережено', error);
+      showRefreshWarning('Значення збережено', error);
     }
-    return true;
+    return returnMutationReceipts ? { kind: 'option', action: 'updated', categoryCode: selectedCat.code,
+      questionId: selectedQuestion.q_db_id, questionKey: selectedQuestion.id,
+      optionId: editOpt.id, valueId: Number(editOpt.value_id) } : true;
   };
 
   const archiveQuestion = async (question, archived) => {
     try {
       await api.patch(`/admin/question/${question.q_db_id}/archive`, { archived });
+    } catch (error) { showFeedback({ tone: 'error', title: 'Не вдалося змінити стан характеристики', message: getApiError(error) }); return false; }
+    const successTitle = archived ? 'Характеристику перенесено в архів' : 'Характеристику відновлено';
+    showFeedback({ title: successTitle, message: 'Історію, призначення товарів і Magento збережено.' });
+    try {
       const nextConfig = await fetchConfig();
       applyConfigWithSelection(nextConfig, selectedCat.code, question.q_db_id);
-      showFeedback({ title: archived ? 'Питання перенесено в архів' : 'Питання відновлено',
-        message: 'Історію, призначення товарів і Magento збережено.' });
-      return true;
-    } catch (error) { showFeedback({ tone: 'error', title: 'Не вдалося змінити стан питання', message: getApiError(error) }); return false; }
+    } catch (error) { showRefreshWarning(successTitle, error); }
+    return returnMutationReceipts ? { kind: 'question', action: archived ? 'archived' : 'restored',
+      categoryCode: selectedCat.code, questionId: question.q_db_id, questionKey: question.id } : true;
   };
 
   const archiveOption = async (option, archived) => {
     try {
       await api.patch(`/admin/option/${option.db_id}/archive`, { archived });
     } catch (error) {
-      showFeedback({ tone: 'error', title: 'Не вдалося змінити стан варіанта', message: getApiError(error) });
+      showFeedback({ tone: 'error', title: 'Не вдалося змінити стан значення', message: getApiError(error) });
       return false;
     }
     if (editOpt.id === option.db_id) setEditOpt(emptyEditOption);
-    const successTitle = archived ? 'Варіант перенесено в архів' : 'Варіант повернено з архіву';
+    const successTitle = archived ? 'Значення перенесено в архів' : 'Значення повернено з архіву';
     showFeedback({ title: successTitle });
     try {
       await fetchConfig();
     } catch (error) {
       showRefreshWarning(successTitle, error);
     }
-    return true;
+    return returnMutationReceipts ? { kind: 'option', action: archived ? 'archived' : 'restored',
+      categoryCode: selectedCat.code, questionId: selectedQuestion.q_db_id, questionKey: selectedQuestion.id,
+      optionId: option.db_id, valueId: option.id } : true;
   };
 
   const persistQuestionOrder = (orderedQuestions, { reindexSku = false } = {}) => {
