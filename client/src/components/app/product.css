@@ -50,6 +50,42 @@
     @apply mt-0.5 text-xs leading-5 text-slate-500;
   }
 
+  .sync-coverage {
+    @apply grid gap-3 border-t border-slate-200 px-4 py-3 sm:px-5;
+  }
+
+  .sync-coverage-categories {
+    @apply grid gap-2 sm:grid-cols-2;
+  }
+
+  .sync-coverage-row-text {
+    @apply flex items-baseline justify-between gap-3;
+  }
+
+  .sync-coverage-label {
+    @apply text-sm font-semibold text-slate-800;
+  }
+
+  .sync-coverage-row.is-compact .sync-coverage-label {
+    @apply text-xs font-medium text-slate-600;
+  }
+
+  .sync-coverage-count {
+    @apply shrink-0 text-xs tabular-nums text-slate-500;
+  }
+
+  .sync-coverage-track {
+    @apply mt-1 h-2 overflow-hidden rounded-full bg-slate-200;
+  }
+
+  .sync-coverage-row.is-compact .sync-coverage-track {
+    @apply h-1.5;
+  }
+
+  .sync-coverage-fill {
+    @apply h-full rounded-full bg-emerald-500 transition-all;
+  }
+
   .product-register {
     @apply min-w-0 overflow-hidden;
   }

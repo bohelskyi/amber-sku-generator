@@ -148,6 +148,16 @@ test('080 legacy SV remote retention records terminal first-sync receipts withou
       assert.equal(product.details.answers.color,undefined);assert.equal(product.details.answers.material,undefined);
       assert.equal(product.full_sku,fixtureProduct.full_sku);
     });
+    await t.test('Magento summary coverage counts the completed current product for this origin only',async()=>{
+      const problems=require('../src/services/magento/sync-problems');
+      const summary=await problems.summary(db,config);
+      assert.deepEqual(summary.coverage,{total:1,synced:1,categories:[{code:'SV',name:summary.coverage.categories[0].name,total:1,synced:1}]});
+      assert.equal((await problems.summary(db,{...config,baseUrl:'https://other-origin.invalid'})).coverage.synced,0);
+      assert.equal((await problems.summary(db,{configured:false})).coverage,null);
+      await db.query('UPDATE products SET exclude_from_export=1 WHERE id=$1',[x.id]);
+      assert.equal((await problems.summary(db,config)).coverage.total,0,'excluded products are not counted');
+      await db.query('UPDATE products SET exclude_from_export=0 WHERE id=$1',[x.id]);
+    });
     await t.test('the database refuses a malformed retained receipt even inside the ledger transaction',async()=>{
       const session=(await db.query('SELECT * FROM magento_first_sync_sessions LIMIT 1')).rows[0];
       await assert.rejects(db.query(`INSERT INTO magento_first_sync_fields(session_id,revision,target,scope,state,evidence)
