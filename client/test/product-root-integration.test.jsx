@@ -62,6 +62,19 @@ function openWorkspace(permissions, initialEntry = '/products') {
   return router;
 }
 
+it('shows Magento sync coverage above the register on the products landing page', async () => {
+  const originalGet = get.getMockImplementation();
+  get.mockImplementation((url, ...args) => url === '/products/register'
+    ? Promise.resolve({ data: { items: [], pageInfo: { hasMore: false, nextCursor: null }, filterOptions: { categories: [] } } })
+    : url === '/magento/summary' ? Promise.resolve({ data: { enabled: true, problemCount: 0,
+      coverage: { total: 10, synced: 4, categories: [{ code: 'NM', name: 'Намисто', total: 10, synced: 4 }] } } })
+      : originalGet(url, ...args));
+  openWorkspace(['products.view', 'products.decode', 'history.view']);
+  await screen.findByRole('heading', { name: 'Реєстр товарів' });
+  expect((await screen.findByRole('progressbar', { name: 'Синхронізовано з Magento: синхронізовано 40%' })).getAttribute('aria-valuenow')).toBe('40');
+  expect(screen.getByRole('progressbar', { name: 'Намисто: синхронізовано 40%' })).toBeTruthy();
+});
+
 it('makes the register the only product search and opens category selection only after Create', async () => {
   const originalGet = get.getMockImplementation();
   get.mockImplementation((url, ...args) => url === '/products/register'

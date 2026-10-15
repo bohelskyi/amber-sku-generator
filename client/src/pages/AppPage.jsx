@@ -9,6 +9,7 @@ import CreationDeliveryNotice from '../components/app/CreationDeliveryNotice.jsx
 import CreationIntegrationResume from '../components/app/CreationIntegrationResume.jsx';
 import { ProductBuilder } from '../components/app/ProductBuilder';
 import { ProductRegister } from '../components/app/ProductRegister';
+import { SyncCoverage } from '../components/app/SyncCoverage.jsx';
 import { ProductPriceChangeDialog } from '../components/app/ProductPriceChangeDialog';
 import { RecountConfirmDialog } from '../components/app/RecountConfirmDialog';
 import { LoadingState, Notice } from '../components/app/UiPrimitives.jsx';
@@ -415,6 +416,8 @@ function AppPage() {
             })}
           />
         )}
+
+        {isLandingRoute && !sku.selectedCat && !sku.decodeData && !sku.isDecodeLoading && <SyncCoverage />}
 
         {canViewRegister && isLandingRoute && !sku.selectedCat && !sku.decodeData && !sku.isDecodeLoading && (
           <ProductRegister canDecode={canDecodeProducts} refreshKey={registerRefresh}

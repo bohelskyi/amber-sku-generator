@@ -23,13 +23,13 @@ export function SyncCoverage() {
   const coverage = summary?.coverage;
   if (!coverage || !coverage.total) return null;
   return (
-    <div className="sync-coverage" data-testid="sync-coverage">
+    <section className="sync-coverage card fade-up" data-testid="sync-coverage">
       <CoverageBar label="Синхронізовано з Magento" synced={coverage.synced} total={coverage.total} />
       <div className="sync-coverage-categories">
         {coverage.categories.map((category) => (
           <CoverageBar key={category.code} label={category.name} synced={category.synced} total={category.total} compact />
         ))}
       </div>
-    </div>
+    </section>
   );
 }
