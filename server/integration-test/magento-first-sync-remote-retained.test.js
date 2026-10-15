@@ -113,6 +113,22 @@ test('080 legacy SV remote retention records terminal first-sync receipts withou
         {code:'MAGENTO_FIRST_SYNC_DECISION_NOT_AVAILABLE'});
       assert.equal((await db.query('SELECT count(*)::int n FROM magento_first_sync_fields')).rows[0].n,0);
     });
+    await t.test('operator preview runs the canonical review on the ordinary pool and records nothing',async()=>{
+      const script=require('../scripts/first-sync-retain-remote'),fs=require('node:fs/promises'),os=require('node:os');
+      const directory=await fs.mkdtemp(path.join(os.tmpdir(),'retain-preview-')),input=path.join(directory,'input.json');
+      await fs.writeFile(input,JSON.stringify({bindingRevisionId:binding.id,items:[{sku:x.full_sku}]}));
+      const runtime=require('../scripts/sv-campaign-stages').createRuntime(path.resolve(__dirname,'..'));
+      // Reuse the controlled observation; the real service, locks and pool stay in use.
+      runtime.first={...runtime.first,review:(cfg,selected,run)=>firstSync.review(cfg,selected,{...run,preview:options.preview,observeRate:options.observeRate})};
+      const before=await canonical(),fieldsBefore=(await db.query('SELECT count(*)::int n FROM magento_first_sync_fields')).rows[0].n,lines=[];
+      const code=await script.main(['--mode','preview','--server-root',path.resolve(__dirname,'..'),'--input',input,'--output',path.join(directory,'out.jsonl'),
+        '--expected-database',name,'--actor-id',String(actor),'--installation-key','schema6-fixture'],
+      {runtime,pool:db,config,fetchImpl:storeConfigs,print:line=>lines.push(JSON.parse(line)),printError:line=>lines.push({error:line})});
+      assert.equal(code,0,JSON.stringify(lines));
+      assert.deepEqual(lines[0],{sku:x.full_sku,status:'retainable',fields:['all/kolir','all/typy_obrobky_burshtynu'],imports:[]});
+      assert.deepEqual(await canonical(),before);
+      assert.equal((await db.query('SELECT count(*)::int n FROM magento_first_sync_fields')).rows[0].n,fieldsBefore);
+    });
     await t.test('retain_remote records a terminal receipt without changing Amber, completes the session and replays once',async()=>{
       const before=await canonical(),review=await firstSync.review(config,selection,options);
       const choices=[{target:'kolir',scope:'all',choice:'retain_remote'},{target:'typy_obrobky_burshtynu',scope:'all',choice:'retain_remote'}];
