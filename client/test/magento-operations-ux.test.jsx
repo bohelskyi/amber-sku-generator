@@ -111,9 +111,9 @@ it('preview displays the exact delivery set; only one separate explicit apply us
   fireEvent.click(screen.getByRole('button', { name: 'Перевірити вплив на товари' }));
   const list = await screen.findByRole('region', { name: 'Перелік товарів для перевірки й синхронізації' }); expect(list.textContent).toContain('SV1');
   expect(api.post).toHaveBeenCalledTimes(1);
-  const apply = screen.getByRole('button', { name: 'Застосувати правила й запланувати 1 товарів' }); fireEvent.click(apply); fireEvent.click(apply);
+  const apply = screen.getByRole('button', { name: 'Застосувати правила' }); fireEvent.click(apply); fireEvent.click(apply);
   expect(api.post).toHaveBeenCalledTimes(2); expect(api.post.mock.calls[1][1].previewToken).toBe('reviewed');
-  expect(screen.getByRole('button', { name: 'Застосовуємо правила й плануємо синхронізацію…' }).disabled).toBe(true);
+  expect(screen.getByRole('button', { name: 'Застосовуємо правила…' }).disabled).toBe(true);
   await act(async () => finishApply({ data: { revision } })); expect(applied).toHaveBeenCalledTimes(1);
 });
 

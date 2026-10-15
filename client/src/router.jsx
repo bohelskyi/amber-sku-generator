@@ -9,6 +9,7 @@ import {
   dailyWorkspaceNavigation, hasAllPermissions, hasAnyPermission, legacyNavigation, navigationForPermissions,
 } from './lib/workspace-navigation.js';
 import { ExportWorkflowProvider } from './hooks/product/export-workflow-context';
+import { getLegacyMagentoCatalogTarget } from './lib/catalog-entry.js';
 
 const AppPage = lazy(() => import('./pages/AppPage.jsx'));
 const AttentionPage = lazy(() => import('./pages/AttentionPage.jsx'));
@@ -17,6 +18,7 @@ const AdministrationPage = lazy(() => import('./pages/AdministrationPage.jsx'));
 const MagentoIntegrationPage = lazy(() => import('./pages/MagentoIntegrationPage.jsx'));
 const SyncProblemsPage = lazy(() => import('./pages/SyncProblemsPage.jsx'));
 const AdminPage = lazy(() => import('./pages/AdminPage.jsx'));
+const CatalogPage = lazy(() => import('./pages/CatalogPage.jsx'));
 const RepricingPage = lazy(() => import('./pages/RepricingPage.jsx'));
 const CorrectionRequestsPage = lazy(() => import('./pages/CorrectionRequestsPage.jsx'));
 const CorrectionHistoryPage = lazy(() => import('./pages/CorrectionHistoryPage.jsx'));
@@ -64,6 +66,13 @@ function LegacyTemplateRedirect() {
   return <Navigate replace to={{ pathname: `/admin/magento/rules${suffix}`, search: location.search, hash: location.hash }} />;
 }
 
+function MagentoEntrance() {
+  const location = useLocation(); const { permissions } = useAuth();
+  const target = getLegacyMagentoCatalogTarget(location.pathname, location.search, location.hash);
+  if (target) return <Navigate replace to={target} />;
+  return permissions.includes('export_templates.view') ? <MagentoIntegrationPage /> : <AccessDenied />;
+}
+
 export default function AppRouter() {
   const [router] = useState(() => createBrowserRouter([{ path: '*', element: <Workspace /> }]));
   return <RouterProvider router={router} />;
@@ -87,9 +96,10 @@ export function Workspace() {
           <Route path="/administration" element={guardAny(['users.manage', 'roles.manage', 'audit.view'], <AdministrationPage />)} />
           <Route path="/sync-problems" element={guardAny(['products.view'], <SyncProblemsPage />)} />
           <Route path="/admin" element={<LegacyAdminRedirect />} />
-          <Route path="/admin/catalog" element={guardAny(['catalog.view'], <AdminPage key="catalog" mode="catalog" />)} />
+          <Route path="/admin/catalog" element={guardAny(['catalog.view', 'export_templates.view'], <CatalogPage />)} />
+          <Route path="/admin/catalog/structure" element={guardAny(['catalog.view'], <AdminPage key="catalog" mode="catalog" />)} />
           <Route path="/admin/pricing" element={guardAny(['pricing.view'], <AdminPage key="pricing" mode="pricing" />)} />
-          <Route path="/admin/magento/*" element={guardAny(['export_templates.view'], <MagentoIntegrationPage />)} />
+          <Route path="/admin/magento/*" element={guardAny(['catalog.view', 'export_templates.view'], <MagentoEntrance />)} />
           <Route path="/admin/repricing" element={guardAny(['repricing.view'], <RepricingPage />)} />
           <Route path="/admin/corrections" element={guardAny(['corrections.view'], <CorrectionRequestsPage />)} />
           <Route path="/admin/corrections/history" element={guardAny(['history.view'], <CorrectionHistoryPage />)} />

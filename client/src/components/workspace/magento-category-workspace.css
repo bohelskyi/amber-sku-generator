@@ -1,4 +1,16 @@
 .mc-workspace { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 24px; align-items: start; }
+.magento-category-page { padding: 24px; }
+.catalog-characteristics-table td:last-child { width: 180px; }
+.catalog-characteristics-table td:last-child .btn { white-space: normal; }
+@media (max-width: 640px) {
+  .magento-category-page { padding: 16px; }
+  .catalog-characteristics-table, .catalog-characteristics-table tbody { display: block; }
+  .mc-workspace .catalog-characteristics-table { min-width: 0; }
+  .catalog-characteristics-table thead { display: none; }
+  .catalog-characteristics-table tr { display: grid; grid-template-columns: minmax(0, 1fr); padding: 12px 0; border-bottom: 1px solid var(--border); gap: 6px; }
+  .mc-workspace .catalog-characteristics-table th, .mc-workspace .catalog-characteristics-table td { display: block; width: auto; border: 0; padding: 4px 8px; overflow-wrap: anywhere; }
+  .catalog-characteristics-table td:last-child .btn { width: 100%; }
+}
 .mc-categories { position: sticky; top: 18px; display: grid; gap: 14px; min-width: 0; }
 .mc-categories h2, .mc-fields > header h2 { font-size: 18px; font-weight: 700; color: var(--navy-900); }
 .mc-categories nav { display: grid; max-height: 65vh; overflow: auto; gap: 4px; }

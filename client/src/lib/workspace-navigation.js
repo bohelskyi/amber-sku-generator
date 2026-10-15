@@ -29,9 +29,9 @@ export const topLevelNavigation = [
 ];
 
 export const settingsNavigation = [
-  { to: '/admin/catalog', label: 'Каталог', description: 'Категорії, характеристики та схеми внутрішнього SKU.', permissions: ['catalog.view'] },
+  { to: '/admin/catalog', label: 'Каталог', description: 'Категорії, характеристики, значення та передавання в магазин.', permissions: ['catalog.view', 'export_templates.view'] },
   { to: '/admin/pricing', label: 'Ціноутворення', description: 'Матриці, модифікатори та курси для розрахунку.', permissions: ['pricing.view'] },
-  { to: '/admin/magento', label: 'Інтеграція Magento', description: 'Доставка товарів, відповідності та підготовка публікацій.', permissions: ['export_templates.view'] },
+  { to: '/admin/magento/overview', label: 'Підключення магазину', description: 'Стан підключення, перевірки та історія передавання.', permissions: ['export_templates.view'] },
 ];
 
 export const administrationNavigation = [

@@ -37,8 +37,8 @@ for (const reconcile of [false, true]) it(`lifecycle hold handoff is read-only, 
 it('Product Detail explains the same held successor without mapping or mutation controls', async () => {
   api.get.mockResolvedValue({ data: { state: 'needs_attention', reason: problem.message, problems: [problem] } });
   shell(<ProductMagentoState product={{ productId: 5033, publicSku: 'SV5111010', status: 'active' }} />, ['products.view']);
-  await screen.findByText('Потрібне узгодження Адміністратора');
-  expect(screen.getByText(/Товар збережено в Amber/)).toBeTruthy();
+  await screen.findByText('Немає точного підтвердження, які попередні версії товару доставлено в Magento');
+  expect(screen.getByRole('link', { name: 'Переглянути проблему' }).getAttribute('href')).toBe('/attention?problem=5033');
   expect(screen.queryByRole('link', { name: 'Історія товару' })).toBeNull();
   expect(screen.queryByRole('link', { name: /Відповідності/ })).toBeNull();
   expect(api.get.mock.calls.map(([url]) => url)).toEqual(['/magento/product-status/5033']);
@@ -52,9 +52,10 @@ it('actual mapping problem opens exact field while resource configuration opens 
   ] }], pageInfo: { total: 1 } } });
   shell(<SyncProblemsPage />, [...permissions, 'export_templates.manage']);
   const mapping = new URL((await screen.findByRole('link', { name: 'Пов’язати значення' })).href);
-  expect(mapping.pathname).toBe('/admin/magento/categories/SV');
-  expect(Object.fromEntries(mapping.searchParams)).toMatchObject({ field: 'kamin_obrobka', productId: '5033', view: 'attributes', returnTo: '/attention?problem=5033' });
-  expect(screen.getByRole('link', { name: 'Налаштувати атрибут Magento' }).getAttribute('href')).toContain('/admin/magento/categories/SV?view=attributes');
+  expect(mapping.pathname).toBe('/admin/catalog');
+  expect(Object.fromEntries(mapping.searchParams)).toMatchObject({ category: 'SV', field: 'kamin_obrobka', productId: '5033', view: 'attributes', returnTo: '/attention?problem=5033' });
+  fireEvent.click(screen.getByText('Інші перешкоди (1)', { selector: 'summary' }));
+  expect(screen.getByRole('link', { name: 'Налаштувати атрибут Magento' }).getAttribute('href')).toContain('/admin/catalog?view=attributes');
   expect(api.post).not.toHaveBeenCalled();
 });
 

@@ -18,7 +18,7 @@ export function creationDeliveryState(readiness, categoryCode) {
   if ((!upgrade && !deferred && !category && !value) || !safeIdentity(readiness.bindingRevisionId)) return { status: 'not_checked' };
   const returnTo = '/products/create?' + new URLSearchParams({ category: categoryCode });
   return { status: 'configuration_required', kind: category ? 'category' : value ? 'source_value' : deferred ? 'deferred_value' : 'native_upgrade', questionKey: readiness.questionKey,
-    href: '/admin/magento/categories/' + encodeURIComponent(categoryCode) + '?' + new URLSearchParams({
+    href: '/admin/catalog?' + new URLSearchParams({ category: categoryCode, view: category ? 'placement' : 'attributes',
       ...(readiness.questionKey ? { question: readiness.questionKey } : {}), binding: readiness.bindingRevisionId, ...(deferred || value ? { value: readiness.valueId } : {}), returnTo,
     }) };
 }

@@ -70,7 +70,7 @@ export default function RepricingPage() {
               {controller.globalDraft
                 ? <FilePenLine size={16} />
                 : <CircleDollarSign size={16} />}
-              Переоцінити все
+              Підготувати переоцінку
             </Button>}
           </>}
         />

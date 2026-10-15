@@ -2,6 +2,25 @@
     @apply grid min-w-0 gap-4 lg:grid-cols-[minmax(300px,0.8fr)_minmax(0,1.45fr)];
   }
 
+  .product-final-price {
+    @apply mt-1 text-2xl font-semibold tabular-nums text-slate-900;
+  }
+
+  .product-sync-summary {
+    @apply min-w-0 flex-1 space-y-1;
+  }
+
+  .product-register-more > summary {
+    @apply cursor-pointer list-none;
+  }
+
+  .product-register-more > summary::-webkit-details-marker { display: none; }
+
+  @media (max-width: 639px) {
+    .product-sync-state .product-sync-summary { flex-basis: 100%; }
+    .product-sync-state > .sync-refresh { min-width: 44px; min-height: 44px; justify-content: center; align-items: center; }
+  }
+
   .product-landing-grid.is-lookup-only {
     @apply lg:grid-cols-1;
   }

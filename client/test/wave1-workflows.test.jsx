@@ -129,7 +129,10 @@ it.each([
     else expect(screen.queryByRole('button', { name })).toBeNull();
   }
   expect(screen.queryByRole('link', { name: 'Відповідності: sku' })).toBeNull();
-  expect(screen.getByRole('link', { name: 'Перевірити правила інтеграції' }).getAttribute('href')).toBe('/admin/magento/categories/SV');
+  const destination = new URL(screen.getByRole('link', { name: 'Перевірити правила інтеграції' }).href);
+  expect(destination.pathname).toBe('/admin/catalog');
+  expect(destination.searchParams.get('category')).toBe('SV');
+  expect(destination.searchParams.get('productId')).toBe('7');
   expect(repair).not.toHaveBeenCalled();
 });
 

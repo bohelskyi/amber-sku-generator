@@ -76,14 +76,14 @@ export default function MagentoIntegrationPage() {
   const operationalText = integration?.operational.state !== 'known' ? 'Дані про зафіксовані проблеми недоступні'
     : integration?.operational.count ? `Потребують уваги: ${integration.operational.count}` : 'Зафіксованих проблем немає';
   const publicationText = published ? `Версія ${published.versionNumber}` : 'Опублікованих відповідностей ще немає';
-  const items = [{ to: '/admin/magento', label: 'Категорії та прив’язки' },
+  const items = [{ to: '/admin/catalog', label: 'Каталог' },
     { to: '/admin/magento/overview', label: 'Стан доставки' },
     ...(canManage ? [{ to: '/admin/magento/changes', label: 'Підготовлені зміни' }] : []),
     { to: '/admin/magento/history', label: 'Історія' },
     ...(isActualAdministrator(auth) ? [{ to: '/admin/magento/administrator', label: 'Контрольовані операції' }] : [])];
   return <main className={categoryWorkspace ? 'app-page magento-category-page' : 'app-page'}><div className="local-workspace magento-workspace">
-    <WorkspaceHeader title="Інтеграція Magento" description={categoryWorkspace ? 'Що передаємо з менеджера в магазин.' : 'Категорії, характеристики та правила передачі товарів.'} actions={!categoryWorkspace && <button className="btn btn-outline btn-compact-md" onClick={() => setRefresh((value) => value + 1)}>Оновити стан</button>} />
-    <div className={categoryWorkspace ? 'mc-navigation' : undefined}><WorkspaceLocalNav label="Інтеграція Magento" items={categoryWorkspace ? items.slice(0, 2) : items} />
+    <WorkspaceHeader title="Підключення магазину" description={categoryWorkspace ? 'Що передаємо з менеджера в магазин.' : 'Стан підключення, журнали та спеціальні операції.'} actions={!categoryWorkspace && <button className="btn btn-outline btn-compact-md" onClick={() => setRefresh((value) => value + 1)}>Оновити стан</button>} />
+    <div className={categoryWorkspace ? 'mc-navigation' : undefined}><WorkspaceLocalNav label="Підключення магазину" items={categoryWorkspace ? items.slice(0, 2) : items} />
       {categoryWorkspace && <div className="mc-extra-nav"><MagentoDetails summary="Інші розділи">{() => <WorkspaceLocalNav label="Додаткові розділи інтеграції" items={items.slice(2)} />}</MagentoDetails></div>}
     </div>
     {error && <Notice>{error}</Notice>}

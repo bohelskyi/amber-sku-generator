@@ -239,8 +239,14 @@ function AppPage() {
             {attentionReturn ? <Link className="btn btn-outline" to={attentionReturn}>Повернутися до проблеми</Link>
               : <Link className="btn btn-outline" to={registerReturn} state={location.state?.productReturnState}>Повернутися до реєстру</Link>}
           </> : isLandingRoute ? <div className="flex flex-wrap gap-2">
-            {canRestoreProducts && <button type="button" className="btn btn-outline" onClick={() => dirtyNavigation.request(() => setRestoreOpen(true))}>Відновити за артикулами</button>}
-            {canHistoricalReactivate && <button type="button" className="btn btn-outline" onClick={() => dirtyNavigation.request(() => setHistoricalOpen(true))}>Нове історичне рішення Адміністратора</button>}
+            {canCreateProducts && <Link className="btn btn-primary" to="/products/create">Створити товар</Link>}
+            {(canRestoreProducts || canHistoricalReactivate) && <details className="product-register-more">
+              <summary className="btn btn-outline">Додаткові дії</summary>
+              <div className="mt-2 grid gap-2">
+                {canRestoreProducts && <button type="button" className="btn btn-outline" onClick={() => dirtyNavigation.request(() => setRestoreOpen(true))}>Відновити за артикулами</button>}
+                {canHistoricalReactivate && <button type="button" className="btn btn-outline" onClick={() => dirtyNavigation.request(() => setHistoricalOpen(true))}>Нове історичне рішення Адміністратора</button>}
+              </div>
+            </details>}
           </div> : undefined} />
         {requestedRepair && !permissionUi.canApplyDirectRecount && <Notice tone="info">Для виправлення характеристик потрібен дозвіл на переоблік товару. Передайте артикул оператору з цим дозволом.</Notice>}
         <Toast message={sku.copyMessage} />
@@ -310,8 +316,8 @@ function AppPage() {
             canCreateProducts={canCreateProducts}
             canViewAttention={canViewAttention}
             canViewHistory={canViewRegister}
-            showCreate={isLandingRoute || isCreateRoute}
-            showLookup={!isCreateRoute}
+            showCreate={isCreateRoute}
+            showLookup={!isCreateRoute && (!isLandingRoute || !canViewRegister)}
             canStartRecount={Boolean(sku.config && recountMode)}
             canChangeProductPrice={permissionUi.canApplyDirectPriceChange}
             recountMode={recountMode || 'apply'}

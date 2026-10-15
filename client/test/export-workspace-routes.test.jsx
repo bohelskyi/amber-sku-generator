@@ -132,6 +132,8 @@ it('keeps view-only legacy export deep links without create or archive authority
 it('keeps product creation, history, decode, recount and archive available without export access', async () => {
   const category = { code: 'BR', name: 'Браслети', requires_weight: 0 };
   productsApi.getConfig.mockResolvedValue(response({ categories: { BR: category }, questions: { BR: [] }, options: {} }));
+  productsApi.listRegister.mockResolvedValue(response({ items: [{ id: 1, publicSku: 'AG-000001', internalSku: 'BR-A', categoryCode: 'BR', categoryName: 'Браслети', status: 'active' }],
+    pageInfo: { hasMore: false, nextCursor: null }, filterOptions: { categories: [category] } }));
   const decode = vi.spyOn(api, 'post').mockResolvedValue(response({
     sku: 'BR-A', internalSku: 'BR-A', publicSku: 'AG-000001', category, existsInDb: true, decodedAnswers: [], suffix: { type: 'sequence', value: 1 },
     product: { id: 1, status: 'active', details: {} }, pricing: null, skuSchema: { version: 1 },
@@ -139,19 +141,20 @@ it('keeps product creation, history, decode, recount and archive available witho
   vi.spyOn(window, 'confirm').mockReturnValue(true);
   vi.spyOn(window, 'alert').mockImplementation(() => {});
   mount('/', ['products.view', 'history.view', 'products.create', 'products.decode', 'products.archive', 'products.recount']);
-  await screen.findByRole('heading', { name: 'Оберіть категорію' });
-  expect(screen.getByRole('heading', { name: 'Реєстр товарів' })).toBeTruthy();
+  await screen.findByRole('heading', { name: 'Реєстр товарів' });
+  expect(screen.queryByRole('heading', { name: 'Оберіть категорію' })).toBeNull();
   expect(screen.queryByRole('region', { name: 'Експорт' })).toBeNull();
   expect(screen.queryByRole('link', { name: 'Перейти до експорту' })).toBeNull();
   expect(screen.queryByRole('link', { name: 'Експорт', exact: true })).toBeNull();
+  link('Створити товар');
+  await screen.findByRole('heading', { name: 'Оберіть категорію' });
   fireEvent.click(screen.getByRole('button', { name: /BR Браслети/ }));
   expect(await screen.findByRole('heading', { name: 'Браслети' })).toBeTruthy(); button('До категорій');
   await screen.findByRole('heading', { name: 'Оберіть категорію' });
   fireEvent.click(within(screen.getByRole('navigation', { name: 'Основна навігація' })).getByRole('link', { name: 'Товари', exact: true }));
-  await screen.findByLabelText('Артикул для відкриття товару');
-  fireEvent.change(screen.getByLabelText('Артикул для відкриття товару'), { target: { value: 'br-a' } }); button('Відкрити товар');
-  await screen.findByRole('button', { name: 'Переоблік' });
-  expect(decode).toHaveBeenCalledWith('/decode', { sku: 'BR-A' }); button('Переоблік');
+  fireEvent.click(await screen.findByRole('link', { name: 'Відкрити товар AG-000001' }));
+  await screen.findByRole('button', { name: 'Змінити характеристики' });
+  expect(decode).toHaveBeenCalledWith('/decode', { sku: 'AG-000001' }); button('Змінити характеристики');
   expect(screen.getByText('Переоблік товару')).toBeTruthy(); button('Скасувати');
   fireEvent.click(screen.getByText('Додаткові дії')); button('Архівувати товар');
   const archiveDialog = await screen.findByRole('dialog', { name: 'Архівувати товар?' });

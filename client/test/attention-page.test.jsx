@@ -23,6 +23,25 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+it('keeps an open name review in Attention while a background queue refresh fails', async () => {
+  const item = { productId: 7, article: 'AG-000007', category: 'SV', nameConflict: true,
+    problems: [{ code: 'NAME_CONFLICT', resolution: 'name', message: 'Потрібно узгодити назву.' }] };
+  api.get.mockResolvedValueOnce({ data: { items: [item], pageInfo: { total: 1 } } })
+    .mockRejectedValue(new Error('Unavailable'));
+  vi.spyOn(api, 'post').mockResolvedValue({ data: {
+    amber: { all: 'Назва Amber', en: 'Amber name' }, magento: { all: 'Назва Magento', en: 'Magento name' },
+    previewToken: 'exact-name-proof',
+  } });
+  renderPage(['products.view', 'exports.create']);
+  fireEvent.click(await screen.findByRole('button', { name: 'Вибрати актуальну назву' }));
+  await screen.findByText(/Назва Amber/);
+  act(() => window.dispatchEvent(new Event('focus')));
+  await screen.findByText(/Не вдалося оновити проблеми доставки/);
+  expect(screen.getByRole('dialog', { name: 'Виберіть актуальну назву' })).toBeTruthy();
+  expect(screen.getByText(/Назва Amber/)).toBeTruthy();
+  expect(api.post).toHaveBeenCalledExactlyOnceWith('/magento/name-resolution/preview', { productId: 7, choice: 'amber' });
+});
+
 it('turns repeated history diagnostics into one starting task without losing other exact repairs', async () => {
   const hold = { code: 'AMBER_SYNC_ELIGIBILITY_UNRESOLVED', resolution: 'lifecycle_reconciliation',
     message: 'Потрібне підтвердження історії доставки', eligibilityIssue: { ancestorProductIds: [1368] } };
@@ -36,12 +55,17 @@ it('turns repeated history diagnostics into one starting task without losing oth
   expect(start.querySelector('h3').textContent).toBe('Потрібне підтвердження історії доставки');
   expect(start.querySelector('button').textContent).toBe('Перевірити товар у Magento');
   expect(screen.getAllByRole('heading', { name: 'Потрібне підтвердження історії доставки' })).toHaveLength(1);
+  const otherProblems = screen.getByText('Інші перешкоди (2)', { selector: 'summary' });
+  expect(otherProblems.closest('details').open).toBe(false);
+  fireEvent.click(otherProblems);
+  expect(otherProblems.closest('details').open).toBe(true);
   const categoryLink = screen.getByRole('link', { name: 'Перевірити відповідність категорії' });
+  expect(new URL(categoryLink.href).pathname).toBe('/admin/catalog');
   expect(categoryLink.getAttribute('href')).toContain('path=Default+Category%2F');
   expect(categoryLink.getAttribute('href')).toContain('view=placement');
   expect(categoryLink.getAttribute('href')).not.toContain('tab=placement');
   expect(start.compareDocumentPosition(categoryLink) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(screen.getByRole('heading', { name: 'Інші перешкоди' })).toBeTruthy();
+  expect(screen.getByRole('region', { name: 'Інші перешкоди' })).toBeTruthy();
   expect(screen.queryByText('1368')).toBeNull();
   fireEvent.click(screen.getByText('Дані для підтримки'));
   expect(screen.getByText(/1368/)).toBeTruthy();
@@ -71,6 +95,20 @@ it('a viewer receives a concrete handoff rather than advice to click an unavaila
   expect(screen.queryByText(/^Відкрийте перевірку доставки/)).toBeNull();
   expect(screen.queryByRole('button', { name: 'Відкрити перевірку доставки' })).toBeNull();
   expect(screen.getByRole('button', { name: 'Копіювати опис проблеми' })).toBeTruthy();
+});
+
+it.each(['target', 'field'])('keeps system product %s out of operator guidance while retaining exact support evidence', async (scopeKey) => {
+  const problem = { code: 'reconciliation_required', resolution: 'administrator', [scopeKey]: 'product',
+    message: 'Amber надіслав зміну, але кінцевий стан не підтверджено.' };
+  api.get.mockResolvedValue({ data: { items: [{ productId: 7, article: 'AG-000007', problems: [problem] }], pageInfo: { total: 1 } } });
+  renderPage(['products.view']);
+  const start = await screen.findByRole('region', { name: 'З чого почати' });
+  expect(start.querySelector('h3').textContent).toBe(problem.message);
+  expect(start.querySelector('.sync-problem-subject')).toBeNull();
+  expect(screen.queryByText(/^product:/)).toBeNull();
+  expect(screen.queryByText('Характеристика')).toBeNull();
+  fireEvent.click(screen.getByText('Дані для підтримки'));
+  expect(JSON.parse(document.querySelector('.sync-raw-evidence').textContent)).toEqual([problem]);
 });
 
 it('optional Magento comparison mounts on demand and still requires an explicit check', async () => {

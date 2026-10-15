@@ -321,10 +321,11 @@ test('decode result keeps authoritative pricing drivers highlighted in a compact
   assert.match(decodeSource, /label="Внутрішній SKU"/);
   assert.match(decodeSource, /Стан у базі/);
   assert.match(decodeSource, /Розраховано до округлення/);
-  assert.match(decodeSource, /Фінальна збережена/);
+  assert.match(decodeSource, /product-final-price/);
+  assert.match(decodeSource, /<summary>Розрахунок ціни<\/summary>/);
   assert.doesNotMatch(decodeSource, /decode-rounding-note/);
   assert.doesNotMatch(decodeSource, /formatWholeUah\(calculatedPriceUah\)\s*→/);
-  assert.match(decodeSource, /Розрахункова ціна за грам/);
+  assert.match(decodeSource, /label="За грам, грн"/);
   assert.match(decodeSource, /label="Матриця"/);
   assert.match(decodeSource, /label="Вага"/);
   assert.match(decodeSource, /<details className="decode-details">/);

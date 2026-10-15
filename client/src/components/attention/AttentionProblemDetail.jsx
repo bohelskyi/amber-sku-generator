@@ -91,15 +91,17 @@ export default function AttentionProblemDetail({ product, productUrl, returnTo, 
       {main.resolution === 'name' && <ProductNameConflict productId={product.productId} available={Boolean(product.nameConflict)} onSaved={onSaved} />}
     </section>}
     {!firstSyncProblem && canReviewFirstSync && exactFirstSyncContext && firstSyncPanel}
-    {groups.length > 1 && <section className="sync-other-problems" aria-label="Інші перешкоди">
-      <h3>Інші перешкоди</h3>
+    {groups.length > 1 && <details className="ui-technical-disclosure">
+      <summary>Інші перешкоди ({groups.length - 1})</summary>
+      <section className="sync-other-problems" aria-label="Інші перешкоди">
       <p className="sync-problem-guidance">Ці причини також зафіксовано для товару. Після виправлення перевірте оновлений стан доставки.</p>
       <ul>{groups.slice(1).map(({ key, problem }) => <li key={key}>
         <h4>{problemTitle(problem)}</h4>
         <ProblemFacts problem={problem} />
         {needsDeliveryRecovery(problem) ? <p className="sync-problem-guidance">Перевіряється у процедурі відновлення доставки на цій сторінці.</p> : repair(problem)}
       </li>)}</ul>
-    </section>}
+    </section>
+    </details>}
     {main?.resolution !== 'name' && <ProductNameConflict productId={product.productId} available={Boolean(product.nameConflict)} onSaved={onSaved} />}
     {recovery && !needsDeliveryRecovery(main) && <MagentoRecovery productId={product.productId} categoryCode={product.category} onTechnicalEvidence={setRecoveryEvidence} onSaved={() => onSaved('recovery')} />}
     {canCompare && !identityProblem && <TechnicalDisclosure summary="Додаткова перевірка даних у Magento">

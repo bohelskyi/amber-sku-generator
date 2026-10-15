@@ -17,7 +17,7 @@ it('numeric definition settings retain the selected type, unit, independent boun
   fireEvent.change(screen.getByRole('textbox', { name: 'Максимум' }), { target: { value: '30' } });
   fireEvent.click(screen.getByRole('checkbox', { name: 'Включати мінімум' }));
   expect(screen.queryByRole('textbox', { name: 'Цифр після коми' })).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: 'Зберегти питання' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Зберегти характеристику' }));
   expect(onSave.mock.calls[0][0].numeric_validation).toEqual({ kind: 'integer', unit: 'мм', min: '1', max: '30', minInclusive: false, maxInclusive: true, maxFractionDigits: 0 });
   fireEvent.change(screen.getByRole('combobox', { name: 'Перевірка' }), { target: { value: 'decimal' } });
   fireEvent.change(screen.getByRole('textbox', { name: 'Одиниця' }), { target: { value: 'г' } });
@@ -25,10 +25,10 @@ it('numeric definition settings retain the selected type, unit, independent boun
   fireEvent.change(screen.getByRole('textbox', { name: 'Максимум' }), { target: { value: '30,5' } });
   fireEvent.change(screen.getByRole('textbox', { name: 'Цифр після коми' }), { target: { value: '2' } });
   fireEvent.click(screen.getByRole('checkbox', { name: 'Включати максимум' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Зберегти питання' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Зберегти характеристику' }));
   expect(onSave.mock.calls[1][0].numeric_validation).toEqual({ kind: 'decimal', unit: 'г', min: '0', max: '30,5', minInclusive: true, maxInclusive: false, maxFractionDigits: '2' });
   fireEvent.change(screen.getByRole('combobox', { name: 'Перевірка' }), { target: { value: 'text' } });
   expect(screen.queryByRole('textbox', { name: 'Одиниця' })).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: 'Зберегти питання' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Зберегти характеристику' }));
   expect(onSave.mock.calls[2][0].numeric_validation).toBeNull();
 });

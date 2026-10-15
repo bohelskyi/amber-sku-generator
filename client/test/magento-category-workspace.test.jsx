@@ -31,6 +31,12 @@ function projection(revision = active, rules = definition, rowId = 'base') {
       { code: 'photo', target: 'photo', label: 'Зображення', text: false, configured: false, editable: false, sources: [], state: 'unmapped', restriction: 'Цей тип атрибута доступний лише для перегляду.' },
     ] };
 }
+function placementRule(data, path) {
+  data.template.definition = structuredClone(data.template.definition);
+  data.template.definition.groups[0].columns.push('categories');
+  data.template.definition.groups[0].rows[0].cells.categories = { op: 'literal', value: path };
+  data.attributes.push({ code: 'categories', target: 'categories', label: 'Розділи магазину', configured: true, editable: true, service: true, sources: [], state: 'connected' });
+}
 let saved;
 let draft;
 function mocks() {
@@ -56,13 +62,19 @@ function mocks() {
   });
   api.put.mockImplementation(async (_url, body) => { saved = { ...saved, draft: { ...saved.draft, revision: '2', definition: body.definition } }; return { data: saved.draft }; });
 }
-function mount(path = '/admin/magento?category=BR', grants = permissions, roles = []) {
-  const router = createMemoryRouter([{ path: '/admin/magento', element: <MagentoCategoryWorkspace categories={categories} activePublication={active} onPublished={vi.fn()} /> }], { initialEntries: [path] });
+function mount(path = '/admin/catalog?category=BR', grants = permissions, roles = []) {
+  const router = createMemoryRouter([{ path: '/admin/catalog', element: <MagentoCategoryWorkspace categories={categories} activePublication={active} onPublished={vi.fn()} /> }], { initialEntries: [path] });
   const view = render(<AuthContext.Provider value={{ permissions: grants, roles }}><RouterProvider router={router} /></AuthContext.Provider>);
   return { ...view, router };
 }
 async function textFields() {
-  fireEvent.click(await screen.findByRole('button', { name: 'Назва й описи' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Назви та SEO' }));
+}
+async function storeFields() {
+  fireEvent.click(await screen.findByRole('button', { name: 'Усі поля магазину та постійні значення' }));
+}
+async function openScope() {
+  fireEvent.click(await screen.findByText('Обсяг перевірки та застосування'));
 }
 function saveDraft() {
   fireEvent.click(screen.getByText('Зберегти й продовжити пізніше'));
@@ -72,10 +84,10 @@ beforeEach(() => { vi.resetAllMocks(); mocks(); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 it('reuses the exact initial base category read while preserving a different language baseline', async () => {
-  mount(); await screen.findByRole('button', { name: 'Матеріал' });
+  mount(); await storeFields(); await screen.findByRole('button', { name: 'Матеріал' });
   expect(api.get.mock.calls.filter(([url]) => url === '/admin/magento-integration/categories/BR')).toHaveLength(1);
   cleanup(); api.get.mockClear();
-  mount('/admin/magento?category=BR&language=english'); await screen.findByRole('button', { name: 'Матеріал' });
+  mount('/admin/catalog?category=BR&language=english'); await storeFields(); await screen.findByRole('button', { name: 'Матеріал' });
   expect(api.get.mock.calls.filter(([url]) => url === '/admin/magento-integration/categories/BR')).toHaveLength(2);
 });
 
@@ -86,8 +98,8 @@ it('shows intended local edits and unrelated publication blockers before prepara
     if (url.includes('/categories/') && !url.includes('/fields/')) result.data.reviewScope = { categoryCount: 2, unresolved: [{ group: 'OT', target: 'name', row: 'base', kind: 'policy', reviewState: 'review_required' }] };
     return result;
   });
-  mount('/admin/magento?category=BR&language=english');
-  const scope = await screen.findByRole('region', { name: 'Обсяг редагування та перевірки' });
+  mount('/admin/catalog?category=BR&language=english');
+  await openScope(); const scope = screen.getByRole('region', { name: 'Обсяг редагування та перевірки' });
   expect(scope.textContent).toContain('Браслети · EN');
   expect(scope.textContent).toContain('увесь пакет правил (2 категорій)');
   expect(scope.textContent).toContain('В інших категоріях: 1 (Інші)');
@@ -95,7 +107,7 @@ it('shows intended local edits and unrelated publication blockers before prepara
 });
 
 it('focuses the exact semantic zero value from a product repair without selecting or approving it', async () => {
-  mount('/admin/magento?category=BR&question=color&value=0&productId=7&returnTo=%2Fattention%3Fproblem%3D7');
+  mount('/admin/catalog?category=BR&question=color&value=0&productId=7&returnTo=%2Fattention%3Fproblem%3D7');
   const mapping = await screen.findByLabelText('Magento для Нуль');
   const row = mapping.closest('tr');
   expect(row.classList.contains('is-repair-target')).toBe(true);
@@ -112,13 +124,13 @@ it('identifies a missing historical local value instead of rendering a naked num
     if (url.endsWith('/kolir')) result.data.entries = [{ ...entry, source: 'BR.color=value_id:87', evaluated: '' }];
     return result;
   });
-  mount('/admin/magento?category=BR&field=kolir&question=color&value=87');
+  mount('/admin/catalog?category=BR&field=kolir&question=color&value=87');
   await screen.findByLabelText('Magento для Невідоме локальне значення (ID 87)');
   expect(api.post).not.toHaveBeenCalled();
 });
 
 it('restores the applied result and reads persistent delivery evidence without implying remote confirmation', async () => {
-  mount('/admin/magento?category=BR&binding=current&source=current');
+  mount('/admin/catalog?category=BR&binding=current&source=current');
   await screen.findByText('Застосовано в Amber. Доставку Magento перевіряємо окремо.');
   await waitFor(() => expect(api.get).toHaveBeenCalledWith('/admin/magento-integration/bindings/current/handoffs', expect.any(Object)));
   expect(api.post).not.toHaveBeenCalled();
@@ -149,7 +161,7 @@ it('prepares native product source support only through the server-advertised ex
 });
 
 it('opens the category and complete attribute set without product evaluation or remote writes; exposes unreadable types', async () => {
-  mount(); await screen.findByRole('button', { name: 'Матеріал' });
+  mount(); await storeFields(); await screen.findByRole('button', { name: 'Матеріал' });
   expect(screen.getByText('Лише в умові')).toBeTruthy();
   expect(api.post).not.toHaveBeenCalled();
   expect(api.get.mock.calls.every(([url]) => /categories|sources/.test(url))).toBe(true);
@@ -157,7 +169,6 @@ it('opens the category and complete attribute set without product evaluation or 
   expect(screen.queryByRole('button', { name: 'Оновити структуру Magento' })).toBeNull();
   fireEvent.change(screen.getByLabelText('Показати'), { target: { value: 'unmapped' } });
   expect(screen.queryByRole('button', { name: 'Опис' })).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: 'Службові поля (1)' }));
   fireEvent.click(screen.getByRole('button', { name: 'Зображення' }));
   expect(screen.getByText('Цей тип атрибута доступний лише для перегляду.')).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'Підключити поле' })).toBeNull();
@@ -173,7 +184,7 @@ it('explains a review state and starts isolated binding review without requiring
     }
     return result;
   });
-  mount();
+  mount(); await storeFields();
   fireEvent.click(await screen.findByRole('button', { name: 'Що виправити' }));
   await screen.findByRole('region', { name: 'Що виправити в полі' });
   expect(screen.getAllByText('Є значення без підтвердженої відповідності.').length).toBeGreaterThan(0);
@@ -207,12 +218,15 @@ it('opens category repair in the new workspace, with paths and a scoped confirma
   const get = api.get.getMockImplementation();
   api.get.mockImplementation(async (url, config) => {
     const result = await get(url, config);
-    if (url.includes('/categories/') && !url.includes('/fields/')) result.data.placements = [{ id: 'category:one', target: 'categories', label: 'Default/Кулони', identity: 42, reviewState: 'proposed' }];
+    if (url.includes('/categories/') && !url.includes('/fields/')) {
+      result.data.placements = [{ id: 'category:one', target: 'categories', label: 'Default/Кулони', identity: 42, reviewState: 'proposed' }];
+      placementRule(result.data, 'Default/Кулони');
+    }
     return result;
   });
-  const { router } = mount('/admin/magento?category=BR&view=placement&returnTo=%2Fattention%3Fproblem%3D7');
+  const { router } = mount('/admin/catalog?category=BR&view=placement&returnTo=%2Fattention%3Fproblem%3D7');
   await screen.findByRole('region', { name: 'Категорії магазину для товарів' });
-  expect(screen.getByText('Default › Кулони')).toBeTruthy();
+  expect(await screen.findByText('Default › Кулони')).toBeTruthy();
   expect(screen.getByRole('link', { name: 'Повернутися до проблеми товару' }).getAttribute('href')).toBe('/attention?problem=7');
   expect(api.post).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Перевірити відповідність розділів' }));
@@ -228,9 +242,10 @@ it('checks the originating product, confirms its new path and requires a separat
   const get = api.get.getMockImplementation();
   api.get.mockImplementation(async (url, config) => {
     const result = await get(url, config);
-    if (url.includes('/categories/') && !url.includes('/fields/')) result.data.placements = [
-      { ...categoryEntry, id: 'category:placement:saved', label: 'Default/Браслети', reviewState: 'approved' },
-    ];
+    if (url.includes('/categories/') && !url.includes('/fields/')) {
+      result.data.placements = [{ ...categoryEntry, id: 'category:placement:saved', label: 'Default/Браслети', reviewState: 'approved' }];
+      placementRule(result.data, 'Default/Браслети');
+    }
     if (url.endsWith('/bindings/isolated')) result.data.entries = [{ ...categoryEntry, ...(confirmed ? { reviewState: 'approved' } : {}) }];
     return result;
   });
@@ -241,8 +256,8 @@ it('checks the originating product, confirms its new path and requires a separat
     if (url.endsWith('/publication/apply')) { draft = { ...draft, state: 'published' }; return { data: { revision: draft } }; }
     return post(url, body);
   });
-  mount('/admin/magento?category=BR&view=placement&productId=5080&returnTo=%2Fattention%3Fproblem%3D5080');
-  await screen.findByText('Підтверджено в збережених налаштуваннях');
+  mount('/admin/catalog?category=BR&view=placement&productId=5080&returnTo=%2Fattention%3Fproblem%3D5080');
+  await screen.findByText('Default › Браслети');
   const check = screen.getByRole('button', { name: 'Перевірити відповідність розділів' });
   expect(check.compareDocumentPosition(screen.getByText('Default › Браслети')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(screen.getByText(/Перевірка врахує товар, з якого ви перейшли/)).toBeTruthy();
@@ -254,9 +269,9 @@ it('checks the originating product, confirms its new path and requires a separat
   expect(api.post).toHaveBeenCalledWith('/admin/magento-integration/successor/apply', { ...request, previewToken: 'successor-proof' });
   expect((await screen.findByLabelText('Відповідність: Default/Браслети/Світлі')).value).toBe('42');
   expect(screen.getByText(/Перевірте шлях у колонці Magento/)).toBeTruthy();
-  expect(screen.queryByRole('button', { name: /Застосувати правила й запланувати / })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Застосувати правила' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Підтвердити', exact: true }));
-  const apply = await screen.findByRole('button', { name: /Застосувати правила й запланувати / });
+  const apply = await screen.findByRole('button', { name: 'Застосувати правила' });
   expect(api.post).toHaveBeenCalledWith('/admin/magento-integration/bindings/isolated/decision', { expectedRevision: '1', binding: categoryEntry.id, action: 'approve', acceptReview: true });
   expect(api.post.mock.calls.some(([url]) => url.endsWith('/publication/apply'))).toBe(false);
   fireEvent.click(apply);
@@ -275,11 +290,11 @@ it('continues restored category review explicitly and checks impact without crea
     return result;
   });
   api.post.mockResolvedValue({ data: { previewToken: 'impact-proof', blockers: [], affected: [], preservedNames: [], lostProducts: [], lostRoutes: [], totalProducts: 12 } });
-  mount('/admin/magento?category=BR&view=placement&binding=isolated&source=current&reviewField=categories');
+  mount('/admin/catalog?category=BR&view=placement&binding=isolated&source=current&reviewField=categories');
   await screen.findByText('Відповідності перевірено');
   expect(api.post).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Продовжити перевірку розділів' }));
-  await screen.findByRole('button', { name: /Застосувати правила й запланувати / });
+  await screen.findByRole('button', { name: 'Застосувати правила' });
   expect(api.post.mock.calls).toEqual([['/admin/magento-integration/publication/preview', {
     bindingRevisionId: 'isolated', expectedRevision: '1', expectedCurrentId: 'current', representatives: [],
   }]]);
@@ -294,7 +309,7 @@ it('keeps a source failure after category approvals in the same exact preparatio
   api.post.mockResolvedValue({ data: { previewToken: 'blocked-proof', blockers: [{ code: 'SOURCE_REFERENCE_UNRESOLVED', sourceId: 'color',
     category: 'BR', key: 'color', requirement: 'historical_sku_or_current_non_sku_value_ids', unresolvedValueIds: ['9'] }],
     affected: [], preservedNames: [], lostProducts: [], lostRoutes: [], totalProducts: 3339, checked: [] } });
-  mount('/admin/magento?category=BR&view=placement&binding=isolated&source=current&productId=5080&returnTo=%2Fattention%3Fproblem%3D5080');
+  mount('/admin/catalog?category=BR&view=placement&binding=isolated&source=current&productId=5080&returnTo=%2Fattention%3Fproblem%3D5080');
   fireEvent.click(await screen.findByRole('button', { name: 'Продовжити перевірку розділів' }));
   const issues = await screen.findByRole('region', { name: 'Що блокує застосування' });
   expect(within(issues).getByText(/яких немає серед підтверджених значень/)).toBeTruthy();
@@ -302,7 +317,7 @@ it('keeps a source failure after category approvals in the same exact preparatio
   const target = new URL(within(issues).getByRole('link', { name: 'Перевірити поле: Браслети → Колір · UA' }).href);
   expect(Object.fromEntries(target.searchParams)).toMatchObject({ binding: 'isolated', source: 'current', field: 'kolir', language: 'base', productId: '5080', returnTo: '/attention?problem=5080' });
   expect(within(issues).queryByRole('link', { name: 'Проблеми синхронізації' })).toBeNull();
-  expect(screen.getByRole('button', { name: /Застосувати правила й запланувати / }).disabled).toBe(true);
+  expect(screen.getByRole('button', { name: 'Застосувати правила' }).disabled).toBe(true);
   expect(api.post.mock.calls).toEqual([['/admin/magento-integration/publication/preview', {
     bindingRevisionId: 'isolated', expectedRevision: '1', expectedCurrentId: 'current', representatives: [],
   }]]);
@@ -319,9 +334,10 @@ it('shows the exact remaining category after placement confirmation and applies 
   const get = api.get.getMockImplementation();
   api.get.mockImplementation(async (url, config) => {
     const result = await get(url, config);
-    if (url.includes('/categories/') && !url.includes('/fields/')) result.data.placements = [
-      { ...placement, ...(confirmed.has(placement.id) ? { reviewState: 'approved' } : {}) },
-    ];
+    if (url.includes('/categories/') && !url.includes('/fields/')) {
+      result.data.placements = [{ ...placement, ...(confirmed.has(placement.id) ? { reviewState: 'approved' } : {}) }];
+      placementRule(result.data, 'Default/Браслети/Форма: коло');
+    }
     if (url.endsWith('/bindings/isolated')) {
       result.data.entries = [placement, other].map((item) => ({ ...item, ...(confirmed.has(item.id) ? { reviewState: 'approved' } : {}) }));
       if (draft.revision === '2') await new Promise((resolve) => { finishRead = resolve; });
@@ -335,14 +351,14 @@ it('shows the exact remaining category after placement confirmation and applies 
     if (url.endsWith('/publication/apply')) return { data: { revision: { ...draft, state: 'published' } } };
     return post(url, body);
   });
-  mount('/admin/magento?category=BR&view=placement');
+  mount('/admin/catalog?category=BR&view=placement');
   fireEvent.click(await screen.findByRole('button', { name: 'Перевірити відповідність розділів' }));
   await screen.findByLabelText('Відповідність: Default/Браслети/Форма: коло');
   expect(screen.queryByText('Матеріал оправи')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Підтвердити', exact: true }));
   await screen.findByText('Оновлюємо підтвердження…');
   expect(screen.queryByText(/Чернетка змінилася/)).toBeNull();
-  expect(screen.queryByRole('button', { name: /Застосувати правила й запланувати / })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Застосувати правила' })).toBeNull();
   await waitFor(() => expect(finishRead).toBeTypeOf('function'));
   await act(async () => finishRead());
   await screen.findByRole('heading', { name: 'Підтвердьте відповідності інших категорій' });
@@ -350,11 +366,12 @@ it('shows the exact remaining category after placement confirmation and applies 
   const row = screen.getByRole('row', { name: /Матеріал оправи/ });
   expect(within(row).getByText('Інші')).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'Показати також інші категорії' })).toBeNull();
-  expect(screen.getByText('Default › Браслети › Форма: коло').closest('.mc-placement-row').textContent).toContain('Підтверджено. Очікує застосування змін.');
+  expect(screen.getByRole('row', { name: /Default › Браслети › Форма: коло/ }).textContent).toContain('Усі товари цієї категорії');
+  expect(screen.queryByText('Зміни застосовано в Amber. Результат доставки відстежується окремо.')).toBeNull();
   expect(api.post.mock.calls.filter(([url]) => url.endsWith('/decision'))).toHaveLength(1);
   expect(api.post.mock.calls.some(([url]) => url.includes('/publication/'))).toBe(false);
   fireEvent.click(within(row).getByRole('button', { name: 'Підтвердити', exact: true }));
-  const apply = await screen.findByRole('button', { name: /Застосувати правила й запланувати / });
+  const apply = await screen.findByRole('button', { name: 'Застосувати правила' });
   expect(api.post.mock.calls.filter(([url]) => url.endsWith('/decision')).map(([, body]) => [body.binding, body.expectedRevision])).toEqual([[placement.id, '1'], [other.id, '2']]);
   expect(screen.queryByText(/Застосування чекає на підтвердження/)).toBeNull();
   expect(api.post.mock.calls.some(([url]) => url.endsWith('/publication/apply'))).toBe(false);
@@ -370,12 +387,12 @@ it('restores the remaining fields of another category visibly without automatic 
     if (url.endsWith('/bindings/isolated')) result.data.entries = [{ ...entry, group: 'OT', source: 'OT.color=value_id:0', evaluated: 'Золотиста оправа' }];
     return result;
   });
-  mount('/admin/magento?category=BR&view=placement&binding=isolated&source=current&reviewField=categories');
+  mount('/admin/catalog?category=BR&view=placement&binding=isolated&source=current&reviewField=categories');
   await screen.findByRole('heading', { name: 'Підтвердьте відповідності інших категорій' });
   const row = screen.getByRole('row', { name: /Золотиста оправа/ });
   expect(row.textContent).toContain('Інші');
   expect(within(row).queryByText('Колір: Нуль')).toBeNull();
-  expect(screen.queryByRole('button', { name: /Застосувати правила й запланувати / })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Застосувати правила' })).toBeNull();
   expect(api.post).not.toHaveBeenCalled();
 });
 
@@ -386,14 +403,14 @@ it('shows remaining local fields after the focused placement is confirmed and ke
     if (url.endsWith('/bindings/isolated')) result.data.revision.revision = '2';
     return result;
   });
-  mount('/admin/magento?category=BR&view=placement&binding=isolated&source=current&reviewField=categories');
+  mount('/admin/catalog?category=BR&view=placement&binding=isolated&source=current&reviewField=categories');
   await screen.findByRole('heading', { name: 'Підтвердьте решту полів категорії' });
   expect(screen.getByLabelText('Відповідність: Колір: Нуль')).toBeTruthy();
   expect(screen.getByText(/Чернетка змінилася/)).toBeTruthy();
   fireEvent.change(screen.getByLabelText('Пояснення перевірки'), { target: { value: 'Перевірено' } });
   fireEvent.click(screen.getByRole('button', { name: 'Підтвердити', exact: true }));
   expect(api.post).not.toHaveBeenCalled();
-  expect(screen.queryByRole('button', { name: /Застосувати правила й запланувати / })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Застосувати правила' })).toBeNull();
 });
 
 it('isolates a shared text rule to the chosen category and language and saves a separate family', async () => {
@@ -457,7 +474,7 @@ it('preserves both saved rule and binding identities during preparation and uses
 
 it('reads an externally navigated language scope without confusing it with a local URL commit', async () => {
   const { router } = mount(); await textFields(); await screen.findByRole('button', { name: 'Опис' });
-  await act(() => router.navigate('/admin/magento?category=BR&language=english&view=text'));
+  await act(() => router.navigate('/admin/catalog?category=BR&language=english&view=text'));
   fireEvent.click(await screen.findByRole('button', { name: 'Опис' }));
   expect((await screen.findByLabelText('Текст для магазину')).value).toBe('Old description');
 });
@@ -465,7 +482,7 @@ it('reads an externally navigated language scope without confusing it with a loc
 it('restores a saved rule draft after reload and keeps it when a CAS save fails', async () => {
   saved = { id: 'family', draft: { revision: '8', definitionHash: 'hash', definition: structuredClone(definition) } };
   saved.draft.definition.groups[0].rows[0].cells.description.value = 'Відновлений опис';
-  mount('/admin/magento?category=BR&ruleDraft=family&source=current');
+  mount('/admin/catalog?category=BR&ruleDraft=family&source=current');
   await textFields();
   fireEvent.click(await screen.findByRole('button', { name: 'Опис' }));
   expect((await screen.findByLabelText('Текст для магазину')).value).toBe('Відновлений опис');
@@ -480,7 +497,7 @@ it('restores a saved rule draft after reload and keeps it when a CAS save fails'
 });
 
 it('retains the stored schema and date when explicit Magento observation fails', async () => {
-  mount(); await screen.findByRole('button', { name: 'Матеріал' });
+  mount(); await storeFields(); await screen.findByRole('button', { name: 'Матеріал' });
   fireEvent.click(screen.getByText('Дані Magento та додаткові налаштування'));
   const date = screen.getByText(/^Структура Magento:/).textContent;
   api.post.mockRejectedValueOnce({ response: { data: { error: 'Magento недоступний' } } });
@@ -506,16 +523,17 @@ it('scopes the separate Administrator rename chooser on the server and hides it 
   api.get.mockResolvedValueOnce({ data: { products: [], nextCursor: null } });
   fireEvent.click(screen.getByRole('button', { name: 'Перевірити товари для контрольованої дії' }));
   await waitFor(() => expect(api.get).toHaveBeenCalledWith('/admin/magento-integration/bindings/current/controlled-products', { params: { after: 0, search: '', categoryCode: 'BR' } }));
-  view.unmount(); mount(); await screen.findByRole('button', { name: 'Матеріал' });
+  view.unmount(); mount(); await storeFields(); await screen.findByRole('button', { name: 'Матеріал' });
   expect(screen.queryByRole('button', { name: 'Застосувати назви до чинних товарів' })).toBeNull();
 });
 
-it('makes the main integration page a category entrance and performs only its local overview read', async () => {
-  api.get.mockResolvedValue({ data: { integration: { configured: true, activePublication: { ...active, versionNumber: 1 }, delivery: { state: 'enabled' }, operational: { state: 'known', count: 0 }, structureObservation: null, draftCount: 0 }, categories } });
-  const router = createMemoryRouter([{ path: '/admin/magento/*', element: <MagentoIntegrationPage /> }], { initialEntries: ['/admin/magento'] });
+it('keeps connection status in the integration service page and links to the unified catalog with only a local overview read', async () => {
+  api.get.mockResolvedValue({ data: { integration: { configured: true, activePublication: { ...active, versionNumber: 1 }, delivery: { state: 'enabled' }, operational: { state: 'known', count: 0 }, structureObservation: null, draftCount: 0 }, categories: categories.map((category) => ({ ...category, preparation: { needed: false, reasons: [] } })) } });
+  const router = createMemoryRouter([{ path: '/admin/magento/*', element: <MagentoIntegrationPage /> }], { initialEntries: ['/admin/magento/overview'] });
   render(<AuthContext.Provider value={{ permissions }}><RouterProvider router={router} /></AuthContext.Provider>);
-  await screen.findByText('Оберіть категорію менеджера');
-  expect(screen.getByRole('link', { name: /Браслети/ })).toBeTruthy();
+  await screen.findByRole('heading', { name: 'Підключення магазину' });
+  await screen.findByRole('link', { name: 'Каталог', exact: true });
+  expect(screen.getByRole('link', { name: 'Каталог', exact: true }).getAttribute('href')).toBe('/admin/catalog');
   expect(api.get.mock.calls.map(([url]) => url)).toEqual(['/admin/magento-integration/overview']);
   expect(api.post).not.toHaveBeenCalled();
 });
@@ -535,7 +553,7 @@ it('rejects shared rule edits that would transmit changes to another category or
 });
 
 it('reopens the original language after an external navigation back from a locally selected scope', async () => {
-  const initial = '/admin/magento?category=BR&view=text';
+  const initial = '/admin/catalog?category=BR&view=text';
   const { router } = mount(initial);
   await screen.findByRole('button', { name: 'Опис' });
   fireEvent.change(screen.getByLabelText('Мова полів'), { target: { value: 'english' } });
@@ -559,7 +577,7 @@ it('checks product impact after the single explicit check and waits for a separa
   fireEvent.change(await screen.findByLabelText('Текст для магазину'), { target: { value: 'Новий опис' } });
   fireEvent.click(screen.getByRole('button', { name: 'Готово' }));
   fireEvent.click(screen.getByRole('button', { name: 'Перевірити зміни' }));
-  const apply = await screen.findByRole('button', { name: /Застосувати правила й запланувати / });
+  const apply = await screen.findByRole('button', { name: 'Застосувати правила' });
   expect(apply.disabled).toBe(false);
   expect(api.post.mock.calls.filter(([url]) => url.endsWith('/publication/preview'))).toHaveLength(1);
   expect(api.post.mock.calls.some(([url]) => url.endsWith('/publication/apply'))).toBe(false);
@@ -573,7 +591,7 @@ it('restores prepared work without starting an automatic product or Magento chec
     if (url.endsWith('/bindings/isolated')) result.data.entries = [{ ...entry, reviewState: 'approved' }];
     return result;
   });
-  mount('/admin/magento?category=BR&binding=isolated&source=current');
+  mount('/admin/catalog?category=BR&binding=isolated&source=current');
   expect(await screen.findByRole('button', { name: 'Перевірити вплив на товари' })).toBeTruthy();
   expect(screen.getByText('Відповідності перевірено')).toBeTruthy();
   expect(api.post).not.toHaveBeenCalled();
@@ -620,15 +638,15 @@ it('inserts a characteristic using fetched labels without another output-mode st
 });
 
 
-it('keeps whole-package blockers upfront and discloses saved-draft consequences without issuing a command', async () => {
+it('discloses whole-package blockers and saved-draft consequences without issuing a command', async () => {
   const get = api.get.getMockImplementation();
   api.get.mockImplementation(async (url, config) => {
     const result = await get(url, config);
     if (url.includes('/categories/') && !url.includes('/fields/')) result.data.reviewScope = { categoryCount: 2, unresolved: [{ group: 'OT', target: 'name', row: 'base', kind: 'policy', reviewState: 'review_required' }] };
     return result;
   });
-  mount('/admin/magento?category=BR&question=color&value=0&productId=7&returnTo=%2Fattention%3Fproblem%3D7');
-  const scope = await screen.findByRole('region', { name: 'Обсяг редагування та перевірки' });
+  mount('/admin/catalog?category=BR&question=color&value=0&productId=7&returnTo=%2Fattention%3Fproblem%3D7');
+  await openScope(); const scope = screen.getByRole('region', { name: 'Обсяг редагування та перевірки' });
   expect(scope.textContent).toContain('увесь пакет правил (2 категорій)');
   expect(scope.textContent).toContain('В інших категоріях: 1 (Інші)');
   expect(scope.textContent).toContain('Вони також блокують застосування пакета.');
@@ -640,12 +658,12 @@ it('keeps whole-package blockers upfront and discloses saved-draft consequences 
 });
 
 it('keeps an exact repair edit and its explicit review action before the long field table without approving it', async () => {
-  mount('/admin/magento?category=BR&question=color&value=0&productId=7&returnTo=%2Fattention%3Fproblem%3D7');
+  mount('/admin/catalog?category=BR&question=color&value=0&productId=7&returnTo=%2Fattention%3Fproblem%3D7');
   const mapping = await screen.findByLabelText('Magento для Нуль');
   fireEvent.change(mapping, { target: { value: '20' } });
   fireEvent.click(screen.getByRole('button', { name: 'Готово' }));
   const action = await screen.findByRole('button', { name: 'Перевірити зміни' });
-  const table = screen.getByRole('table', { name: 'Поля Magento та джерела менеджера' });
+  const table = within(screen.getByRole('region', { name: 'Характеристики Менеджера' })).getByRole('table');
   expect(action.closest('.mc-change-bar').compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(screen.getByRole('region', { name: 'Підготовлені зміни' }).textContent).toContain('вибрані відповідності');
   expect(api.post).not.toHaveBeenCalled();
@@ -653,7 +671,7 @@ it('keeps an exact repair edit and its explicit review action before the long fi
 });
 
 it('discloses mobile category choices without changing the selected category or full package scope', async () => {
-  mount(); await screen.findByRole('button', { name: 'Матеріал' });
+  mount(); await storeFields(); await screen.findByRole('button', { name: 'Матеріал' });
   const chooser = screen.getByRole('button', { name: 'Браслети · змінити категорію' });
   const choices = document.getElementById(chooser.getAttribute('aria-controls'));
   expect(chooser.getAttribute('aria-expanded')).toBe('false');
@@ -664,17 +682,19 @@ it('discloses mobile category choices without changing the selected category or 
   expect(within(choices).getByRole('link', { name: /Браслети/ }).getAttribute('aria-current')).toBe('page');
   fireEvent.click(within(choices).getByRole('link', { name: /Браслети/ }));
   expect(choices.classList.contains('is-open')).toBe(false);
+  await openScope();
   expect(screen.getByRole('region', { name: 'Обсяг редагування та перевірки' }).textContent).toContain('увесь пакет правил (2 категорій)');
   expect(api.post).not.toHaveBeenCalled();
 });
 
 it('places optional structural preparation after the ordinary field table without hiding package blockers', async () => {
-  mount(); const table = await screen.findByRole('table', { name: 'Поля Magento та джерела менеджера' });
+  mount(); const table = within(await screen.findByRole('region', { name: 'Характеристики Менеджера' })).getByRole('table');
   const structure = screen.getByText('Підготувати зміну структури');
   expect(table.compareDocumentPosition(structure) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(structure.closest('details').open).toBe(false);
   fireEvent.click(structure);
   expect(screen.getByRole('link', { name: 'Характеристика', exact: true }).href).toContain('intent=attribute');
+  await openScope();
   expect(screen.getByRole('region', { name: 'Обсяг редагування та перевірки' }).textContent).toContain('увесь пакет правил (2 категорій)');
   expect(api.post).not.toHaveBeenCalled();
 });
@@ -757,7 +777,7 @@ it('long field names and visible If/Then rules preserve the condition, fallback,
   const condition = { op: 'eq', left: { op: 'semanticKey', input: { op: 'source', id: 'color' } }, right: { op: 'literal', value: '0' } };
   rules.groups[0].rows[0].cells.description = { op: 'when', if: condition, then: { op: 'literal', value: 'Довгий початковий текст для картини. '.repeat(20) }, else: { op: 'literal', value: 'Збережений результат інакше' } };
   const before = JSON.stringify(rules); useLocalRuleFixture(rules, title);
-  mount('/admin/magento?category=BR&view=text'); fireEvent.click(await screen.findByRole('button', { name: title }));
+  mount('/admin/catalog?category=BR&view=text'); fireEvent.click(await screen.findByRole('button', { name: title }));
   const dialog = await screen.findByRole('dialog', { name: 'Поле Magento' }); expect(within(dialog).getByRole('heading', { name: title })).toBeTruthy();
   const row = within(dialog).getByRole('region', { name: 'Умова 1' });
   expect(within(row).getByText('Якщо')).toBeTruthy(); expect(within(row).getByText('Тоді →')).toBeTruthy();
@@ -774,10 +794,12 @@ it('long field names and visible If/Then rules preserve the condition, fallback,
 });
 
 it('compatible tab=text opens text fields and preserves exact product, language and safe return context', async () => {
-  const { router } = mount('/admin/magento?category=BR&tab=text&language=english&productId=7&returnTo=%2Fattention%3Fproblem%3D7');
-  const tab = await screen.findByRole('button', { name: 'Назва й описи' });
+  const { router } = mount('/admin/catalog?category=BR&tab=text&language=english&productId=7&returnTo=%2Fattention%3Fproblem%3D7');
+  const tab = await screen.findByRole('button', { name: 'Назви та SEO' });
   expect(tab.getAttribute('aria-pressed')).toBe('true');
   expect(screen.getByLabelText('Мова полів').value).toBe('english');
+  expect(screen.queryByRole('region', { name: 'Повні назви товарів' })).toBeNull();
+  fireEvent.click(screen.getByText('Оновлення назв чинних товарів'));
   expect(screen.getByRole('region', { name: 'Повні назви товарів' })).toBeTruthy();
   expect(api.post).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Характеристики' }));
@@ -802,7 +824,8 @@ it('full-name support stays visible as available, saved draft and current policy
     }
     return post(url, body);
   });
-  mount('/admin/magento?category=BR&tab=text');
+  mount('/admin/catalog?category=BR&tab=text');
+  fireEvent.click(await screen.findByText('Оновлення назв чинних товарів'));
   const prepare = await screen.findByRole('button', { name: 'Підготувати підтримку повних назв' });
   expect(screen.getByRole('region', { name: 'Повні назви товарів' }).textContent).toContain('Доступна підготовка');
   fireEvent.click(prepare); fireEvent.click(prepare);
@@ -818,7 +841,8 @@ it('full-name support stays visible as available, saved draft and current policy
     if (url.includes('/categories/') && !url.includes('/fields/')) result.data.template.definition = { ...definition, nameReadiness: { contractVersion: 'effective-product-names-v1' } };
     return result;
   });
-  mount('/admin/magento?category=BR&tab=text');
+  mount('/admin/catalog?category=BR&tab=text');
+  fireEvent.click(await screen.findByText('Оновлення назв чинних товарів'));
   await screen.findByText('Підтримка є в чинних правилах');
   expect(screen.queryByRole('button', { name: 'Підготувати підтримку повних назв' })).toBeNull();
 });

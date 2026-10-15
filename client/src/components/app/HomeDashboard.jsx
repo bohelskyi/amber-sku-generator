@@ -156,7 +156,7 @@ export function HomeDashboard({
 }) {
   return (
     <div className="space-y-5">
-      {!decodeData && <div className={`product-landing-grid${canCreateProducts && showCreate && showLookup ? '' : ' is-lookup-only'}`}>
+      {!decodeData && (showCreate || showLookup) && <div className={`product-landing-grid${canCreateProducts && showCreate && showLookup ? '' : ' is-lookup-only'}`}>
         {showLookup && <section className="home-workspace-panel product-lookup-panel card fade-up">
           <div className="home-decode-panel px-4 py-4 sm:px-5">
             <p className="eyebrow">Відкрити товар</p>
@@ -369,7 +369,6 @@ export function DecodeWorkspace({
           publicSku: decodeData.publicSku, sku: decodeData.sku,
           categoryCode: decodeData.category.code, status: decodeData.product?.status || 'active',
           magentoNameReviewRequired: decodeData.product?.magento_name_review_required === true }}
-          onRepairCharacteristics={canStartRecount && isCurrentProduct ? onStartRecount : undefined}
           onSaved={() => onDecode?.(decodeData.publicSku || decodeData.sku)} />
         <header className="builder-header">
           <div className="min-w-0">
@@ -447,29 +446,11 @@ export function DecodeWorkspace({
             )}
 
             <div className="builder-summary-group">
-              <p className="builder-summary-section-title">Ціна виробу</p>
-              <DecodeSummaryRow
-                label="Розраховано до округлення"
-                value={formatOptionalValue(calculatedPriceUah, formatWholeUah)}
-              />
-              <div className="builder-price-row is-strong">
-                <span>Фінальна збережена</span>
-                <span>{formatOptionalValue(finalStoredPriceUah, formatUah)}</span>
-                <span>{formatOptionalValue(finalStoredPriceUsd, formatUsd)}</span>
-              </div>
-            </div>
-
-            <div className="builder-price-section">
-              <p className="builder-summary-section-title">Розрахункова ціна за грам · ₴ / USD</p>
-              <div className="builder-price-row is-strong">
-                <span />
-                <span>{formatOptionalValue(pricing?.pricePerGramUah, formatUahPerGram)}</span>
-                <span>{formatOptionalValue(pricing?.pricePerGram, formatUsd)}</span>
-              </div>
+              <p className="builder-summary-section-title">Ціна товару</p>
+              <p className="product-final-price">{formatOptionalValue(finalStoredPriceUah, formatUah)}</p>
             </div>
 
             <div className="builder-summary-group">
-              <DecodeSummaryRow label="Матриця" value={pricing?.matrixName || '—'} />
               <DecodeSummaryRow
                 label="Вага"
                 value={weightState.conflict ? 'Потрібна перевірка' : decodedWeight !== null && decodedWeight !== undefined
@@ -477,6 +458,17 @@ export function DecodeWorkspace({
                   : '—'}
               />
             </div>
+
+            <details className="decode-details">
+              <summary>Розрахунок ціни</summary>
+              <div className="decode-details-body">
+                <DecodeSummaryRow label="Розраховано до округлення" value={formatOptionalValue(calculatedPriceUah, formatWholeUah)} />
+                <DecodeSummaryRow label="Збережена ціна, USD" value={formatOptionalValue(finalStoredPriceUsd, formatUsd)} />
+                <DecodeSummaryRow label="За грам, грн" value={formatOptionalValue(pricing?.pricePerGramUah, formatUahPerGram)} />
+                <DecodeSummaryRow label="За грам, USD" value={formatOptionalValue(pricing?.pricePerGram, formatUsd)} />
+                <DecodeSummaryRow label="Матриця" value={pricing?.matrixName || '—'} />
+              </div>
+            </details>
 
             <details className="decode-details">
               <summary>Технічні деталі</summary>
@@ -571,7 +563,7 @@ export function DecodeWorkspace({
 
           {decodeData.existsInDb && <div className="builder-summary-actions product-detail-actions">
             {canStartRecount && isCurrentProduct && <button onClick={onStartRecount} className="btn btn-primary">
-              {recountMode === 'request' ? 'Підготувати запит' : 'Переоблік'}
+              {recountMode === 'request' ? 'Підготувати запит' : 'Змінити характеристики'}
             </button>}
             {canChangeProductPrice && isCurrentProduct && <button onClick={onStartPriceChange} className="btn btn-outline">Змінити ціну</button>}
             {canViewHistory && <Link className="btn btn-outline" to={`/products/history?sku=${encodeURIComponent(decodeData.publicSku || decodeData.internalSku || decodeData.sku)}`}>Історія товару</Link>}

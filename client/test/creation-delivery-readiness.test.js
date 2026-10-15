@@ -7,7 +7,9 @@ const upgrade = { scope: 'native_characteristic_source_support', status: 'config
 test('exact current-binding support handoff retains native category, question and own return path', () => {
   const state = creationDeliveryState(upgrade, 'NM');
   const url = new URL(state.href, 'https://manager.local');
-  assert.equal(url.pathname, '/admin/magento/categories/NM');
+  assert.equal(url.pathname, '/admin/catalog');
+  assert.equal(url.searchParams.get('category'), 'NM');
+  assert.equal(url.searchParams.get('view'), 'attributes');
   assert.equal(url.searchParams.get('binding'), 'current-v4');
   assert.equal(url.searchParams.get('question'), 'extra');
   assert.equal(url.searchParams.get('returnTo'), '/products/create?category=NM');

@@ -271,7 +271,7 @@ describe('Repricing workflow', () => {
     });
     await renderRepricing(['repricing.view', 'repricing.prepare', 'products.recount', 'corrections.create', 'corrections.view', 'catalog.view', 'pricing.view']);
     const header = screen.getByRole('heading', { name: 'Масова переоцінка' }).closest('header');
-    expect(within(header).getAllByRole('button').map((button) => button.textContent.trim())).toEqual(['Переоцінити все']);
+    expect(within(header).getAllByRole('button').map((button) => button.textContent.trim())).toEqual(['Підготувати переоцінку']);
     expect(within(header).queryAllByRole('link')).toHaveLength(0);
     expect(within(header).queryByText('Декодер')).toBeNull(); expect(within(header).queryByText(/^Запити/)).toBeNull();
     expect(within(header).queryByText('До адмін-панелі')).toBeNull();
@@ -766,7 +766,7 @@ describe('Repricing workflow', () => {
     });
 
     await renderRepricing();
-    fireEvent.click(await screen.findByRole('button', { name: 'Переоцінити все' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Підготувати переоцінку' }));
     const errorFilter = await screen.findByRole('button', { name: 'Помилки' });
     const applyButton = screen.getByRole('button', { name: 'Застосувати переоцінку' });
     const priceInput = screen.getByRole('textbox', { name: 'Нова ціна для BR1001' });
@@ -859,7 +859,7 @@ describe('Repricing workflow', () => {
     });
 
     await renderRepricing();
-    fireEvent.click(await screen.findByRole('button', { name: 'Переоцінити все' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Підготувати переоцінку' }));
     const applyButton = await screen.findByRole('button', { name: 'Застосувати переоцінку' });
     expect(applyButton.disabled).toBe(true);
 
@@ -1018,7 +1018,7 @@ describe('Admin catalog workflow', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Bracelets/ }));
     fireEvent.click(screen.getByText('Kind').closest('[role="button"]'));
     fireEvent.click(screen.getByRole('button', { name: 'Редагувати' }));
-    fireEvent.change(screen.getByRole('textbox', { name: 'Назва питання' }), {
+    fireEvent.change(screen.getByRole('textbox', { name: 'Назва характеристики' }), {
       target: { value: 'Updated kind' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Зберегти зміни' }));

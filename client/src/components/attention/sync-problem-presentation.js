@@ -39,7 +39,7 @@ export function problemSubject(problem = {}) {
   const scope = firstSync && typeof problem.scope === 'string' && problem.scope.trim() && problem.scope.length <= 160
     && !Array.from(problem.scope).some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127) ? problem.scope : null;
   return { scope: scope === 'all' ? 'UA / основний магазин' : scope === 'en' ? 'EN' : scope, path: problem.path || null,
-    field: problem.fieldLabel || (firstSync && target === 'name' ? 'Назва' : PRODUCT_FIELD_LABELS[target]) || target || null,
+    field: problem.fieldLabel || (firstSync && target === 'name' ? 'Назва' : PRODUCT_FIELD_LABELS[target]) || (target === 'product' ? null : target) || null,
     value: problem.expectedValue ?? problem.valueLabel ?? null };
 }
 
@@ -58,10 +58,12 @@ export function problemTitle(problem = {}) {
 
 export function problemRepairUrl(problem, product, returnTo) {
   const target = problem.target || problem.field;
+  const value = problem.value ?? problem.valueId;
   const placement = Boolean(problem.path) || target === 'categories' || (problem.diagnosticCode || problem.code || '').startsWith('CATEGORY_');
-  return withRepairContext(product.category ? `/admin/magento/categories/${encodeURIComponent(product.category)}?view=${placement ? 'placement' : ['name', 'description', 'short_description', 'meta_title', 'meta_description', 'meta_keyword'].includes(target) ? 'text' : 'attributes'}` : '/admin/magento', {
+  return withRepairContext(product.category ? `/admin/catalog?view=${placement ? 'placement' : ['name', 'description', 'short_description', 'meta_title', 'meta_description', 'meta_keyword'].includes(target) ? 'text' : 'attributes'}` : '/admin/catalog', {
     productId: String(product.productId), category: product.category, field: placement ? undefined : target,
-    question: problem.question || problem.questionKey, value: problem.value ?? problem.valueId,
+    question: problem.question || problem.questionKey,
+    value: typeof value === 'string' || typeof value === 'number' ? String(value) : undefined,
     path: problem.path, returnTo,
   });
 }

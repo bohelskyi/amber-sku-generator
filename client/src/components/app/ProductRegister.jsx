@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ExternalLink, RefreshCw, Search } from 'lucide-react';
+import { RefreshCw, Search } from 'lucide-react';
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { formatDecimal, formatUah } from '../../lib/formatters';
 import { useProductRegister } from '../../hooks/product/useProductRegister';
@@ -35,15 +35,15 @@ function ProductRowActions({ product, canDecode, onDeleteArchivedTest }) {
   const currentProduct = product.status === 'active';
   return <div className="product-register-actions">
     <CopyButton label={`Скопіювати артикул ${article}`} value={article} />
-    {canDecode && currentProduct && <Link className="btn btn-outline btn-icon" to={productLink(article)}
+    {canDecode && currentProduct && <Link className="btn btn-outline btn-compact" to={productLink(article)}
       state={{ productReturnTo: location.pathname + location.search, productReturnState: location.state }}
       aria-label={`Відкрити товар ${article}`} title="Відкрити товар">
-      <ExternalLink size={15} aria-hidden="true" />
+      Відкрити
     </Link>}
-    {!currentProduct && <Link className="btn btn-outline btn-icon"
+    {!currentProduct && <Link className="btn btn-outline btn-compact"
       to={`/products/history?sku=${encodeURIComponent(product.internalSku || article)}`}
       aria-label={`Відкрити історію товару ${article}`} title="Відкрити історію товару">
-      <ExternalLink size={15} aria-hidden="true" />
+      Історія
     </Link>}
     {onDeleteArchivedTest && product.status === 'archived' && isTestProduct(product) && /^TEST-\d{6,}$/.test(article) &&
       <button type="button" className="btn btn-outline" onClick={() => onDeleteArchivedTest(product)}
@@ -124,7 +124,7 @@ function ProductRegisterContent({ canDecode, onDeleteArchivedTest, initialFilter
       <div className="product-register-header">
         <div>
           <h2 id="product-register-title" className="section-title-text">Реєстр товарів</h2>
-          <p className="section-subtitle mt-1">Пошук за артикулом або внутрішнім SKU.</p>
+          <p className="section-subtitle mt-1">Знайдіть товар за артикулом або оберіть категорію.</p>
         </div>
         <button type="button" className="btn btn-outline btn-icon" onClick={register.refresh}
           disabled={register.loading} aria-label="Оновити реєстр" title="Оновити">
@@ -138,7 +138,7 @@ function ProductRegisterContent({ canDecode, onDeleteArchivedTest, initialFilter
           <Search size={16} aria-hidden="true" />
           <input className="input-sm" value={draftSearch}
             onChange={(event) => setDraftSearch(event.target.value)}
-            placeholder="Артикул або внутрішній SKU" />
+            placeholder="Артикул товару" />
         </label>
         <select className="input-sm" aria-label="Категорія товарів" value={register.filters.category}
           onChange={(event) => changeFilter('category', event.target.value)}>

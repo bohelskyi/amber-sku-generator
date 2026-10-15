@@ -37,11 +37,11 @@ it('opens the exact catalog context from Magento without writing or reopening a 
   const post = vi.spyOn(api, 'post');
   renderPage('catalog', ['catalog.view', 'catalog.manage'],
     '/admin/catalog?category=BR&action=new-question&returnTo=%2Fadmin%2Fmagento%2Fcategories%2FBR');
-  expect(await screen.findByRole('textbox', { name: /Назва питання/ })).toBeTruthy();
+  expect(await screen.findByRole('textbox', { name: /Назва характеристики/ })).toBeTruthy();
   expect(screen.getByRole('link', { name: /Повернутися до інтеграції Magento/ }).getAttribute('href')).toBe('/admin/magento/categories/BR');
   expect(post).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: /Скасувати/ }));
-  await waitFor(() => expect(screen.queryByRole('textbox', { name: /Назва питання/ })).toBeNull());
+  await waitFor(() => expect(screen.queryByRole('textbox', { name: /Назва характеристики/ })).toBeNull());
 });
 
 it('does not grant catalog editing from a deep link or accept an external return target', async () => {
@@ -53,7 +53,7 @@ it('does not grant catalog editing from a deep link or accept an external return
   renderPage('catalog', ['catalog.view'], '/admin/catalog?category=BR&action=new-question&returnTo=https%3A%2F%2Fexample.com');
   await screen.findByRole('button', { name: /Bracelets/ });
   await waitFor(() => expect(api.get).toHaveBeenCalledWith('/admin/sku-schema/BR'));
-  expect(screen.queryByRole('textbox', { name: /Назва питання/ })).toBeNull();
+  expect(screen.queryByRole('textbox', { name: /Назва характеристики/ })).toBeNull();
   expect(screen.queryByRole('link', { name: /Повернутися до інтеграції Magento/ })).toBeNull();
 });
 
@@ -340,7 +340,7 @@ it('returns to the same Attention context only after an explicit successful cata
   const label = await screen.findByRole('textbox', { name: /Назва українською/ });
   fireEvent.change(label, { target: { value: 'Узгоджений нуль' } });
   fireEvent.click(screen.getByRole('button', { name: 'Зберегти зміни' }));
-  expect(await screen.findByText('Не вдалося зберегти варіант')).toBeTruthy();
+  expect(await screen.findByText('Не вдалося зберегти значення')).toBeTruthy();
   expect(router.state.location.pathname).toBe('/admin/catalog');
   fireEvent.click(screen.getByRole('button', { name: 'Зберегти зміни' }));
   expect(await screen.findByText('Повернулися до Attention')).toBeTruthy();
@@ -365,10 +365,10 @@ it('creates an exact local variant and returns to the preserved preparation only
   const label = await screen.findByRole('textbox', { name: 'Назва українською' });
   expect(post).not.toHaveBeenCalled();
   fireEvent.change(label, { target: { value: 'Новий вид' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Зберегти варіант' }));
-  expect(await screen.findByText('Не вдалося створити варіант')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Зберегти значення' }));
+  expect(await screen.findByText('Не вдалося створити значення')).toBeTruthy();
   expect(router.state.location.pathname).toBe('/admin/catalog');
-  fireEvent.click(screen.getByRole('button', { name: 'Зберегти варіант' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Зберегти значення' }));
   expect(await screen.findByText('Повернулися до підготовки')).toBeTruthy();
   expect(router.state.location.pathname + router.state.location.search).toBe(back);
   expect(post).toHaveBeenCalledTimes(2);

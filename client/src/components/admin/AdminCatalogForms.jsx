@@ -35,7 +35,7 @@ export function CategoryForm({ category, native = false, isEdit = false, onCance
       <div className="catalog-context-form-header">
         <div>
           <h3>{isEdit ? 'Налаштування категорії' : 'Нова категорія'}</h3>
-          <p>{isEdit ? 'Загальні правила для поточної категорії.' : 'Створіть категорію перед додаванням питань.'}</p>
+          <p>{isEdit ? 'Загальні правила для поточної категорії.' : 'Створіть категорію перед додаванням характеристик.'}</p>
         </div>
         <button type="button" onClick={onCancel} className="btn btn-outline px-3 py-2 text-xs">Закрити</button>
       </div>
@@ -103,11 +103,11 @@ export function QuestionForm({ config, currentCatQuestions, excludeQuestionId, f
   return (
     <div className="catalog-detail-form">
       <div className="catalog-detail-form-title">
-        <div><h3>{isNew ? 'Нове питання' : 'Редагування питання'}</h3><p>{isNew ? 'Налаштуйте поле у контексті поточної категорії.' : question.label}</p></div>
+        <div><h3>{isNew ? 'Нова характеристика' : 'Редагування характеристики'}</h3><p>{isNew ? 'Налаштуйте поле у контексті поточної категорії.' : question.label}</p></div>
         <button type="button" onClick={onCancel} className="btn btn-outline px-3 py-2 text-xs">Закрити</button>
       </div>
       <FormSection title="Загальні" variant="catalog">
-        <FieldControl label="Назва питання">
+        <FieldControl label="Назва характеристики">
           <input className="input-sm" placeholder="Розмір" value={question.label} onChange={(event) => onChange({ ...question, label: event.target.value })} />
         </FieldControl>
         <FieldControl label="Тип поля">
@@ -152,20 +152,20 @@ export function QuestionForm({ config, currentCatQuestions, excludeQuestionId, f
               <input className="input-sm font-mono" placeholder="-" value={question.sku_separator} onChange={(event) => onChange({ ...question, sku_separator: event.target.value })} />
             </FieldControl>
           </div>
-        ) : <p className="catalog-neutral-note">SKU-параметри не застосовуються до цього питання.</p>}
+        ) : <p className="catalog-neutral-note">SKU-параметри не застосовуються до цієї характеристики.</p>}
       </FormSection></CatalogHistoricalSettings>}
       <FormSection title="Видимість та умови" variant="catalog">
         <ConditionBuilder
           config={config}
           excludeQuestionId={excludeQuestionId}
-          label="Показувати питання"
+          label="Показувати характеристику"
           questions={currentCatQuestions}
           value={question.visible_if_json}
           onChange={(nextValue) => onChange({ ...question, visible_if_json: nextValue })}
         />
       </FormSection>
       <div className="catalog-form-actions">
-        <button type="button" onClick={onSave} className={`btn ${isNew ? 'btn-amber' : 'btn-primary'}`}>{isNew ? 'Зберегти питання' : 'Зберегти зміни'}</button>
+        <button type="button" onClick={onSave} className={`btn ${isNew ? 'btn-amber' : 'btn-primary'}`}>{isNew ? 'Зберегти характеристику' : 'Зберегти зміни'}</button>
         <button type="button" onClick={onCancel} className="btn btn-outline">Скасувати</button>
       </div>
     </div>
@@ -177,12 +177,12 @@ export function OptionForm({ config, currentCatQuestions, excludeQuestionId, isN
   return (
     <div className="catalog-option-form">
       <div className="catalog-option-form-header">
-        <h4>{isNew ? 'Новий варіант' : 'Редагування варіанта'}</h4>
+        <h4>{isNew ? 'Нове значення' : 'Редагування значення'}</h4>
         <button type="button" onClick={onCancel} className="btn btn-outline px-3 py-1.5 text-xs">Закрити</button>
       </div>
       <div className="catalog-option-form-grid">
         <FieldControl label="Назва українською">
-          <input className="input-sm" maxLength={255} placeholder="Назва варіанта" value={option.label} onChange={(event) => onChange({ ...option, label: event.target.value })} />
+          <input className="input-sm" maxLength={255} placeholder="Назва значення" value={option.label} onChange={(event) => onChange({ ...option, label: event.target.value })} />
         </FieldControl>
         <FieldControl label="Назва англійською" hint="Необов’язково для каталогу. Потрібна для створення значення Magento з активним EN магазином.">
           <input className="input-sm" maxLength={255} placeholder="English label" value={option.label_en ?? ''} onChange={(event) => onChange({ ...option, label_en: event.target.value })} />
@@ -206,11 +206,11 @@ export function OptionForm({ config, currentCatQuestions, excludeQuestionId, isN
         </FieldControl>
       </CatalogHistoricalSettings>}
       <div className="catalog-condition-grid">
-        <ConditionBuilder config={config} excludeQuestionId={excludeQuestionId} label="Показувати варіант" questions={currentCatQuestions} value={option.visible_if_json} onChange={(nextValue) => onChange({ ...option, visible_if_json: nextValue })} />
-        <ConditionBuilder config={config} excludeQuestionId={excludeQuestionId} label="Приховувати варіант" questions={currentCatQuestions} value={option.hidden_if_json} onChange={(nextValue) => onChange({ ...option, hidden_if_json: nextValue })} />
+        <ConditionBuilder config={config} excludeQuestionId={excludeQuestionId} label="Показувати значення" questions={currentCatQuestions} value={option.visible_if_json} onChange={(nextValue) => onChange({ ...option, visible_if_json: nextValue })} />
+        <ConditionBuilder config={config} excludeQuestionId={excludeQuestionId} label="Приховувати значення" questions={currentCatQuestions} value={option.hidden_if_json} onChange={(nextValue) => onChange({ ...option, hidden_if_json: nextValue })} />
       </div>
       <div className="catalog-form-actions">
-        <button type="button" onClick={onSave} className={`btn ${isNew ? 'btn-amber' : 'btn-primary'}`}>{isNew ? 'Зберегти варіант' : 'Зберегти зміни'}</button>
+        <button type="button" onClick={onSave} className={`btn ${isNew ? 'btn-amber' : 'btn-primary'}`}>{isNew ? 'Зберегти значення' : 'Зберегти зміни'}</button>
         <button type="button" onClick={onCancel} className="btn btn-outline">Скасувати</button>
       </div>
     </div>

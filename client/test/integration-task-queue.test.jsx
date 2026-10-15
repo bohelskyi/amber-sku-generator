@@ -17,7 +17,11 @@ beforeEach(()=>{
 afterEach(()=>{cleanup();vi.restoreAllMocks();});
 const mount=(props={})=>render(<IntegrationTaskQueue apiClient={client} selectedTaskId={id} {...props}/>);
 it('exact deep-link reads the selected task and no resolution or mutation occurs until explicit interaction',async()=>{
- mount();await screen.findByRole('article',{name:'Вибрана задача інтеграції'});await screen.findByRole('link',{name:'Відкрити точне налаштування'});expect(client.get.mock.calls.map(([url])=>url)).toEqual(['/integration-tasks','/integration-tasks/'+id]);expect(client.post).not.toHaveBeenCalled();expect(screen.getByRole('link',{name:'Відкрити точне налаштування'}).getAttribute('href')).toBe(makeTask().repairHref);expect(screen.getByRole('link',{name:'Повернутися до створення товару'}).getAttribute('href')).toBe('/products/create?integrationTask='+id);expect(screen.getByText('Фото зі спроби створення: 2.')).toBeTruthy();
+ mount();await screen.findByRole('article',{name:'Вибрана задача інтеграції'});await screen.findByRole('link',{name:'Відкрити точне налаштування'});expect(client.get.mock.calls.map(([url])=>url)).toEqual(['/integration-tasks','/integration-tasks/'+id]);expect(client.post).not.toHaveBeenCalled();
+ const repair=new URL(screen.getByRole('link',{name:'Відкрити точне налаштування'}).href);
+ expect(repair.pathname).toBe('/admin/catalog');
+ expect(Object.fromEntries(repair.searchParams)).toEqual({...Object.fromEntries(new URL(makeTask().repairHref,'https://amber.invalid').searchParams),catalogTask:'resource'});
+ expect(screen.getByRole('link',{name:'Повернутися до створення товару'}).getAttribute('href')).toBe('/products/create?integrationTask='+id);expect(screen.getByText('Фото зі спроби створення: 2.')).toBeTruthy();
 });
 it('creator can read own task and resume but has no administrator repair or resolve action',async()=>{
  auth.roles=[{key:'manager'}];auth.permissions=['products.create'];mount();await screen.findByRole('link',{name:'Повернутися до створення товару'});expect(screen.queryByRole('link',{name:'Відкрити точне налаштування'})).toBeNull();expect(screen.queryByRole('button',{name:'Перевірити результат налаштування'})).toBeNull();expect(client.post).not.toHaveBeenCalled();

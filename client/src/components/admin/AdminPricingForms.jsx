@@ -200,6 +200,7 @@ export function ScenarioMatrix({ currentCatQuestions, handlePriceChange, matrixC
         <div><h4>Матриця цін</h4><p>{axisX.label} × {axisY.label}</p></div>
         <span>Порожня клітинка — немає автоматичної ціни</span>
       </div>
+      {!readOnly && <p className="mb-3 text-sm text-slate-600">Зміни зберігаються автоматично після виходу з клітинки. Щоб прибрати ціну, очистіть клітинку.</p>}
       {matrixValidationError && <div role="alert" className="pricing-matrix-error">{matrixValidationError}</div>}
       <div className="pricing-matrix-scroll">
         <table className="pricing-matrix-table">

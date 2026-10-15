@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../auth/auth-context.js';
 import { api } from '../../lib/api.js';
 import { EmptyState, LoadingState, Notice } from '../app/UiPrimitives.jsx';
@@ -27,8 +27,9 @@ const goals = [
   { value: 'values', title: 'Додати значення або категорію Magento', text: 'Створити відсутній ресурс, перевірити його та підтвердити відповідність.' },
   { value: 'connect', title: 'Підключити категорію Amber', text: 'Підготувати правила, ресурси Magento та перевірити новий товар.' },
 ];
-export default function MagentoPreparationWorkspace({ activePublication, observation, onPublished, onDiscover, checking, checkError }) {
+export default function MagentoPreparationWorkspace({ activePublication, observation, onPublished, onDiscover, checking, checkError, embedded = false }) {
   const navigate = useNavigate(); const { permissions } = useAuth(); const [params, setParams] = useSearchParams();
+  const location = useLocation();
   const revisionId = params.get('draft') || ''; const categoryCode = params.get('category') || '';
   const context = repairContext(params);
   function queryChange(changes) { setParams((previous) => { const next = new URLSearchParams(previous); for (const [key, value] of Object.entries(changes)) { if (value == null || value === '') next.delete(key); else next.set(key, String(value)); } return next; }, { replace: true }); }
@@ -74,13 +75,13 @@ export default function MagentoPreparationWorkspace({ activePublication, observa
   const stageIds = intent === 'mapping' ? [0, 2, 3, 4] : intent === 'rules' ? [0, 5, 2, 3, 4] : [0, 1, 2, 3, 4];
   const selectedGoal = goals.find((goal) => goal.value === intent);
   const categoryQuery = encodeURIComponent(category?.code || '');
-  const taskPath = `/admin/magento/prepare?${params}`;
+  const taskPath = `${embedded ? location.pathname : '/admin/magento/prepare'}?${params}`;
   const optionQuestions = (data?.catalog?.questions?.[category?.code] || []).filter((question) => !question.archived && question.input_type === 'options');
   const optionQuestion = optionQuestions.find((question) => question.id === context.question);
   const catalogLink = (action) => `/admin/catalog?${new URLSearchParams({ category: category?.code || '', ...(context.question ? { question: context.question } : {}), ...(action ? { action } : {}), returnTo: taskPath })}`;
   const rulesPath = revision?.templateId ? withRepairContext(`/admin/magento/rules/${encodeURIComponent(revision.templateId)}`, context, { version: revision.templateVersionId, intent: intent || 'rules', category: category?.code, ...(intent === 'subcategory' ? { field: 'categories' } : {}) }) : null;
   const field = params.get('field') || undefined;
-  const returnPath = context.returnTo || (context.productId ? `/attention?problem=${encodeURIComponent(context.productId)}` : `/admin/magento/categories/${categoryQuery}`);
+  const returnPath = context.returnTo || (context.productId ? `/attention?problem=${encodeURIComponent(context.productId)}` : embedded ? `/admin/catalog?category=${categoryQuery}` : `/admin/magento/categories/${categoryQuery}`);
   return <div className="space-y-5 magento-preparation-workspace">
     <Link className="text-sm underline" to={returnPath}>{context.productId ? 'Повернутися до товару' : 'До категорії'}</Link>
     <h2 className="text-xl font-semibold">{selectedGoal?.title || 'Підготувати зміни інтеграції'}</h2>
@@ -98,8 +99,8 @@ export default function MagentoPreparationWorkspace({ activePublication, observa
       <div className="card space-y-2 p-4 mp-context"><p className="font-medium">{!revision ? 'Опублікованих відповідностей ще немає' : revision.state === 'draft' ? `Чернетка змін · ревізія ${revision.revision}` : revision.id === activePublication?.id ? `Переглядаємо активну версію ${revision.versionNumber}` : 'Переглядаємо історичну опубліковану версію'}</p>
         <p className="text-sm">Категорія: {category?.name || 'Не вибрано'}. {revision?.state === 'draft' ? 'Не впливає на поточну доставку.' : 'Опубліковані відповідності незмінні.'}</p></div>
       {stage === 0 && <section className="card space-y-4 p-5"><h3 className="font-semibold">Обсяг змін</h3>
-        <details open={!intent}><summary>Змінити задачу</summary><div className="magento-goal-grid" role="group" aria-label="Що потрібно підготувати?">{goals.map((goal) => <button type="button" key={goal.value} aria-pressed={intent === goal.value} onClick={() => setIntent(goal.value)}><strong>{goal.title}</strong><span>{goal.text}</span></button>)}</div></details>
-        <label className="block text-sm">Категорія товарів<select className="input" value={category?.code || ''} onChange={(event) => setCategoryCode(event.target.value)}>{data.categories.map((item) => <option key={item.code} value={item.code}>{item.name}</option>)}</select></label>
+        {(!embedded || !intent) && <details open={!intent}><summary>Змінити задачу</summary><div className="magento-goal-grid" role="group" aria-label="Що потрібно підготувати?">{goals.map((goal) => <button type="button" key={goal.value} aria-pressed={intent === goal.value} onClick={() => setIntent(goal.value)}><strong>{goal.title}</strong><span>{goal.text}</span></button>)}</div></details>}
+        {(!embedded || !categoryCode) && <label className="block text-sm">Категорія товарів<select className="input" value={category?.code || ''} onChange={(event) => setCategoryCode(event.target.value)}>{data.categories.map((item) => <option key={item.code} value={item.code}>{item.name}</option>)}</select></label>}
         <details><summary>Відкрити збережену чернетку або історичну версію</summary><label className="block text-sm">Версія для перегляду<select className="input" value={revisionId} onChange={(event) => { ++sequence.current; setData(null); setRepresentatives([]); setRevisionId(event.target.value); }}><option value="">Поточна опублікована</option>{data.revisions.map((item) => <option key={item.id} value={item.id}>{item.state === 'draft' ? 'Чернетка' : item.id === activePublication?.id ? 'Активна версія' : 'Історична версія'} · {item.version_number || item.revision} · {new Date(item.observed_at).toLocaleString('uk-UA')}</option>)}</select></label></details>
         {permissions.includes('catalog.view') && <Link className="text-sm underline" to={catalogLink()}>Каталог цієї категорії: характеристики, значення та SKU-схема</Link>}
         {intent === 'rules' && activePublication?.templateId && <Link className="btn btn-outline" to={withRepairContext(`/admin/magento/rules/${encodeURIComponent(activePublication.templateId)}`, context, { version: activePublication.templateVersionId, category: category?.code })}>Відкрити поточні правила категорії</Link>}
