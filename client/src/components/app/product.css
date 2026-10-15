@@ -51,7 +51,7 @@
   }
 
   .sync-coverage {
-    @apply grid gap-3 border-t border-slate-200 px-4 py-3 sm:px-5;
+    @apply grid gap-3 px-4 py-4 sm:px-5;
   }
 
   .sync-coverage-categories {
