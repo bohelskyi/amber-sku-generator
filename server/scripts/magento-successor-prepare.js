@@ -1,7 +1,8 @@
 'use strict';
 // Prepares a binding successor for a newly published template through the existing
 // integration-successor service (the same code as Settings -> Magento), with an
-// explicit representative product sample for one category.
+// explicit representative product sample: one category, or an explicit SKU list
+// (for example one product per category path that needs review).
 // preview: GET-only Magento observation and read-only local evidence; prints what
 //   carries, what needs review and blockers, plus the preview token.
 // apply: repeats the fresh preparation, requires the same token and creates an
@@ -11,14 +12,14 @@ const path = require('node:path');
 const { createRequire } = require('node:module');
 
 const HELP = 'node magento-successor-prepare.js --mode preview|apply --expected-database NAME --actor-id ID '
-  + '--source UUID --template-version UUID [--category SV] [--per-group 12] [--preview-token SHA256] [--server-root SERVER]';
+  + '--source UUID --template-version UUID [--category SV] [--per-group 12 | --skus SKU1,SKU2 (max 100)] [--preview-token SHA256] [--server-root SERVER]';
 const fail = code => { throw Object.assign(Error(code), { code }); };
 
 function argumentsFor(args) {
   if (args.length === 1 && args[0] === '--help') return { help: true };
   const flags = { '--mode': 'mode', '--expected-database': 'database', '--actor-id': 'actor', '--source': 'sourceId',
     '--template-version': 'templateVersionId', '--category': 'category', '--per-group': 'perGroup',
-    '--preview-token': 'previewToken', '--server-root': 'serverRoot' }, out = { category: 'SV', perGroup: '12' };
+    '--preview-token': 'previewToken', '--server-root': 'serverRoot', '--skus': 'skus' }, out = { category: 'SV', perGroup: '12' };
   const seen = new Set();
   for (let i = 0; i < args.length; i += 2) {
     const key = flags[args[i]], value = args[i + 1];
@@ -29,6 +30,13 @@ function argumentsFor(args) {
   if (!['preview', 'apply'].includes(out.mode) || !out.database || !/^[1-9][0-9]{0,17}$/.test(out.actor || '')
     || !uuid.test(out.sourceId || '') || !uuid.test(out.templateVersionId || '') || !/^[A-Z][A-Z0-9_]{0,31}$/.test(out.category)
     || !/^[1-9][0-9]?$/.test(out.perGroup) || (out.mode === 'apply') !== /^[a-f0-9]{64}$/.test(out.previewToken || '')) fail('SUCCESSOR_ARGUMENTS');
+  if (out.skus !== undefined) {
+    // An explicit sample replaces the category sample; both together are ambiguous.
+    const skus = out.skus.split(',');
+    if (seen.has('category') || seen.has('perGroup') || !skus.length || skus.length > 100 || new Set(skus).size !== skus.length
+      || skus.some(sku => !sku || sku.trim() !== sku || sku.length > 256 || /[\u0000-\u001f\u007f]/.test(sku))) fail('SUCCESSOR_ARGUMENTS');
+    out.skus = skus;
+  }
   out.actor = Number(out.actor); out.perGroup = Number(out.perGroup);
   out.serverRoot = path.resolve(out.serverRoot || path.join(__dirname, '..'));
   return out;
@@ -42,6 +50,15 @@ async function sampleProducts(db, category, perGroup) {
       AND p.corrected_to_product_id IS NULL) s WHERE n<=$2 ORDER BY id LIMIT 100`, [category, perGroup])).rows;
   if (!rows.length) fail('SUCCESSOR_NO_PRODUCTS');
   return rows.map(row => Number(row.id));
+}
+
+// Explicit sample: each SKU must name exactly one current active product.
+async function productsForSkus(db, skus) {
+  const rows = (await db.query(`SELECT p.id, i.public_sku FROM products p JOIN public_product_identities i ON i.id=p.public_product_identity_id
+    WHERE i.public_sku=ANY($1::text[]) AND p.status='active' AND p.corrected_to_product_id IS NULL`, [skus])).rows;
+  const ids = skus.map(sku => rows.filter(row => row.public_sku === sku));
+  if (ids.some(found => found.length !== 1)) fail('SUCCESSOR_SKU_NOT_FOUND');
+  return ids.map(found => Number(found[0].id));
 }
 
 function summarize(result) {
@@ -72,7 +89,7 @@ async function main(args = process.argv.slice(2), dependencies = {}) {
       [cli.sourceId, 'published'])).rows[0];
     if (!source) fail('SUCCESSOR_SOURCE_NOT_PUBLISHED');
     const input = { sourceId: cli.sourceId, expectedSourceRevision: source.revision, templateVersionId: cli.templateVersionId,
-      productIds: await sampleProducts(db, cli.category, cli.perGroup) };
+      productIds: cli.skus ? await productsForSkus(db, cli.skus) : await sampleProducts(db, cli.category, cli.perGroup) };
     const options = { databasePool: db, mutationContext: { actorUserId: cli.actor } };
     if (cli.mode === 'preview') {
       print(JSON.stringify({ kind: 'successor_preview', ...summarize(await successor.prepare(config, input, options)) }));
@@ -90,4 +107,4 @@ async function main(args = process.argv.slice(2), dependencies = {}) {
   } finally { if (pool) await pool.end().catch(() => {}); }
 }
 if (require.main === module) main().then(code => { process.exitCode = code; });
-module.exports = { argumentsFor, sampleProducts, summarize, main };
+module.exports = { argumentsFor, sampleProducts, productsForSkus, summarize, main };
