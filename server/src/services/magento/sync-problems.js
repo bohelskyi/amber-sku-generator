@@ -117,12 +117,30 @@ async function saveDiagnostics(db, automatic, blockers) {
     WHERE public_product_identity_id=$1 AND desired_generation=$2`,
   [automatic.publicIdentityId, automatic.generation, JSON.stringify(safeDiagnostics(blockers))]);
 }
-async function summary(db = pool) {
+async function summary(db = pool, config = require('../../config/env').magento) {
   const result = (await db.query(`SELECT a.enabled,
     (SELECT count(*)::int FROM (SELECT public_product_identity_id FROM magento_product_sync_requests WHERE state='needs_attention'
       UNION SELECT public_product_identity_id FROM magento_test_deletions WHERE state<>'finalized') pending) AS "problemCount"
     FROM magento_auto_sync_activation a WHERE singleton`)).rows[0];
-  return { enabled: Boolean(result?.enabled), problemCount: Number(result?.problemCount || 0) };
+  return { enabled: Boolean(result?.enabled), problemCount: Number(result?.problemCount || 0),
+    coverage: await coverage(db, config) };
+}
+// A current product counts as synchronized once it completed first sync or has an
+// acknowledged delivery to the configured Magento origin, the same facts that make
+// first-sync eligibility ordinary. TEST, excluded and historical rows are not counted.
+async function coverage(db, config) {
+  if (!config?.configured || !config.baseUrl) return null;
+  const rows = (await db.query(`SELECT p.category, max(c.name) AS name, count(*)::int AS total,
+      count(*) FILTER (WHERE EXISTS(SELECT 1 FROM magento_first_sync_sessions s WHERE s.origin_hash=$1
+          AND s.public_product_identity_id=p.public_product_identity_id AND s.completed_at IS NOT NULL)
+        OR EXISTS(SELECT 1 FROM magento_sync_jobs j WHERE j.origin_hash=$1
+          AND j.public_product_identity_id=p.public_product_identity_id AND j.state='succeeded' AND j.acknowledged_at IS NOT NULL))::int AS synced
+    FROM products p JOIN public_product_identities i ON i.id=p.public_product_identity_id
+    LEFT JOIN categories c ON c.code=p.category
+    WHERE p.status='active' AND p.corrected_to_product_id IS NULL AND NOT i.is_test_product AND p.exclude_from_export=0
+    GROUP BY p.category ORDER BY p.category`, [originHash(config.baseUrl)])).rows;
+  const categories = rows.map(row => ({ code: row.category, name: row.name || row.category, total: row.total, synced: row.synced }));
+  return { total: categories.reduce((sum, row) => sum + row.total, 0), synced: categories.reduce((sum, row) => sum + row.synced, 0), categories };
 }
 function presentProblemRow(row) {
   const foreignIdentity = row.diagnostics?.some(item => item.code === 'MAGENTO_NATIVE_IDENTITY_COLLISION');

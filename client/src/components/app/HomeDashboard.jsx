@@ -34,6 +34,7 @@ import {
 } from '../../lib/product-recount';
 import { numericQuestionPolicy, physicalWeightPolicy, validateNumericInput } from '../../lib/product-numeric-input.js';
 import { ProductMagentoState } from './ProductMagentoState.jsx';
+import { SyncCoverage } from './SyncCoverage.jsx';
 import { RecountNameFields } from './RecountNameFields.jsx';
 import { ExchangeRateNotice } from '../ExchangeRateNotice';
 
@@ -187,6 +188,7 @@ export function HomeDashboard({
             <div><strong>Потребує уваги</strong><span>Запити на виправлення та проблеми синхронізації</span></div>
             <Link to="/attention" className="btn btn-outline btn-compact-md">Переглянути</Link>
           </div>}
+          <SyncCoverage />
         </section>}
 
         {canCreateProducts && showCreate && <section className="home-workspace-panel home-create-panel card fade-up stagger-1">
