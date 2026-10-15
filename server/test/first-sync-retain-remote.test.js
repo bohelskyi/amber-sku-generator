@@ -35,7 +35,7 @@ async function run(mode, runtime, extra = []) {
   const input = path.join(directory, 'input.json');
   await fs.writeFile(input, JSON.stringify({ bindingRevisionId: 'binding', items: [{ sku: 'SV1' }, { sku: 'SV2' }, { sku: 'SV3' }] }));
   const lines = [], errors = [];
-  const pool = { query: async sql => ({ rows: [/read_only/.test(sql) ? { default_transaction_read_only: 'on' } : { name: 'amber_test' }] }) };
+  const pool = { query: async () => ({ rows: [{ name: 'amber_test' }] }) };
   const code = await script.main(['--mode', mode, '--input', input, '--output', path.join(directory, 'out.jsonl'), ...common, ...extra],
     { runtime, pool, getOnly: fetch => fetch, fetchImpl: async () => ({}), print: line => lines.push(JSON.parse(line)), printError: line => errors.push(line) });
   return { code, lines, errors };

@@ -3,7 +3,8 @@
 // sync): where Amber has no characteristic answer, Magento has one and the
 // published template emits nothing, record `retain_remote`. Neither Amber nor
 // Magento changes. Later import of these values belongs to removing legacy SKU
-// dependencies. Magento transport is GET-only; preview uses a read-only pool.
+// dependencies. Magento transport is GET-only. Preview never calls apply; the
+// canonical review takes its normal locks, so it needs an ordinary pool.
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { createRequire } = require('node:module');
@@ -99,10 +100,10 @@ async function main(args = process.argv.slice(2), dependencies = {}) {
     const config = dependencies.config || runtime.config.parseMagentoConfig(env);
     if (!config.configured) fail('MAGENTO_NOT_CONFIGURED');
     runtime.c.installation(cli.installation);
-    pool = dependencies.pool || (cli.mode === 'preview' ? runtime.pool.createReadOnlyPool(env) : runtime.createPool(env));
+    // first-sync review locks the Administrator/product rows (SELECT ... FOR UPDATE),
+    // which a read-only transaction refuses (25006). Review records nothing.
+    pool = dependencies.pool || runtime.createPool(env);
     if ((await pool.query('SELECT current_database() AS name')).rows[0]?.name !== cli.database) fail('RETAIN_REMOTE_DATABASE_MISMATCH');
-    if (cli.mode === 'preview' && (await pool.query('SHOW default_transaction_read_only')).rows[0]?.default_transaction_read_only !== 'on')
-      fail('RETAIN_REMOTE_READ_ONLY_DATABASE_REQUIRED');
     const run = { databasePool: pool, actorUserId: cli.actor, installation: cli.installation,
       sensitiveValues: runtime.pool.databaseSecrets(env), fetchImpl: getOnly(dependencies.fetchImpl || globalThis.fetch) };
     handle = await fs.open(cli.output, 'wx', 0o600);

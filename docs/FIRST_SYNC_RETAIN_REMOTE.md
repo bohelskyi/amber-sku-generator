@@ -51,8 +51,10 @@ completion sets. 073/075/076 remain unchanged history.
 
 `server/scripts/first-sync-retain-remote.js` applies the choice sequentially, one
 product at a time, through the canonical `first-sync.service` review and
-`applyWithPreparedValidation`. Magento transport is GET-only; preview uses a
-read-only database pool.
+`applyWithPreparedValidation`. Magento transport is GET-only. Preview only runs the
+canonical review, which records nothing but takes its usual Administrator/product
+locks, so both modes use the ordinary database pool (a read-only pool fails with
+SQLSTATE 25006).
 
 ```text
 node /app/scripts/first-sync-retain-remote.js --mode preview --server-root /app \
