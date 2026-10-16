@@ -26,6 +26,12 @@ const PHOTOS = new Set(['base_image', 'small_image', 'thumbnail_image', 'additio
 const RECEIPT_STATES = new Set(['imported', 'equal', 'optional_empty', 'outward_verified', 'name_received', 'seo_received', 'remote_retained']);
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/;
 const NM_EXACT_LENGTH_COMPARISON = 'nm-exact-length-cm-v1';
+// Catalog owner decision (2026-10-16): Amber is authoritative for CH bead
+// dimensions; Magento historically swapped bead length and width.
+const CH_DECIMALS = Object.freeze({ dovzhyna_namystyny: 'bead_length', diametr_namystyny: 'bead_width',
+  dovzhyna_vyrobu: 'rosary_length' });
+const CH_LOCAL_AUTHORITY = 'ch-bead-dimensions-v1';
+const MAGENTO_MANAGED_SEO = new Set(['meta_title', 'meta_description']);
 const present = value => value !== null && value !== undefined
   && !(typeof value === 'string' && value.trim() === '');
 const scalar = value => value === null || typeof value === 'boolean'
@@ -354,7 +360,7 @@ function projectFirstSyncFields(input) {
       && INFORMATION[category]?.includes(descriptor.key) && !descriptor.aliases.length && scope === 'all'
       && direct.wrappers.every(wrapper => wrapper === 'text'))) descriptor = null;
     let persistence = 'derived', local = { known: true, present: false }, kind = 'derived', type = 'text';
-    let unit, scale, constraints, prospective, reverseCandidates, comparison, importBlocker = null, semanticRequired = false, remoteRetention = null;
+    let unit, scale, constraints, prospective, reverseCandidates, comparison, importBlocker = null, semanticRequired = false, remoteRetention = null, localAuthority = null;
     if (target === 'name') {
       persistence = 'name'; kind = 'name'; local = effectiveLocalName(product, evaluated, scope);
       descriptor = { kind: 'name', field: scope === 'all' ? 'magento_name_override.values.all' : 'magento_name_override.values.en' };
@@ -449,7 +455,24 @@ function projectFirstSyncFields(input) {
       if (direct?.trimmed && remote.known && remote.present && (typeof remote.value !== 'string'
         || remote.value.trim() !== remote.value) && !exactNumericPair) reason ||= 'CANONICAL_INFORMATION_VALUE_NORMALIZED';
     } else {
-      if (direct) reason ||= 'CANONICAL_SOURCE_SETTER_UNSUPPORTED';
+      // CH bead/rosary dimensions are forward-only decimal outputs of one CH
+      // information answer. Compare them numerically as derived outputs (no
+      // reverse import); Amber stays the explicit authority for differences.
+      const chDecimal = direct && category === 'CH' && scope === 'all' && CH_DECIMALS[target]
+        && compiled.definition.sources[direct.id]?.kind === 'information'
+        && compiled.definition.sources[direct.id].category === 'CH'
+        && compiled.definition.sources[direct.id].key === CH_DECIMALS[target]
+        && !compiled.definition.sources[direct.id].aliases.length
+        && hash(direct.wrappers) === hash(['text', 'decimalText'])
+        && expected?.strategy === 'scalar' && binding?.attributeCode === target
+        && attr && pinnedAttr && hash(attr) === hash(pinnedAttr)
+        && currentSet?.attributeCodes.includes(target) && pinnedSet?.attributeCodes.includes(target)
+        && output.verified;
+      if (chDecimal) {
+        type = 'decimal'; scale = 6; constraints = { min: '0', minInclusive: false };
+        localAuthority = CH_LOCAL_AUTHORITY;
+      } else if (direct) reason ||= 'CANONICAL_SOURCE_SETTER_UNSUPPORTED';
+      if (!direct && category === 'CH' && scope === 'all' && target === 'rozmir_kameniu') localAuthority = CH_LOCAL_AUTHORITY;
       prospective = output;
       if (expected?.strategy?.endsWith('_option') && prospective.verified && present(prospective.value)) {
         const matches = bindings.options.filter(option => option.bindingKey === expected.bindingKey
@@ -485,6 +508,12 @@ function projectFirstSyncFields(input) {
     if (category === 'NM' && ['meta_title','meta_description'].includes(target)) {
       persistence = 'seo_snapshot'; kind = 'seo'; type = 'text';
       descriptor = { kind:'seo_snapshot', field:target };
+    }
+    // An approved magento_managed policy means ordinary delivery never writes
+    // this derived SEO output, so first sync has nothing to reconcile for it.
+    if (kind === 'derived' && !direct && MAGENTO_MANAGED_SEO.has(target) && !reason
+      && policy?.reviewState === 'approved' && policy.policy === 'magento_managed') {
+      coverage.push({ target, scope, state: 'ignored', reason: 'MAGENTO_MANAGED_DERIVED_SEO' }); continue;
     }
     if (unit && remote.known) remote.unit = unit;
     const receipt = receipts.get(scope + '/' + target);
@@ -527,7 +556,8 @@ function projectFirstSyncFields(input) {
       requiresRuntimeValidation: ['information', 'weight', 'price', 'characteristic', 'name'].includes(persistence),
       ...(persistence === 'weight' ? { mirrorAnswerKey: 'weight', setterContract: 'canonical-g-scale3-and-answer-coherence' } : {}),
       ...(persistence === 'price' ? { setterContract: 'manual-UAH-scale2-preserve-server-pricing-baseline' } : {}),
-      ...(importBlocker ? { importBlocker } : {}), ...(remoteRetention ? { remoteRetention } : {}), ...(enReason && scope === 'en' ? { readReason: enReason } : {}),
+      ...(importBlocker ? { importBlocker } : {}), ...(remoteRetention ? { remoteRetention } : {}),
+      ...(localAuthority && !reason ? { localAuthority } : {}), ...(enReason && scope === 'en' ? { readReason: enReason } : {}),
       ...(reason ? { reason } : {}) });
     coverage.push({ target, scope, state: 'projected', persistence });
     if (reason) blockers.push({ code: reason, target, scope });

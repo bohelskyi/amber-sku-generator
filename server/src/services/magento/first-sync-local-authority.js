@@ -11,11 +11,21 @@ function validSeoLocal(field) {
     && field.remote?.known===true && (field.remote.present===true ? text(field.remote.value)
       : field.remote.present===false && (field.remote.value==null || typeof field.remote.value==='string' && field.remote.value.trim()===''));
 }
+// Catalog owner decision: Amber is authoritative for CH bead dimensions.
+const chTargets=new Set(['dovzhyna_namystyny','diametr_namystyny','dovzhyna_vyrobu','rozmir_kameniu']);
+function validChLocal(field,meta) {
+  if(meta.localAuthority!=='ch-bead-dimensions-v1' || !chTargets.has(field.target) || field.scope!=='all'
+    || field.local?.known!==true || field.local.present!==true || field.remote?.known!==true || field.remote.present!==true)return false;
+  if(field.target==='rozmir_kameniu')return field.type==='text' && text(field.local.value);
+  const value=require('./first-sync-field-plan').normalizeDecimal(field.local.value,6);
+  return field.type==='decimal' && field.scale===6 && value!==null && value!=='0' && !value.startsWith('-');
+}
 function selectable(field,meta,result) {
   if(field.kind!=='derived' || result.reason!=='DERIVED_FORWARD_MISMATCH'
     || !field.mapping?.proven || !field.prospective?.verified || meta.reason || meta.readReason
     || meta.outwardPolicy!=='authoritative_create_update')return false;
   if(validSeoLocal(field))return true;
+  if(validChLocal(field,meta))return true;
   const price=require('./first-sync-field-plan').normalizeDecimal(field.local?.value,2);
   return field.target==='price' && field.scope==='all' && field.type==='decimal' && field.unit==='UAH'
     && meta.canonicalLocalPriceProven===true
@@ -56,4 +66,4 @@ async function validate(client,token,command,current) {
   }
   return new Set(changed.map(key));
 }
-module.exports={validSeoLocal,selectable,mint,validate};
+module.exports={validSeoLocal,validChLocal,selectable,mint,validate};

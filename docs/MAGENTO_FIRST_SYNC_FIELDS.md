@@ -573,6 +573,9 @@ Amber, Magento has a value and the published output is verified empty, an
 Administrator may record `retain_remote` (terminal state `remote_retained`, no Amber
 or Magento write). See [temporary legacy SV remote retention](FIRST_SYNC_RETAIN_REMOTE.md).
 
+CH decisions (2026-10-16): Amber is authoritative for CH bead dimensions, and CH SEO
+may be left to Magento. See [CH first-sync decisions](FIRST_SYNC_CH_DECISIONS.md).
+
 ## Actual conditional SV acceptance coverage
 
 Approved routes sharing one remote attribute set are selected by exactly one
