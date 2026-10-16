@@ -39,6 +39,16 @@ The current system/candidate materialization makes `SV souvenir=value_id:6` size
 
 The size requirement is captured in the template AST and therefore participates in immutable published binding semantics. Existing publications, hashes and snapshots stay unchanged. Correct an existing integration through the existing workflow: clone/edit the template's SV size expression, publish a new template version, prepare/review its binding successor (including any approvals invalidated by the changed dependency), preview the exact affected scope and publish through the reviewed H3b handoff. Do not regenerate an old publication or waive its evaluation errors in the planner. See [publication and controlled handoff](MAGENTO_INTEGRATION.md#reviewed-publication-and-controlled-handoff-h3b).
 
+## SV checkers category section
+
+The current system/candidate materialization places SV board game `table_games=4`
+(`nastlni_ihry` «Шашки/дама») in the store section `…/Настільні ігри/Шашки`. A `/`
+inside a category segment would split the CSV/API category path (Magento names with
+`/` are never comparable), so the category segment uses the `svGameCategory` table
+while the `nastlni_ihry` attribute value is unchanged. Existing publications keep
+their AST; apply it through a new template version and reviewed binding successor,
+as for the keychain size correction above.
+
 ## Extensible v4 integration contract
 
 Wave 2 H0 adds the explicit opt-in `evaluatorVersion: "magento-declarative-4"`, with `formatVersion: 1`, `sourceContractVersion: "public-product-identity-v1"` and **only** `outputContract: "magento-products-columns-v2"`. It uses the same compiler, expression language, evaluator, protected full-product columns, source validation, planner and durable writer. It is not a second mapper or automatic contract upgrade.

@@ -139,7 +139,10 @@ test('SV category routing, all statuette/game paths, Stone processing and litera
   for (const [table_games, name] of Object.entries(dictionaries.svGames)) {
     const mapped = mapProduct(product('SV', { souvenir: 2, table_games }, manual), catalog());
     assert.deepEqual(mapped.errors, []);
-    assert.equal(mapped.base.categories, `Default/Сувеніри,Default/Сувеніри/Настільні ігри,Default/Сувеніри/Настільні ігри/${name}`);
+    // A '/' in a category segment would split the path, so checkers use the «Шашки» section.
+    const section = table_games === '4' ? 'Шашки' : name;
+    assert.equal(mapped.base.nastlni_ihry, name);
+    assert.equal(mapped.base.categories, `Default/Сувеніри,Default/Сувеніри/Настільні ігри,Default/Сувеніри/Настільні ігри/${section}`);
   }
   for (const [stone_processing, name] of [[0, 'Необроблений'], ['0', 'Необроблений'], [1, 'Полірований']]) {
     const mapped = mapProduct(product('SV', { souvenir: 5, stone_processing }, manual), catalog());
