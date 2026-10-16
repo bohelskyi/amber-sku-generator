@@ -96,3 +96,32 @@ test('optional empty owned fields preserve delivery; populated base and English 
   const zero=structuredClone(next);zero.groups[0].rows[0].cells.new_note={op:'literal',value:'0'};
   assert.equal(check(zero).affected.length,1,'zero is an actual managed output, not absence');
 });
+test('observation fingerprint ignores locale-dependent labels of unbound options but keeps values and bound evidence',()=>{
+  const {normalizeSchema,hash,observationFingerprint}=require('../src/services/magento/binding-contract');
+  const countries=(labels)=>{const s=structuredClone(fixture.observation());
+    s.attributes.push({attribute_id:1990,attribute_code:'country_of_manufacture',frontend_input:'select',
+      options:[['AD',labels[0]],['AE',labels[1]]].map(([value,label])=>({value,label}))});
+    return normalizeSchema(s);};
+  const definition=fixture.definition(),english=countries(['Andorra','United Arab Emirates']),ukrainian=countries(['Андорра','Обʼєднані Арабські Емірати']);
+  const bindings=fixture.approvedBindings(definition,english);
+  assert.ok(bindings.attributes.some((a)=>a.attributeCode==='kolir'));
+  assert.ok(!bindings.attributes.some((a)=>a.attributeCode==='country_of_manufacture'));
+  // Stored integrity fingerprints keep hashing the exact snapshot.
+  assert.notEqual(hash(english),hash(ukrainian));
+  assert.equal(observationFingerprint(english,[bindings]),observationFingerprint(ukrainian,[bindings]));
+  assert.equal(observationFingerprint(english,[bindings,null]),observationFingerprint(ukrainian,[bindings,undefined]));
+  const changed=(edit)=>{const s=structuredClone(ukrainian);edit(s);return observationFingerprint(s,[bindings]);};
+  const base=observationFingerprint(english,[bindings]);
+  const country=(s)=>s.attributes.find((a)=>a.attribute_code==='country_of_manufacture');
+  const kolir=(s)=>s.attributes.find((a)=>a.attribute_code==='kolir');
+  assert.notEqual(changed((s)=>{country(s).options.push({value:'AF',label:'Afghanistan',isEmpty:false});}),base,'unbound option set still checked');
+  assert.notEqual(changed((s)=>{country(s).options[0].value='AX';}),base,'unbound option value still checked');
+  assert.notEqual(changed((s)=>{country(s).default_frontend_label='Country';}),base,'unbound attribute metadata still checked');
+  assert.notEqual(changed((s)=>{kolir(s).options[0].label='Relabelled red';}),base,'bound option label remains identity evidence');
+  assert.notEqual(changed((s)=>{kolir(s).options[0].value='green-id';}),base,'bound option value still checked');
+  assert.notEqual(changed((s)=>{s.attributeSets[0].attribute_set_name='Renamed';}),base,'attribute set evidence still checked');
+  // An attribute bound only by the current publication keeps its labels too.
+  const current={attributes:[{attributeCode:'country_of_manufacture'}]};
+  assert.notEqual(observationFingerprint(english,[bindings,current]),observationFingerprint(ukrainian,[bindings,current]));
+  assert.deepEqual(english,countries(['Andorra','United Arab Emirates']),'input schema is not mutated');
+});

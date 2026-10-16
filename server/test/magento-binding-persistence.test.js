@@ -123,3 +123,19 @@ test('binding: observation hashes ignore ordering and credentials are rejected b
   assert.throws(() => safeData({ note: 'synthetic-credential' }, ['synthetic-credential']));
   assert.throws(() => safeData({ consumerSecret: 'never store' }));
 });
+test('binding: drift ignores relabelled unbound options but reports their value changes and stored-snapshot mismatch', () => {
+  const countries = (labels) => { const s = structuredClone(schema());
+    s.attributes.push({ attribute_id: 1990, attribute_code: 'country_of_manufacture', frontend_input: 'select',
+      options: [['AD', labels[0]], ['AE', labels[1]]].map(([value, label]) => ({ value, label })) });
+    return normalizeSchema(s); };
+  const s = countries(['Andorra', 'United Arab Emirates']); const b = normalizeBindings(approvedBindings());
+  const revision = { id: 'fixture', revision: '3', bindings: b, schema: s, schemaFingerprint: hash(s), topologyFingerprint: hash(s.storeTopology) };
+  const relabelled = countries(['Андорра', 'Обʼєднані Арабські Емірати']);
+  const result = compareSchema(revision, relabelled);
+  assert.deepEqual(result.diagnostics, []); assert.equal(result.schemaFingerprint, hash(relabelled));
+  const added = structuredClone(relabelled); added.attributes.find((a) => a.attribute_code === 'country_of_manufacture').options.push({ value: 'AF', label: 'Afghanistan' });
+  assert.deepEqual(compareSchema(revision, added).diagnostics.map((d) => d.code), ['SCHEMA_FINGERPRINT_CHANGED']);
+  const bound = structuredClone(relabelled); bound.attributes.find((a) => a.attribute_code === 'kolir').options[0].label = 'Renamed';
+  assert.deepEqual(compareSchema(revision, bound).diagnostics.map((d) => d.code), ['SCHEMA_FINGERPRINT_CHANGED', 'OPTION_ID_LABEL_CHANGED']);
+  assert.deepEqual(compareSchema({ ...revision, schemaFingerprint: hash(relabelled) }, s).diagnostics.map((d) => d.code), ['SCHEMA_FINGERPRINT_CHANGED']);
+});

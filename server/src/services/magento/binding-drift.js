@@ -1,5 +1,5 @@
 const { auditMagentoSchema } = require('./schema-audit');
-const { normalizeSchema, hash, originHash, error } = require('./binding-contract');
+const { normalizeSchema, hash, observationFingerprint, originHash, error } = require('./binding-contract');
 
 function compareSchema(revision, observation) {
   const current = normalizeSchema(observation);
@@ -7,7 +7,9 @@ function compareSchema(revision, observation) {
   const diagnostics = [];
   const add = (code, context = {}) => diagnostics.push({ code, severity: 'review', ...context });
   if (current.storeCode !== previous.storeCode) throw error(422, 'MAGENTO_BINDING_SCOPE_MISMATCH', 'Schema observation scope differs');
-  if (hash(current) !== revision.schemaFingerprint) add('SCHEMA_FINGERPRINT_CHANGED');
+  // Labels of unbound options (e.g. locale-dependent country names) are not drift.
+  if (hash(previous) !== revision.schemaFingerprint || observationFingerprint(current, [revision.bindings])
+    !== observationFingerprint(previous, [revision.bindings])) add('SCHEMA_FINGERPRINT_CHANGED');
   if (hash(current.storeTopology) !== revision.topologyFingerprint) add('STORE_TOPOLOGY_CHANGED');
   for (const route of revision.bindings.routes) {
     if (route.setId === null) continue;

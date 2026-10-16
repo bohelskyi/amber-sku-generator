@@ -349,3 +349,37 @@ test('exact controlled SKU list reports each public identity without fuzzy omiss
       await assert.rejects(controlled.candidates(f.config,f.current.id,f.options,query));
   }finally{await f.db.end();await dropTestDatabase('amber_exact_controlled_test');}
 });
+test('publication gate ignores locale-relabelled unbound country options; bound and value drift still block',async()=>{
+  const name='amber_publication_locale_labels_test',f=await setup(name);
+  try{
+    const {normalizeSchema,hash}=require('../src/services/magento/binding-contract');
+    const observed=(labels,edit=()=>{})=>{const s=structuredClone(f.schema);
+      s.attributes.push({attribute_id:1990,attribute_code:'country_of_manufacture',frontend_input:'select',
+        options:[['AD',labels[0]],['AE',labels[1]]].map(([value,label])=>({value,label}))});
+      edit(s);return normalizeSchema(s);};
+    const english=observed(['Andorra','United Arab Emirates']),ukrainian=observed(['Андорра','Обʼєднані Арабські Емірати']);
+    const next=structuredClone(f.d);next.groups[0].rows[0].cells.price.value='43';
+    const v=await templates.createTemplate({key:'locale-next',displayName:'locale-next',definition:next},f.options);
+    const version=await templates.publishTemplate(v.id,{expectedRevision:v.draft.revision,expectedDefinitionHash:v.draft.definitionHash},f.options);
+    let draft=await bindings.createDraft({installationKey:'publication',origin:f.config.baseUrl,templateVersionId:version.id,
+      observedAt:'2026-10-15T00:00:00.000Z',schema:english},f.options);
+    draft=await bindings.updateDraft(draft.id,{expectedRevision:draft.revision,bindings:f.approved(next)},f.options);
+    assert.ok(!draft.bindings.attributes.some(a=>a.attributeCode==='country_of_manufacture'));
+    assert.ok(draft.bindings.attributes.some(a=>a.attributeCode==='name'));
+    const stored=(await f.db.query('SELECT schema_fingerprint FROM magento_binding_revisions WHERE id=$1',[draft.id])).rows[0].schema_fingerprint;
+    assert.equal(stored,hash(english));assert.notEqual(stored,hash(ukrainian));
+    const input={bindingRevisionId:draft.id,expectedRevision:draft.revision,expectedCurrentId:f.current.id};
+    const discovering=(schema)=>({...f.options,discover:async()=>({schema,categories:[],observedAt:'2026-10-16T00:00:00.000Z'})});
+    // Real drift on a bound attribute or an unbound option value still requires fresh preparation.
+    for(const schema of [observed(['Андорра','Обʼєднані Арабські Емірати'],(s)=>{s.attributes.find(a=>a.attribute_code==='name').scope='website';}),
+      observed(['Andorra','United Arab Emirates'],(s)=>{s.attributes.find(a=>a.attribute_code==='country_of_manufacture').options.push({value:'AF',label:'Afghanistan'});})])
+      await assert.rejects(publication.preview(f.config,input,discovering(schema)),{code:'MAGENTO_BINDING_OBSERVATION_CHANGED'});
+    const reviewed=await publication.preview(f.config,input,discovering(ukrainian));
+    assert.deepEqual(reviewed.blockers,[]);
+    // Labels flip back between review and publish; the reviewed token stays valid.
+    const receipt=await publication.publish(f.config,{...input,previewToken:reviewed.previewToken},discovering(english));
+    assert.equal(receipt.alreadyApplied,false);
+    const row=(await f.db.query('SELECT state,schema_fingerprint FROM magento_binding_revisions WHERE id=$1',[draft.id])).rows[0];
+    assert.equal(row.state,'published');assert.equal(row.schema_fingerprint,hash(english),'stored snapshot fingerprint is unchanged');
+  }finally{await f.db.end();await dropTestDatabase(name);}
+});
