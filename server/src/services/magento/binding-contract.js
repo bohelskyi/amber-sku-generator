@@ -100,5 +100,18 @@ function normalizeSchema(report, secrets = []) {
   return { storeCode: report.storeCode, attributes, attributeSets, storeTopology };
 }
 
-module.exports = { error, invalid, hash, originHash, code, questionKey, positive, semanticId, command, counter, identity,
+// Observation comparison only (publication gate, drift); stored schema fingerprints stay
+// integrity hashes of the exact snapshot. Magento may return option labels of
+// system sources (e.g. country_of_manufacture) in a cache/locale-dependent
+// language. Labels of attributes that no given binding references carry no
+// delivery evidence, so they are omitted; their option values and all other
+// metadata stay. Bound attributes keep their option labels as identity evidence.
+function observationFingerprint(schema, bindingSets) {
+  const bound = new Set(bindingSets.filter(Boolean).flatMap((b) => b.attributes)
+    .map((a) => a.attributeCode).filter((code) => code !== null && code !== undefined));
+  return hash({ ...schema, attributes: schema.attributes.map((a) => bound.has(a.attribute_code) ? a
+    : { ...a, options: a.options.map(({ label, ...option }) => { void label; return option; }) }) });
+}
+
+module.exports = { error, invalid, hash, observationFingerprint, originHash, code, questionKey, positive, semanticId, command, counter, identity,
   installation, safeData, unique, list, normalizeSchema };

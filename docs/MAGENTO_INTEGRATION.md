@@ -1390,6 +1390,19 @@ lend its old option identities to its replacement. Fingerprints use normalized,
 deterministically ordered observations and include option labels/topology. Sequential
 GETs are not an atomic remote snapshot; this is explicit comparison, not monitoring.
 
+Stored `schema_fingerprint` values remain integrity hashes of each exact immutable
+snapshot. `SCHEMA_FINGERPRINT_CHANGED` and the publication
+`MAGENTO_BINDING_OBSERVATION_CHANGED` gate instead compare
+`observationFingerprint(schema, bindingSets)` of the fresh observation and the
+integrity-verified stored snapshot. It omits only option **labels** of attributes no
+given binding references by `attributeCode`. Magento returns some system-source
+labels (for example `country_of_manufacture` ISO-code options seen as `Andorra`
+and later `Андорра` on 2026-10-16) in a cache/locale-dependent language, which made
+drafts randomly stale. Option values and sets, attribute metadata, attribute sets,
+topology and every label of an attribute bound by the draft or current publication
+stay compared. Existing stored fingerprints are unchanged, so no migration is
+needed.
+
 ### Compatibility findings constraining later phases
 
 The table below preserves the earlier compatibility baseline. The bounded review
@@ -2078,6 +2091,9 @@ marker is retained, so an externally enabled TEST counterpart still blocks deliv
 Optional empty owned outputs are omitted from the declared delivery signature,
 matching transport omission rather than enrolling an unchanged product. Populated
 base/English outputs and zero values still contribute to publication impact.
+The publication gate and the preview-token schema hash use the label-insensitive
+observation fingerprint described under drift comparison, so a relabelled unbound
+system option neither invalidates the draft nor the reviewed token.
 Local projections are not a claim that every remote product has been inspected.
 Remote reads reuse the existing evaluator/planner and the request-scoped 512-GET /
 60-second bound; no persistent background-report engine is introduced.
