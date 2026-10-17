@@ -91,3 +91,11 @@ test('a global authority failure stops the run', async () => {
   const result = await run('preview', runtime);
   assert.equal(result.code, 1); assert.equal(result.lines.length, 2); assert.equal(result.lines.at(-1).counts.stopped, 'ADMIN_PERMISSION_REVOKED');
 });
+
+test('an equal name receipt is not an import for retain_remote; a fresh name import still is', () => {
+  const retained = { target: 'kolir', scope: 'all', record: { state: 'remote_retained', after: null, source: { decision: 'retain_remote' } } };
+  script.validatePrepared({ rows: [retained, { target: 'name', scope: 'all', status: 'equal', record: { state: 'name_received' } }] },
+    [{ target: 'kolir', scope: 'all' }], false);
+  assert.throws(() => script.validatePrepared({ rows: [retained, { target: 'name', scope: 'all', status: 'imported', record: { state: 'name_received' } }] },
+    [{ target: 'kolir', scope: 'all' }], false), /RETAIN_REMOTE_OTHER_IMPORTS_PRESENT/);
+});

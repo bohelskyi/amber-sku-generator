@@ -96,3 +96,12 @@ test('a global authority failure stops the run', async () => {
   const result = await run('preview', runtime);
   assert.equal(result.code, 1); assert.equal(result.lines.length, 2); assert.equal(result.lines.at(-1).counts.stopped, 'ADMIN_PERMISSION_REVOKED');
 });
+
+test('an equal name receipt is not an import; a fresh name import still is', () => {
+  const kept = { target: 'price', scope: 'all', status: 'pending_outward_confirmation', record: { state: 'pending_outward_confirmation', source: { decision: 'keep_local' } } };
+  const equalName = { target: 'name', scope: 'all', status: 'equal', record: { state: 'name_received' } };
+  const importedName = { target: 'name', scope: 'en', status: 'imported', record: { state: 'name_received' } };
+  script.validatePrepared({ rows: [kept, equalName] }, [{ target: 'price', scope: 'all' }], false);
+  assert.throws(() => script.validatePrepared({ rows: [kept, importedName] }, [{ target: 'price', scope: 'all' }], false), /KEEP_LOCAL_OTHER_IMPORTS_PRESENT/);
+  script.validatePrepared({ rows: [kept, importedName] }, [{ target: 'price', scope: 'all' }], true);
+});
