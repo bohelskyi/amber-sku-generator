@@ -66,6 +66,9 @@ node /app/scripts/first-sync-retain-remote.js --mode apply --server-root /app \
   --expected-database amber --actor-id ADMIN_ID --installation-key amber
 ```
 
+Optional: `--allow-imports` (apply only) also commits other Magento values the fresh
+plan receipts; `--schema-cache-seconds 0-600` reuses Magento schema reads within one run.
+
 `INPUT.json` is `{ "bindingRevisionId": "...", "items": [{ "sku": "..." }] }`, the same
 shape as the campaign input. Each output line is one product:
 

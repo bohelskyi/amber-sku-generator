@@ -26,3 +26,7 @@ These records describe their own dated checkpoint. “Current”, “planned”,
 - [2026 refactor audit and completed roadmap](implementation/REFACTOR_2026.md)
 - [Dated local human acceptance launch](implementation/HUMAN_ACCEPTANCE_2026-09-24.md)
 - [Documentation consolidation inventory](implementation/DOCUMENTATION_CONSOLIDATION_2026-09-27.md)
+- [Wave 1 UX/runtime cleanup boundary (2026-10-01)](implementation/UX_RUNTIME_WAVE_1_2026-10-01.md)
+- [SV campaign implementation review (2026-10-14)](implementation/SV_CAMPAIGN_REVIEW_2026-10-14.md)
+- [Historical reactivation protocol v1, superseded by the standard protocol](implementation/HISTORICAL_REACTIVATION_PROTOCOL_V1.md)
+- [Magento remaining-group review and option inventory (2026-09-28)](implementation/MAGENTO_REMAINING_GROUP_REVIEW_2026-09-28.md)
