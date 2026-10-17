@@ -43,7 +43,7 @@ The full index is [`docs/README.md`](docs/README.md); `docs/archive/` is dated h
 
 ## Migration rules
 
-- Never edit any already-applied migration; add a forward migration. Every committed migration (currently `000`–`080`) is immutable history; see [the migration guide](docs/DATABASE_MIGRATIONS.md).
+- Never edit any already-applied migration; add a forward migration. Every committed migration (currently `000`–`081`) is immutable history; see [the migration guide](docs/DATABASE_MIGRATIONS.md).
 - Preserve checksum and line-ending canonicalization. Never rewrite stored checksums to hide a mismatch.
 - Keep each migration transactional and safe for fresh, known upgrade/checkpoint, repeated-startup, and rollback paths as applicable.
 - Migration DDL uses a dedicated no-query-timeout connection. Runtime DDL is not a substitute for migrations.

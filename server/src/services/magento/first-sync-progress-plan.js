@@ -61,6 +61,12 @@ function prepareProgress(projection, progress, decision = null) {
     } else if (selected && selected.choice==='retain_remote') {
       status='remote_retained';reason='ADMINISTRATOR_RETAINED_REMOTE';after=null;
     } else if (status==='imported') after=result.importValue;
+    // Approved magento_managed SEO: Magento keeps its value. Automatic terminal
+    // receipt; equal/empty fields keep their ordinary receipts.
+    const managedSeo=meta.remoteRetention==='magento-managed-seo-v1' && !seo && field.kind==='derived'
+      && field.remote.known===true && field.mapping.proven && !selected && !priorKeep
+      && !['equal','optional_empty'].includes(status);
+    if (managedSeo) { status='remote_retained';reason='MAGENTO_MANAGED_SEO_REMOTE_RETAINED';after=null; }
     if (status==='imported' && !supported) {
       status='review_required';reason=meta.importBlocker || 'CANONICAL_' + meta.persistence.toUpperCase() + '_SETTER_UNSUPPORTED';
       after=field.local.value ?? null;
@@ -82,6 +88,7 @@ function prepareProgress(projection, progress, decision = null) {
       ...(priorKeep || selected?.choice==='keep_local' ? {decision:'keep_local'}:{}),
       ...(selected?.choice==='accept_remote' ? {decision:'accept_remote'}:{}),
       ...(selected?.choice==='retain_remote' ? {decision:'retain_remote'}:{}),
+      ...(managedSeo ? {decision:'retain_remote',retention:'magento_managed_seo'}:{}),
       ...(seo && prior?.state==='seo_pending_initial_readback' && selected?.choice==='keep_local'
         ? {seoAuthorityChange:{revision:prior.revision,evidence:Object.fromEntries(['target','scope','state','before','remote','after','source','mappingHash'].map(k=>[k,prior[k]]))}} : {})};
     const record={target:field.target,scope:field.scope,state,before:field.local,remote:field.remote,

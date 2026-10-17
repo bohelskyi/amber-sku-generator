@@ -25,10 +25,15 @@ swapped bead length and width, and stores the decimals with six places (`33.0000
 
 When the published binding approves the `magento_managed` policy for derived
 `meta_title`/`meta_description` (the binding UI draft, review and publication), ordinary
-delivery never writes them. First sync then lists them as ignored coverage
-(`MAGENTO_MANAGED_DERIVED_SEO`) instead of a permanent `DERIVED_FORWARD_MISMATCH`.
-An earlier non-terminal first-sync record of that field still blocks completion
-(`FIRST_SYNC_UNSETTLED_PRIOR_FIELD`). NM SEO snapshots are unchanged.
+delivery never writes them. Since migration 081 first sync records such a field
+automatically as terminal `remote_retained` (`MAGENTO_MANAGED_SEO_REMOTE_RETAINED`,
+source `decision: retain_remote`, `retention: magento_managed_seo`, `after` null)
+whenever Magento's value is known and differs from Amber's; equal or both-empty values
+keep their ordinary `equal`/`optional_empty` receipt. This also settles an earlier
+non-terminal record of the field (for example a `review_required` row written before
+the policy was approved), so it no longer raises `FIRST_SYNC_UNSETTLED_PRIOR_FIELD`.
+No operator choice is offered or accepted for these fields. Products that stopped on
+that blocker need only a reviewed `broader_resync` handoff. NM SEO snapshots are unchanged.
 
 ## Batch keep_local
 

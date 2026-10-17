@@ -153,6 +153,7 @@ New paths touching these resources must follow existing lock order and final-sta
 | `078_daily_exchange_rate_refresh.sql` | Daily exchange-rate refresh scheduling metadata. See [PRICING](PRICING.md). |
 | `079_canonical_weight_repair_all_sv.sql` | Weight repair candidates for every legacy SV product. See [CANONICAL_WEIGHT_REPAIR](CANONICAL_WEIGHT_REPAIR.md). |
 | `080_first_sync_remote_retained.sql` | Temporary `remote_retained` first-sync state for legacy SV. See [FIRST_SYNC_RETAIN_REMOTE](FIRST_SYNC_RETAIN_REMOTE.md). |
+| `081_first_sync_magento_managed_seo.sql` | Automatic `remote_retained` receipt for derived SEO with an approved `magento_managed` policy. See [FIRST_SYNC_CH_DECISIONS](FIRST_SYNC_CH_DECISIONS.md). |
 
 ## Test deletion migration
 
@@ -484,3 +485,14 @@ state in the terminal and completion sets by replacing `guard_first_sync_evidenc
 and `require_first_sync_progress`. It writes no product, receipt or delivery data;
 073/075/076 checksums are unchanged. See
 [temporary legacy SV remote retention](FIRST_SYNC_RETAIN_REMOTE.md).
+
+## 081 — magento_managed SEO remote retention
+
+[081_first_sync_magento_managed_seo.sql](../server/migrations/081_first_sync_magento_managed_seo.sql)
+replaces `first_sync_remote_retained_shape` so `remote_retained` also admits a derived
+`meta_title`/`meta_description` receipt (scope `all` or `en`, `source.retention`
+`magento_managed_seo`, `source.field` equal to the target, Magento known, `after`
+null); the 080 semantic shape now additionally requires no `retention`. It replaces
+`guard_first_sync_evidence` only to skip the legacy-SV product check for that
+retention. It writes no data; 080's checksum is unchanged. See
+[CH first-sync decisions](FIRST_SYNC_CH_DECISIONS.md#seo-magento-may-keep-ch-meta-title-and-description).
