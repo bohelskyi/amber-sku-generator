@@ -214,3 +214,51 @@ test('a real current-product delivery confirmation still invalidates admission d
     assert.equal((await helper.readOnClient(client, f.config, f.observation)).admission, null);
   });
 });
+
+test('an admission recorded under an earlier publication stays valid for a later publication of the same installation', async () => {
+  const later = '33333333-3333-4333-8333-333333333333';
+  const prepare = async (f, client, binding = {}) => {
+    receipt(f, await helper.captureOnClient(client, f.identity));
+    Object.assign(f.rows[0].binding, { version_number: '10', current_version_number: '11' }, binding);
+    f.observation.amber.revision.id = later;
+  };
+  const f = fixture();
+  await withEvidence(f, async (client, calls) => {
+    await prepare(f, client);
+    const result = await helper.readOnClient(client, f.config, f.observation);
+    assert.ok(result.admission); assert.equal(result.reason, null);
+    assert.equal(calls.queries[0].params[2], later, 'the current publication version is read from the database');
+    assert.equal(helper.allows(f.observation, result.admission), true);
+    const initial = result.evidenceHash, fresh = await helper.assertOnClient(client, f.config, f.observation, result.admission);
+    assert.equal(fresh.evidenceHash, initial);
+  });
+  for (const [label, binding] of [['newer receipt', { version_number: '12' }], ['same version number', { version_number: '11' }],
+    ['current is not published', { current_version_number: null }], ['receipt draft', { state: 'draft' }],
+    ['other installation', { installation_key: 'installation-b' }], ['other origin', { origin_hash: 'd'.repeat(64) }]]) {
+    const g = fixture();
+    await withEvidence(g, async client => {
+      await prepare(g, client, binding);
+      const result = await helper.readOnClient(client, g.config, g.observation);
+      assert.equal(result.admission, null, label);
+      assert.equal(result.reason, 'FIRST_SYNC_HISTORY_ADMISSION_RECEIPT_REQUIRED', label);
+    });
+  }
+});
+
+test('an earlier-publication receipt still needs its exact handoff, envelope and unchanged history', async () => {
+  const later = '33333333-3333-4333-8333-333333333333';
+  for (const mutate of [
+    f => { f.rows[0].handoff.binding_revision_id = later; },
+    f => { f.rows[0].receipt.details.bindingRevisionId = later; },
+    f => { f.rows[0].handoff.evidence.firstSyncAdmission.identity.bindingRevisionId = later; },
+    f => { f.history.products[1].status = 'active'; },
+  ]) {
+    const f = fixture();
+    await withEvidence(f, async client => {
+      receipt(f, await helper.captureOnClient(client, f.identity));
+      Object.assign(f.rows[0].binding, { version_number: '10', current_version_number: '11' });
+      f.observation.amber.revision.id = later; mutate(f);
+      assert.equal((await helper.readOnClient(client, f.config, f.observation)).admission, null);
+    });
+  }
+});

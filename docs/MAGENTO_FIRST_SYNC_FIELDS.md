@@ -365,6 +365,14 @@ Delivery jobs, retained-file membership and the other checks above are unchanged
 
 An admitted session keeps its root audit ID in every immutable progress command. Its latest progress/audit receipt records revision and CSV-retirement counters after legitimate local imports, including when legacy product CSV is disabled. Unrelated counter changes cannot be sealed by another progress command. An incomplete session must keep a valid admission at commit, dispatch and acknowledgement; a new publication requires an explicit fresh review when protected work is clear, preserving terminal field receipts. Completed sessions return to ordinary rules. No field conflict is resolved by history admission.
 
+Recount admissions (`stable_recount_exposure` / `historical_recount_exposure`
+receipts) have no renewal action once the lifecycle is `prior_exposure`. Their
+receipt therefore stays valid for a later published binding revision of the same
+installation and origin (the receipt's revision version is lower than the current
+published version); the exact audit/handoff/envelope, lifecycle and unchanged
+reviewed history are still required. Cutover/legacy-snapshot admissions keep the
+explicit per-publication renewal above.
+
 Both retain authenticated active-user, CSRF and the existing manage/publish/export
 permission checks. Apply additionally requires and revalidates Administrator
 authority. `accept_remote` is available only for a valid conflict with a supported
