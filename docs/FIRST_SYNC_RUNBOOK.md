@@ -41,6 +41,10 @@ enqueues or writes Magento directly.
      with `--targets`.
    - Missing names/values come from Magento: [name completion](NAME_COMPLETION_BATCH.md),
      [initial names](FIRST_SYNC_INITIAL_NAMES.md).
+   - Legacy SV zero canonical weight with no recorded answer (`decor_weight`
+     `FIRST_SYNC_LEGACY_MISSING_ONLY_REVIEW_REQUIRED`): take Magento `decor_weight` with
+     [`canonical-weight-repair.js --source magento-readback`](CANONICAL_WEIGHT_REPAIR.md#magento-readback-source),
+     then the step 4 handoff.
    - Legacy SV characteristic empty in Amber and not emitted by the template:
      [`first-sync-retain-remote.js`](FIRST_SYNC_RETAIN_REMOTE.md) (temporary).
    - SV cohorts: [SV campaign](SV_CAMPAIGN.md) wraps history, names, fields and handoff.
@@ -114,7 +118,7 @@ Every publication has side effects on products that are **not yet synced**:
 | `magento-carry-unchanged-reviews.js` | Re-approve identical successor decisions | this page |
 | `magento-publication.js` | H3b publication preview/apply with handoff | [integration](MAGENTO_INTEGRATION.md#reviewed-publication-and-controlled-handoff-h3b) |
 | `sv-optional-characteristics.js` | One-off SV template change (2026-10-14) | script header |
-| `canonical-weight-repair.js` | Reviewed zero-weight repair | [weight repair](CANONICAL_WEIGHT_REPAIR.md) |
+| `canonical-weight-repair.js` | Reviewed zero-weight repair from the recorded answer or (`--source magento-readback`) Magento `decor_weight` | [weight repair](CANONICAL_WEIGHT_REPAIR.md), [Magento source](CANONICAL_WEIGHT_REPAIR.md#magento-readback-source) |
 
 ## Open follow-ups
 
