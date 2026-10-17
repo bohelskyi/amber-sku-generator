@@ -38,7 +38,8 @@ for many products, sequentially and with GET-only Magento transport:
 ```text
 node scripts/first-sync-keep-local.js --mode preview|apply --server-root /app \
   --input input.json --output NEW_FILE.jsonl --expected-database NAME \
-  --actor-id ID --installation-key KEY --targets price,vaha_vyrobu,... [--allow-imports]
+  --actor-id ID --installation-key KEY --targets price,vaha_vyrobu,... [--allow-imports] \
+  [--schema-cache-seconds 0-600]
 ```
 
 - Input: `{ "bindingRevisionId": "...", "items": [{ "sku": "..." }] }`, up to 2000 SKUs.

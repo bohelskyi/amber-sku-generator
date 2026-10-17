@@ -1,10 +1,11 @@
 # Scoped legacy history admission batch
 
 `server/scripts/first-sync-history-batch.js` is a standalone adapter for the
-canonical services already deployed in PR 68. Copy this single script alongside
-the deployed server and pass `--server-root` pointing to its directory containing
-`package.json`, `src/` and `scripts/`. No deployment, migration, dependency install,
-application startup or worker startup is needed.
+canonical services. It ships with the server image (`/app/scripts`) and requires its
+sibling `magento-schema-read-cache.js`; pass `--server-root /app`. No migration,
+dependency install, application startup or worker startup is needed. Admissions are
+per binding publication: rerun it for unsynced products after every publication (see
+the [first-sync runbook](FIRST_SYNC_RUNBOOK.md)).
 
 This operation requires explicit approval for the exact SKU list. Its only domain
 mutation is the existing `product.magento_first_sync_cutover_reviewed` audit with

@@ -1,71 +1,78 @@
 # Amber SKU Manager documentation
 
-Wave 1 production deployment is complete (PR #19, 2026-10-01 operator receipt). Its review boundary is documented in [Wave 1 UX/runtime cleanup](UX_RUNTIME_WAVE_1.md). Catalog + Magento self-service remains the separately reviewed Wave 2.
-
-This is the canonical documentation index. Current code and PostgreSQL migrations define implemented behavior; deployment data and operator evidence define environment-specific facts. Historical plans do not override the maintained guides.
+Canonical index. Current code and migrations define behavior; these guides explain
+contracts and procedures. Archived records are dated history, not current behavior.
 
 ## Start here
 
-1. [Project context](../PROJECT_CONTEXT.md) — architecture, capabilities, implementation/deployment distinction.
-2. [AGENTS](../AGENTS.md) — engineering guardrails and verification/safe test environments.
-3. [Root README](../README.md) — local startup and Docker quickstart.
+1. [Project context](../PROJECT_CONTEXT.md): architecture, capabilities, deployment status.
+2. [AGENTS](../AGENTS.md): engineering guardrails, verification and safe test databases.
+3. [Root README](../README.md): local startup and Docker quickstart.
 
-## Current domain guides
-
-Each guide is the maintained authority for its domain; other documents summarize and link to it.
+## Domain references (contracts)
 
 | Guide | Scope |
 | --- | --- |
 | [SKU and catalog](SKU_CATALOG.md) | Schema versions, semantic IDs, calibration, preview/save/decode, permanent SKU reservation. |
-| [Pricing](PRICING.md) | Matrices/modifiers, rate handling, rounding, calculated/automatic/manual meanings and legacy zeros. |
-| [Recount and corrections](RECOUNT_CORRECTIONS.md) | Target validation, lineage, shared exact names, request parity/ownership, stale evidence. |
-| [Repricing](REPRICING.md) | Drafts, authoritative preview, atomic apply and exact-state rollback. |
-| [Exports](EXPORTS.md) | Gate-dependent lifecycle queues, immutable membership, acknowledgment, price stream and reconciliation semantics. |
-| [Magento integration](MAGENTO_INTEGRATION.md) | Persistent bindings, explicit category flow, durable direct sync/verification, production receipts, future reviewed extensions and immutable evidence. |
-| [Export templates](EXPORT_TEMPLATES.md) | Administrative API, editor, immutable publications, source support and signed capture binding. |
-| [Shared export sessions](SHARED_EXPORT_SESSIONS.md) | Private/shared workflows, scoped invitations, access epochs, durable attempts and recovery. |
-| [Authentication and RBAC](AUTH_RBAC.md) | OIDC, sessions, active-user/CSRF boundary, permission catalog and administration. |
-| [Database and migrations](DATABASE_MIGRATIONS.md) | Migration/checksum policy, forward migration inventory and database protections. |
-| [Operations](OPERATIONS.md) | Topology, ordinary deployments, health, graceful shutdown, backup/restore and integrity audit. |
+| [Manager product workflows](MANAGER_PRODUCT_WORKFLOWS.md) | Native characteristics, create/recount/archive flows, pre-save article reservations. |
+| [Pricing](PRICING.md) | Matrices/modifiers, exchange rate, rounding, calculated/automatic/manual prices. |
+| [Recount and corrections](RECOUNT_CORRECTIONS.md) | Target validation, lineage, correction requests, stale evidence. |
+| [Repricing](REPRICING.md) | Drafts, authoritative preview, atomic apply and rollback. |
+| [Exports](EXPORTS.md) | Export lifecycle, immutable membership, acknowledgment, price stream, CSV retirement. |
+| [Export templates](EXPORT_TEMPLATES.md) | Template API, editor, immutable publications, template-level catalog fixes. |
+| [Shared export sessions](SHARED_EXPORT_SESSIONS.md) | Private/shared workflows, invitations, attempts and recovery. |
+| [Authentication and RBAC](AUTH_RBAC.md) | OIDC, sessions, active-user/CSRF boundary, permissions. |
+| [Database and migrations](DATABASE_MIGRATIONS.md) | Runner, forward-only rule, lock order, migration inventory 000–080. |
+| [Operations](OPERATIONS.md) | Topology, deployments, health, shutdown, backup/restore, audit. |
+| [Application UX](APPLICATION_UX.md) | Navigation, shared UI primitives, terminology, acceptance boundaries. |
 
-Local October 2026 product workflows: [native characteristics and Manager flows](MANAGER_PRODUCT_WORKFLOWS.md),
-[original product photos](PRODUCT_PHOTOS.md), [reviewed catalog deletion](REVIEWED_CATALOG_DELETION.md),
-[historical reactivation](HISTORICAL_REACTIVATION.md), [durable integration tasks](PRODUCT_INTEGRATION_TASKS.md),
-and [archive/restore visibility](PRODUCT_LIFECYCLE.md). These are implementation
-contracts; real-store and authenticated browser acceptance remain separate.
+Product lifecycle details: [photos](PRODUCT_PHOTOS.md), [archive/restore visibility](PRODUCT_LIFECYCLE.md),
+[reviewed catalog deletion](REVIEWED_CATALOG_DELETION.md), [integration tasks](PRODUCT_INTEGRATION_TASKS.md),
+[historical reactivation (standard protocol)](HISTORICAL_STANDARD_REACTIVATION.md),
+[TEST products](NATIVE_TEST_PRODUCTS.md).
 
-Local technical references: [client development](../client/README.md), [serialized PostgreSQL tests](../server/integration-test/README.md), [synthetic Magento fixture maintenance](../server/test/fixtures/magento-v1/README.md).
+## Magento integration
 
-Scoped first-sync operations: [initial names with legacy history](FIRST_SYNC_INITIAL_NAMES.md).
+| Guide | Scope |
+| --- | --- |
+| [Magento integration](MAGENTO_INTEGRATION.md) | Bindings, categories, successor/publication (H3a/H3b), option creation (H4), recovery. |
+| [Automatic sync](MAGENTO_AUTOMATIC_SYNC.md) | Sync requests, jobs, worker, eligibility, test-product deletion. |
+| [First-sync fields](MAGENTO_FIRST_SYNC_FIELDS.md) | First-sync projection, decisions, receipts, admissions. |
+| [Magento attributes](MAGENTO_ATTRIBUTES.md) | Controlled attribute creation and set membership. |
+| [Scoped option label adapter](MAGENTO_SCOPED_OPTION_LABEL_ADAPTER.md) | External label adapter contract. |
 
-Cross-application presentation: [Amber operations interface](APPLICATION_UX.md)
-describes the local full-application redesign, navigation, shared primitives,
-terminology, read boundaries and fixture-versus-human acceptance.
+## First sync operations (current campaign)
 
-## Current operational runbooks
+Start with the **[first-sync runbook](FIRST_SYNC_RUNBOOK.md)**: order of work, CLI
+index, publication side effects and traps. Per-tool details:
 
-- [Reviewed canonical weight repair](CANONICAL_WEIGHT_REPAIR.md) — exact zero-to-recorded-answer plans, unchanged delivery/prices, immutable per-row audit and controlled inverse. Fresh production review and application remain separate.
+- [History admission batch](FIRST_SYNC_HISTORY_BATCH.md)
+- [CH decisions and keep-local batch](FIRST_SYNC_CH_DECISIONS.md)
+- [Temporary legacy SV retain_remote](FIRST_SYNC_RETAIN_REMOTE.md)
+- [Name completion batch](NAME_COMPLETION_BATCH.md), [initial names](FIRST_SYNC_INITIAL_NAMES.md), [campaign names adapter](FIRST_SYNC_CAMPAIGN_NAMES.md)
+- [Local discovery](FIRST_SYNC_LOCAL_DISCOVERY.md), [local authority batch](FIRST_SYNC_LOCAL_BATCH.md), [exact-SKU campaign](FIRST_SYNC_CAMPAIGN.md)
+- [SV classification](FIRST_SYNC_LOCAL_CLASSIFY.md), [SV campaign](SV_CAMPAIGN.md)
 
-- [Batch completion of missing names from Magento](NAME_COMPLETION_BATCH.md): sequential use of the existing name-completion action, intent/receipt journal, resume and delivery status. No Magento writes.
+## Other runbooks
 
-- [Reviewed bulk correction requests](CORRECTION_REQUEST_BATCH.md) — read-only plans, explicit scope, sequential apply, atomic phase receipts and separate delivery review. Implemented locally; no production run is implied.
+- [Reviewed canonical weight repair](CANONICAL_WEIGHT_REPAIR.md)
+- [Reviewed bulk correction requests](CORRECTION_REQUEST_BATCH.md)
+- [Full-product cutover](FULL_PRODUCT_CUTOVER_RUNBOOK.md): only for installations not yet cut over; production is done.
 
-- [Full-product cutover](FULL_PRODUCT_CUTOVER_RUNBOOK.md) — procedure for installations that have not completed cutover. Current production completed Wave 1 activation/cutover; ordinary deployments follow Operations. Rehearsal and dated production receipts remain separate.
+Technical references: [client development](../client/README.md),
+[serialized PostgreSQL tests](../server/integration-test/README.md),
+[synthetic Magento fixtures](../server/test/fixtures/magento-v1/README.md).
+
+## Open work
+
+- Finish the first sync per category (SV, CH, KL, BR, NM, then silver); see the runbook.
+- Remove legacy SKU dependencies after the mass sync ([retain remote](FIRST_SYNC_RETAIN_REMOTE.md)).
+- Account-onboarding invitations are not implemented ([RBAC](AUTH_RBAC.md#correction-ownership-and-remaining-gap)).
+- Magento attribute/set mutation, complex option types and `url_key` generation remain deferred ([integration](MAGENTO_INTEGRATION.md)).
+- Infrastructure policy (DB exposure, image upgrades, non-root containers, backup schedule/retention/encryption) remains separate operational work ([operations](OPERATIONS.md)).
+- Manual UX evidence for 200% zoom and second-account collaboration ([audit](archive/ux/EXPORT_UX_ACCEPTANCE_AUDIT_POST_UX5_2026-09-26.md#що-ще-потребує-оператора)).
 
 ## Historical archive
 
-[Archive index](archive/README.md) groups export plans, UX audits, investigations and implementation/acceptance records. They preserve dates, old findings, rejected alternatives and test counts as historical evidence, **not current behavior contracts**. Current guides do not require reading them to understand the application.
-
-The [consolidation inventory](archive/implementation/DOCUMENTATION_CONSOLIDATION_2026-09-27.md) classifies every original documentation file and records moves/extractions and the inspection baseline.
-
-## Deferred work and operationally pending items
-
-- **Wave 2 catalog + integration self-service:** repository checkpoints H0 (opt-in v4), H1 (bounded readiness/discovery/previews), H2 (reviewed single-category creation), H4 (Administrator-attested option creation) H3a (successor preparation/review) and H3b (reviewed publication, exact handoff and controlled name-rule/resync actions) are implemented. Remote/manual acceptance of these new workflows remains required. These repository checkpoints do not imply production deployment. Current production activation, historical cutover and CSV retirement are complete; future installations retain the explicit [runbook](FULL_PRODUCT_CUTOVER_RUNBOOK.md).
-- **Historical data quality:** new duplicate/lineage/exclusion or unapproved mapping cases remain case-specific work; completed production collision/delivery reconciliation is not pending. Cutover does not silently repair them. See [Exports](EXPORTS.md#acceptance-boundary).
-- **Target template/Magento acceptance:** source/alias evidence, frozen business mappings (including KL zero semantics, narrow SV names and deferred AR values), measurement units and fresh controlled Check Data/import decisions. Existing template support, publication and recovery are implemented; an old successful Check Data run is not blanket acceptance.
-- **Manual UX acceptance evidence:** the latest retained browser audit still leaves genuine 200% zoom and second-account collaboration scenarios unverified manually. Automated coverage and implemented UX are separate from this operational evidence gap; see the [audit](archive/ux/EXPORT_UX_ACCEPTANCE_AUDIT_POST_UX5_2026-09-26.md#що-ще-потребує-оператора).
-- **Account-onboarding invitations:** not implemented. Scoped export-session invitations are implemented and grant no global rights; see [RBAC](AUTH_RBAC.md#correction-ownership-and-remaining-gap).
-- **Magento integration extension:** the [automatic workflow](MAGENTO_AUTOMATIC_SYNC.md), production publication, CREATE acceptance and reconciled product-CSV retirement are complete. New bindings/routes still need explicit review and controlled acceptance. Attribute/set mutation, complex option types and explicit `url_key` generation remain deferred; ordinary reviewed option creation is implemented in H4. Full export review is bounded, not server-streamed/windowed. See [Magento integration](MAGENTO_INTEGRATION.md) and [Exports](EXPORTS.md#product-csv-retirement).
-- **Infrastructure policy:** production database exposure, runtime/image upgrades and pin/update policy, non-root/read-only container work, backup scheduling/retention/encryption/off-host monitoring remain separate operational work. Current topology and backup boundaries are in [Operations](OPERATIONS.md).
-
-These items do not reopen completed PR/phase implementations. Current production receipts are recorded in [Project context](../PROJECT_CONTEXT.md#implementation-and-deployment-status); old audits and rehearsals describe their dated environments, not current production blockers.
+[Archive index](archive/README.md): plans, audits, investigations, rehearsals and
+dated review records. Do not execute an archived runbook as a current procedure.

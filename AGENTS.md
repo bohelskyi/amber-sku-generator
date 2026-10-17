@@ -9,6 +9,8 @@
 
 ### Which doc to read
 
+The full index is [`docs/README.md`](docs/README.md); `docs/archive/` is dated history only.
+
 | Task area | Required context |
 | --- | --- |
 | Authentication, RBAC, users, access states | [`docs/AUTH_RBAC.md`](docs/AUTH_RBAC.md) |
@@ -20,6 +22,10 @@
 | Shared export sessions | [`docs/SHARED_EXPORT_SESSIONS.md`](docs/SHARED_EXPORT_SESSIONS.md) |
 | Full-product cutover | [`docs/FULL_PRODUCT_CUTOVER_RUNBOOK.md`](docs/FULL_PRODUCT_CUTOVER_RUNBOOK.md) |
 | Export snapshots and CSV | [`docs/EXPORTS.md`](docs/EXPORTS.md) |
+| Magento integration, bindings, publication | [`docs/MAGENTO_INTEGRATION.md`](docs/MAGENTO_INTEGRATION.md) |
+| Automatic Magento sync, jobs, worker | [`docs/MAGENTO_AUTOMATIC_SYNC.md`](docs/MAGENTO_AUTOMATIC_SYNC.md) |
+| First sync: field contract | [`docs/MAGENTO_FIRST_SYNC_FIELDS.md`](docs/MAGENTO_FIRST_SYNC_FIELDS.md) |
+| First sync: operator scripts and order of work | [`docs/FIRST_SYNC_RUNBOOK.md`](docs/FIRST_SYNC_RUNBOOK.md) |
 | Database and migrations | [`docs/DATABASE_MIGRATIONS.md`](docs/DATABASE_MIGRATIONS.md) |
 | Deployment, health, backup, restore | [`docs/OPERATIONS.md`](docs/OPERATIONS.md) |
 
@@ -37,7 +43,7 @@
 
 ## Migration rules
 
-- Never edit any already-applied migration; add a forward migration. Accepted migrations `000`–`040` are immutable history; see [the migration guide](docs/DATABASE_MIGRATIONS.md).
+- Never edit any already-applied migration; add a forward migration. Every committed migration (currently `000`–`080`) is immutable history; see [the migration guide](docs/DATABASE_MIGRATIONS.md).
 - Preserve checksum and line-ending canonicalization. Never rewrite stored checksums to hide a mismatch.
 - Keep each migration transactional and safe for fresh, known upgrade/checkpoint, repeated-startup, and rollback paths as applicable.
 - Migration DDL uses a dedicated no-query-timeout connection. Runtime DDL is not a substitute for migrations.
