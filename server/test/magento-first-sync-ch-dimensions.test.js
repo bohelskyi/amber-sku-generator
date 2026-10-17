@@ -131,16 +131,31 @@ test('CH decimal comparison stays fail-closed for invalid, empty and unproven in
   assert.equal(metadata(other, 'dovzhyna_vyrobu').localAuthority, undefined);
 });
 
-test('approved magento_managed CH SEO is left to Magento instead of blocking first sync', () => {
+test('approved magento_managed CH SEO becomes an automatic terminal remote_retained receipt', () => {
   const owned = projectFirstSyncFields(chFixture());
   assert.equal(field(owned, 'meta_title').reason, 'DERIVED_FORWARD_MISMATCH');
   const managed = projectFirstSyncFields(chFixture({ policies: { meta_title: 'magento_managed' } }));
-  assert.equal(field(managed, 'meta_title'), undefined);
-  assert.deepEqual(managed.coverage.fields.find(value => value.target === 'meta_title'),
-    { target: 'meta_title', scope: 'all', state: 'ignored', reason: 'MAGENTO_MANAGED_DERIVED_SEO' });
+  assert.equal(metadata(managed, 'meta_title').remoteRetention, 'magento-managed-seo-v1');
   assert.equal(managed.blockers.some(blocker => blocker.target === 'meta_title'), false);
-  // A non-terminal earlier decision for the field still blocks completion.
+  const prepared = prepareProgress(managed, null), seo = row(prepared, 'meta_title');
+  assert.equal(seo.record.state, 'remote_retained');
+  assert.equal(seo.record.after, null);
+  assert.deepEqual([seo.record.source.decision, seo.record.source.retention, seo.record.source.field],
+    ['retain_remote', 'magento_managed_seo', 'meta_title']);
+  assert.deepEqual([seo.canKeepLocal, seo.canAcceptRemote, Object.hasOwn(seo, 'canRetainRemote'), seo.terminal], [false, false, false, true]);
+  assert.equal(prepared.blockers.some(blocker => blocker.target === 'meta_title'), false);
+  // An earlier non-terminal record of the field is settled, not left unsettled.
   const prior = prepareProgress(owned, null).rows.find(value => value.target === 'meta_title').record;
-  assert.equal(prepareProgress(managed, { fields: [prior] }).blockers
-    .some(blocker => blocker.code === 'FIRST_SYNC_UNSETTLED_PRIOR_FIELD' && blocker.target === 'meta_title'), true);
+  assert.equal(prior.state, 'review_required');
+  const settled = prepareProgress(managed, { fields: [prior] });
+  assert.equal(row(settled, 'meta_title').record.state, 'remote_retained');
+  assert.equal(settled.blockers.some(blocker => blocker.target === 'meta_title'), false);
+  // Equal or both-empty SEO keeps its ordinary receipt; an explicit choice is refused.
+  const equal = projectFirstSyncFields(chFixture({ policies: { meta_title: 'magento_managed' }, remote: { meta_title: 'Amber CH title' } }));
+  assert.equal(row(prepareProgress(equal, null), 'meta_title').record.state, 'equal');
+  assert.throws(() => prepareProgress(managed, null, [{ target: 'meta_title', scope: 'all', choice: 'keep_local' }]),
+    { code: 'MAGENTO_FIRST_SYNC_DECISION_NOT_AVAILABLE' });
+  // An unknown Magento read is never retained.
+  const unknown = projectFirstSyncFields(chFixture({ policies: { meta_title: 'magento_managed' }, remote: { meta_title: { nested: true } } }));
+  assert.notEqual(row(prepareProgress(unknown, null), 'meta_title').record.state, 'remote_retained');
 });

@@ -32,6 +32,7 @@ const CH_DECIMALS = Object.freeze({ dovzhyna_namystyny: 'bead_length', diametr_n
   dovzhyna_vyrobu: 'rosary_length' });
 const CH_LOCAL_AUTHORITY = 'ch-bead-dimensions-v1';
 const MAGENTO_MANAGED_SEO = new Set(['meta_title', 'meta_description']);
+const MAGENTO_MANAGED_SEO_RETENTION = 'magento-managed-seo-v1';
 const present = value => value !== null && value !== undefined
   && !(typeof value === 'string' && value.trim() === '');
 const scalar = value => value === null || typeof value === 'boolean'
@@ -360,7 +361,7 @@ function projectFirstSyncFields(input) {
       && INFORMATION[category]?.includes(descriptor.key) && !descriptor.aliases.length && scope === 'all'
       && direct.wrappers.every(wrapper => wrapper === 'text'))) descriptor = null;
     let persistence = 'derived', local = { known: true, present: false }, kind = 'derived', type = 'text';
-    let unit, scale, constraints, prospective, reverseCandidates, comparison, importBlocker = null, semanticRequired = false, localAuthority = null;
+    let unit, scale, constraints, prospective, reverseCandidates, comparison, importBlocker = null, semanticRequired = false, remoteRetention = null, localAuthority = null;
     if (target === 'name') {
       persistence = 'name'; kind = 'name'; local = effectiveLocalName(product, evaluated, scope);
       descriptor = { kind: 'name', field: scope === 'all' ? 'magento_name_override.values.all' : 'magento_name_override.values.en' };
@@ -506,17 +507,18 @@ function projectFirstSyncFields(input) {
       descriptor = { kind:'seo_snapshot', field:target };
     }
     // An approved magento_managed policy means ordinary delivery never writes
-    // this derived SEO output, so first sync has nothing to reconcile for it.
-    if (kind === 'derived' && !direct && MAGENTO_MANAGED_SEO.has(target) && !reason
-      && policy?.reviewState === 'approved' && policy.policy === 'magento_managed') {
-      coverage.push({ target, scope, state: 'ignored', reason: 'MAGENTO_MANAGED_DERIVED_SEO' }); continue;
-    }
+    // this derived SEO output: Magento keeps its value. The progress plan records
+    // that as a terminal remote_retained receipt (no Amber or Magento write), which
+    // also settles any earlier non-terminal record of the field.
+    const magentoManagedSeo = kind === 'derived' && !direct && MAGENTO_MANAGED_SEO.has(target) && !reason
+      && policy?.reviewState === 'approved' && policy.policy === 'magento_managed';
+    if (magentoManagedSeo) remoteRetention = MAGENTO_MANAGED_SEO_RETENTION;
     if (unit && remote.known) remote.unit = unit;
     const receipt = receipts.get(scope + '/' + target);
     if (!receipt && importBlocker && local.known && !local.present && remote.known && remote.present) reason ||= importBlocker;
     const outwardPresent = kind === 'derived' ? prospective?.verified && present(prospective.value)
       : local.known && local.present;
-    if (!receipt && outwardPresent && remote.known && !remote.present
+    if (!receipt && outwardPresent && remote.known && !remote.present && !magentoManagedSeo
       && policy?.policy !== 'authoritative_create_update') reason ||= 'OUTWARD_POLICY_NOT_AUTHORITATIVE';
     if (reverseCandidates?.length > 256) { reason ||= 'REVERSE_DOMAIN_LIMIT_EXCEEDED'; reverseCandidates = []; }
     const source = { kind: descriptor?.kind || 'derived', ...(descriptor?.key ? { key: descriptor.key } : {}),
@@ -552,7 +554,7 @@ function projectFirstSyncFields(input) {
       requiresRuntimeValidation: ['information', 'weight', 'price', 'characteristic', 'name'].includes(persistence),
       ...(persistence === 'weight' ? { mirrorAnswerKey: 'weight', setterContract: 'canonical-g-scale3-and-answer-coherence' } : {}),
       ...(persistence === 'price' ? { setterContract: 'manual-UAH-scale2-preserve-server-pricing-baseline' } : {}),
-      ...(importBlocker ? { importBlocker } : {}),
+      ...(importBlocker ? { importBlocker } : {}), ...(remoteRetention ? { remoteRetention } : {}),
       ...(localAuthority && !reason ? { localAuthority } : {}), ...(enReason && scope === 'en' ? { readReason: enReason } : {}),
       ...(reason ? { reason } : {}) });
     coverage.push({ target, scope, state: 'projected', persistence });

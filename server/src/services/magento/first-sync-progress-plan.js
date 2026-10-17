@@ -1,6 +1,6 @@
 const { hash } = require('./binding-contract');
-// remote_retained stays terminal for receipts recorded before the temporary
-// retain_remote decision was removed; no new decision produces it.
+// remote_retained is terminal: the automatic magento_managed SEO receipt, and legacy
+// SV receipts recorded before the explicit retain_remote choice was removed.
 const TERMINAL = new Set(['imported','equal','optional_empty','outward_verified','name_received','seo_received','remote_retained']);
 const CORRECTION_REASONS = new Set(['FIRST_SYNC_LEGACY_SKU_CORRECTION_REQUIRED',
   'FIRST_SYNC_LEGACY_MISSING_ONLY_REVIEW_REQUIRED', 'FIRST_SYNC_LEGACY_WEIGHT_IDENTITY_REVIEW_REQUIRED',
@@ -54,6 +54,12 @@ function prepareProgress(projection, progress, decision = null) {
       status=seo?'seo_pending_initial_readback':'imported';after=reverseValues ? reverseValues[0] : field.remote.value;
       reason=seo?'ADMINISTRATOR_ACCEPTED_REMOTE_SEO':'ADMINISTRATOR_ACCEPTED_REMOTE';
     } else if (status==='imported') after=result.importValue;
+    // Approved magento_managed SEO: Magento keeps its value. Automatic terminal
+    // receipt; equal/empty fields keep their ordinary receipts.
+    const managedSeo=meta.remoteRetention==='magento-managed-seo-v1' && !seo && field.kind==='derived'
+      && field.remote.known===true && field.mapping.proven && !selected && !priorKeep
+      && !['equal','optional_empty'].includes(status);
+    if (managedSeo) { status='remote_retained';reason='MAGENTO_MANAGED_SEO_REMOTE_RETAINED';after=null; }
     if (status==='imported' && !supported) {
       status='review_required';reason=meta.importBlocker || 'CANONICAL_' + meta.persistence.toUpperCase() + '_SETTER_UNSUPPORTED';
       after=field.local.value ?? null;
@@ -74,6 +80,7 @@ function prepareProgress(projection, progress, decision = null) {
       ...(!meta.source.key && !meta.source.field ? {field:field.target}:{}),manifestHash,
       ...(priorKeep || selected?.choice==='keep_local' ? {decision:'keep_local'}:{}),
       ...(selected?.choice==='accept_remote' ? {decision:'accept_remote'}:{}),
+      ...(managedSeo ? {decision:'retain_remote',retention:'magento_managed_seo'}:{}),
       ...(seo && prior?.state==='seo_pending_initial_readback' && selected?.choice==='keep_local'
         ? {seoAuthorityChange:{revision:prior.revision,evidence:Object.fromEntries(['target','scope','state','before','remote','after','source','mappingHash'].map(k=>[k,prior[k]]))}} : {})};
     const record={target:field.target,scope:field.scope,state,before:field.local,remote:field.remote,

@@ -1,7 +1,7 @@
 # Legacy SV remote retention in first sync (removed) and retained-value import
 
-**Status: the temporary decision `retain_remote` is removed** (migration
-[081](../server/migrations/081_first_sync_remote_retention_closed.sql)). Receipts
+**Status: the temporary legacy SV decision `retain_remote` is removed** (migration
+[082](../server/migrations/082_first_sync_remote_retention_closed.sql)). Receipts
 recorded with it stay terminal, immutable first-sync history. Their values are
 imported into Amber with the reviewed command described below.
 
@@ -32,11 +32,15 @@ kept only for lookup; Amber no longer decodes or regenerates them. See
    [historical source support](EXPORT_TEMPLATES.md#historical-source-support).
    Published templates keep v1 until an explicit reviewed update, new template
    publication and binding successor.
-3. The `retain_remote` choice, `canRetainRemote`, the `remoteRetention` projection
-   marker and `first-sync-retain-remote.js` are removed. A request with
-   `choice: retain_remote` is invalid. Migration 081 refuses any new
-   `remote_retained` row (`FIRST_SYNC_REMOTE_RETENTION_CLOSED`); the state stays in
-   the terminal and completion sets so existing sessions remain complete.
+3. The explicit `retain_remote` choice, `canRetainRemote`, the legacy
+   `remoteRetention` projection marker and `first-sync-retain-remote.js` are
+   removed. A request with `choice: retain_remote` is invalid. Migration 082 refuses
+   any new legacy semantic `remote_retained` row (`FIRST_SYNC_REMOTE_RETENTION_CLOSED`);
+   the state stays in the terminal and completion sets so existing sessions remain
+   complete. The separate automatic receipt for `magento_managed` SEO
+   (`source.retention: magento_managed_seo`, migration 081; see
+   [CH first-sync decisions](FIRST_SYNC_CH_DECISIONS.md)) is unchanged and is never
+   imported.
 
 ## Importing retained values
 
@@ -48,7 +52,7 @@ its own audit receipt `product.magento_retained_values_imported`.
 For one product it requires: Administrator with `export_templates.manage`,
 `exports.view` and `products.recount`; the current published binding; a current
 legacy SV product whose first sync is complete (`ordinary`) and has
-`remote_retained` fields. Each retained field is checked against a fresh GET-only
+legacy semantic `remote_retained` fields (SEO receipts are skipped). Each retained field is checked against a fresh GET-only
 Magento observation and a no-receipt projection of the current publication:
 
 | Field status | Meaning |
@@ -86,7 +90,8 @@ the products from the retained receipts:
 ```sql
 SELECT DISTINCT s.public_sku FROM magento_first_sync_fields f
 JOIN magento_first_sync_sessions s ON s.id=f.session_id
-WHERE f.state='remote_retained' ORDER BY 1;
+WHERE f.state='remote_retained' AND f.evidence->'source'->>'retention' IS NULL
+  AND f.evidence->'source'->>'kind'='semantic' ORDER BY 1;
 ```
 
 Each output line is one product: `importable` (preview), `imported` /

@@ -1,5 +1,6 @@
-// Reviewed import of values recorded by the removed first-sync decision
-// retain_remote (state remote_retained, migration 080). Historical internal SKUs
+// Reviewed import of values recorded by the removed legacy SV first-sync decision
+// retain_remote (state remote_retained, migration 080). The automatic
+// magento_managed SEO receipts (081) are not imports and are never selected. Historical internal SKUs
 // are opaque identifiers (catalog owner, 2026-10-14), so a legacy SV answer that
 // Amber lacks may now be filled missing-only from Magento. The completed first-sync
 // ledger stays immutable history; this command writes only the Amber product
@@ -44,6 +45,7 @@ async function retainedRows(client, config, publicIdentityId) {
       s.completed_at IS NOT NULL completed
     FROM magento_first_sync_fields f JOIN magento_first_sync_sessions s ON s.id=f.session_id
     WHERE s.origin_hash=$1 AND s.public_product_identity_id=$2 AND f.state='remote_retained'
+      AND f.evidence->'source'->>'retention' IS NULL AND f.evidence->'source'->>'kind'='semantic'
     ORDER BY f.scope,f.target`, [c.originHash(config.baseUrl), publicIdentityId])).rows;
 }
 

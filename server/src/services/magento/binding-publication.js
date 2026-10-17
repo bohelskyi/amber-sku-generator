@@ -161,7 +161,10 @@ async function boundedPreview(config,input,options={}){
     }
     scope.checkEvidence(result);
   }}));
-  if(metadata.draft.revision!==local.draft.revision || c.hash(observation.schema)!==local.draft.schemaFingerprint)
+  // The draft snapshot's integrity was verified against its stored fingerprint on read.
+  const observed=(schema)=>c.observationFingerprint(schema,[local.draft.bindings,local.current?.bindings]);
+  const schemaHash=observed(observation.schema);
+  if(metadata.draft.revision!==local.draft.revision || schemaHash!==observed(local.draft.schema))
     throw c.error(409,'MAGENTO_BINDING_OBSERVATION_CHANGED','Prepare a draft with fresh Magento metadata');
   result.lostRoutes=local.current?scopes(local.current).filter(r=>!scopes(local.draft).includes(r)):[];
   const validation=local.validation;
@@ -188,7 +191,7 @@ async function boundedPreview(config,input,options={}){
   const missingCreate=newRoutes.filter((route)=>!checked.some((p)=>p.kind==='create' && p.routeKey===route && p.sendable));
   const blockers=[...(!validation.valid?validation.diagnostics:[]),...missingCreate.map((routeKey)=>({code:'REPRESENTATIVE_CREATE_REQUIRED',routeKey})),
     ...checked.filter((p)=>p.kind==='current' && result.affected.some((a)=>a.productId===p.productId) && !p.sendable).map((p)=>({code:'AFFECTED_CURRENT_PREVIEW_BLOCKED',productId:p.productId}))];
-  const proof={localHash:local.localHash,validation:validation.diagnostics,schemaHash:c.hash(observation.schema),nodes:observation.categories,
+  const proof={localHash:local.localHash,validation:validation.diagnostics,schemaHash,nodes:observation.categories,
     ...result,projectionDigest:projectionDigest.digest('hex'),checked:checked.map(({observedAt,...p})=>{void observedAt;return p;}),blockers};
   const previewToken=c.hash(clean(proof));
   const response={bindingRevisionId:local.draft.id,expectedRevision:local.draft.revision,expectedCurrentId:local.current?.id || null,

@@ -575,7 +575,8 @@ creates a successor nor chooses answers or changes a receipt automatically. Thes
 repository tests do not establish production acceptance.
 
 The temporary `retain_remote` decision (2026-10-14, state `remote_retained`) is
-removed; migration 081 refuses new retained rows and existing receipts stay
+removed; migration 082 refuses new legacy retained rows (the automatic
+`magento_managed` SEO receipt of 081 is unchanged) and existing receipts stay
 terminal. Their values are imported with the reviewed command in
 [legacy SV remote retention](FIRST_SYNC_RETAIN_REMOTE.md#importing-retained-values).
 

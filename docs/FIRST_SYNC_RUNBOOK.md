@@ -100,7 +100,7 @@ Every publication has side effects on products that are **not yet synced**:
 | --- | --- | --- |
 | `first-sync-history-batch.js` | Legacy history admission, ≤50 per scope | [history batch](FIRST_SYNC_HISTORY_BATCH.md) |
 | `first-sync-keep-local.js` | Amber-wins decisions (price, rounding weight, CH dimensions) | [CH decisions](FIRST_SYNC_CH_DECISIONS.md) |
-| `first-sync-retained-import.js` | Import values left in Magento by the removed retain_remote | [retained import](FIRST_SYNC_RETAIN_REMOTE.md#importing-retained-values) |
+| `first-sync-retained-import.js` | Import legacy SV values left in Magento by the removed retain_remote | [retained import](FIRST_SYNC_RETAIN_REMOTE.md#importing-retained-values) |
 | `name-completion-batch.js` | Fill missing names from Magento | [name completion](NAME_COMPLETION_BATCH.md) |
 | `first-sync-initial-names.js` | Initial names for `NAME_BASELINE_REQUIRED` | [initial names](FIRST_SYNC_INITIAL_NAMES.md) |
 | `first-sync-local-discovery.js`, `first-sync-local-batch.js` | Sealed local authority packets (≤10) | [discovery](FIRST_SYNC_LOCAL_DISCOVERY.md), [local batch](FIRST_SYNC_LOCAL_BATCH.md) |
@@ -116,7 +116,6 @@ Every publication has side effects on products that are **not yet synced**:
 
 - After the mass sync: run `first-sync-retained-import.js`; publish the v2 source-support
   template and binding successor for NM/AR (see [retained import](FIRST_SYNC_RETAIN_REMOTE.md)).
-- Ignore volatile country labels in the Magento schema fingerprint.
 - `first-sync-keep-local.js` counts an equal-name
   `name_received` receipt as an import; use `--allow-imports` when the preview lists no imports.
 - Successor preparation could carry unchanged reviewed category paths instead of

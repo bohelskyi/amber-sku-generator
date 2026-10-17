@@ -5,7 +5,7 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const {Client,Pool}=require('pg'),{execFile}=require('node:child_process'),{promisify}=require('node:util');
 const path=require('node:path'),{randomUUID}=require('node:crypto');
 const fixture=require('../test/fixtures/legacy-sv-schema6');
-test('081 closes legacy SV remote retention; retained values and legacy material/colour import missing-only',async t=>{
+test('082 closes legacy SV remote retention; retained values and legacy material/colour import missing-only',async t=>{
   const source=new URL(process.env.TEST_DATABASE_URL||'');assert.equal(source.hostname,'127.0.0.1');assert.equal(source.port,'55432');assert.ok(source.pathname.endsWith('_test'));
   const name='amber_retained_'+process.pid+'_test',control=new Client({connectionString:source.toString()});await control.connect();let created=false,db;
   try{
@@ -93,9 +93,9 @@ test('081 closes legacy SV remote retention; retained values and legacy material
       (SELECT count(*)::int FROM magento_first_sync_progress) progress`)).rows[0];
     const answers=async()=>(await actual(x.id)).details.answers;
 
-    await t.test('081 closes the state for new rows; 080 history and repeated startup keep checksums',async()=>{
+    await t.test('082 closes the legacy state for new rows; 080/081 history and repeated startup keep checksums',async()=>{
       const runner=require('../src/db/run-migrations'),fs=require('node:fs/promises');
-      for(const file of ['080_first_sync_remote_retained.sql','081_first_sync_remote_retention_closed.sql']){
+      for(const file of ['080_first_sync_remote_retained.sql','081_first_sync_magento_managed_seo.sql','082_first_sync_remote_retention_closed.sql']){
         const sql=await fs.readFile(path.resolve(__dirname,'../migrations',file),'utf8');
         assert.equal((await db.query('SELECT checksum FROM schema_migrations WHERE name=$1',[file])).rows[0].checksum,runner.getMigrationChecksum(sql));
       }
@@ -104,6 +104,9 @@ test('081 closes legacy SV remote retention; retained values and legacy material
       assert.deepEqual((await db.query('SELECT name,checksum FROM schema_migrations ORDER BY name')).rows,before);
       assert.match((await db.query("SELECT pg_get_constraintdef(oid) def FROM pg_constraint WHERE conname='magento_first_sync_fields_state_check'")).rows[0].def,/remote_retained/);
       assert.equal((await db.query("SELECT count(*)::int n FROM pg_trigger WHERE tgname='first_sync_field_closed_retention' AND tgenabled='O'")).rows[0].n,1);
+      // Only the legacy semantic retention is closed; the automatic magento_managed SEO receipt stays admitted.
+      assert.match((await db.query("SELECT pg_get_triggerdef(oid) def FROM pg_trigger WHERE tgname='first_sync_field_closed_retention'")).rows[0].def,
+        /remote_retained.*retention.*IS DISTINCT FROM 'magento_managed_seo'/);
     });
     await t.test('first sync now offers legacy colour as a missing-only import; retain_remote is refused',async()=>{
       const before=await canonical(),review=await firstSync.review(config,selection,options);
@@ -119,8 +122,8 @@ test('081 closes legacy SV remote retention; retained values and legacy material
       assert.equal((await ledgerCounts()).fields,0);
     });
     let retained;
-    await t.test('historical retained receipts (recorded before 081) remain terminal and complete the session',async()=>{
-      // Reproduce the pre-081 ledger exactly as the removed decision recorded it.
+    await t.test('historical retained receipts (recorded before 082) remain terminal and complete the session',async()=>{
+      // Reproduce the pre-082 ledger exactly as the removed decision recorded it.
       const obs=await observation(),inspection=await firstSync.inspect(config,obs,options);
       assert.equal(inspection.mode,'first');
       // The removed decision recorded the planner rows before canonical validation.
@@ -195,11 +198,52 @@ test('081 closes legacy SV remote retention; retained values and legacy material
         assert.equal(binding.bindings.options.find(o=>o.bindingKey===attribute.bindingKey&&o.evaluatedOutput===evaluated.base[target]&&o.reviewState==='approved').optionId,remoteValues[target]);
       }
     });
-    await t.test('the database refuses any new retained receipt even inside the ledger transaction',async()=>{
+    await t.test('the database refuses any new legacy retained receipt even inside the ledger transaction',async()=>{
       const session=(await db.query('SELECT * FROM magento_first_sync_sessions LIMIT 1')).rows[0];
       await assert.rejects(db.query(`INSERT INTO magento_first_sync_fields(session_id,revision,target,scope,state,evidence)
         VALUES($1,$2,'kolir','all','remote_retained',$3::jsonb)`,[session.id,Number(session.revision)+1,JSON.stringify(retained[0].evidence)]),
       /FIRST_SYNC_REMOTE_RETENTION_CLOSED/);
+    });
+    await t.test('081 admits the magento_managed SEO retained shape and keeps the 080 shape strict',async()=>{
+      const runner=require('../src/db/run-migrations'),fs=require('node:fs/promises');
+      const sql=await fs.readFile(path.resolve(__dirname,'../migrations/081_first_sync_magento_managed_seo.sql'),'utf8');
+      assert.equal((await db.query("SELECT checksum FROM schema_migrations WHERE name='081_first_sync_magento_managed_seo.sql'")).rows[0].checksum,runner.getMigrationChecksum(sql));
+      const client=await db.connect();
+      try{
+        await client.query('BEGIN');
+        // The CHECK constraint alone, without the ledger triggers and foreign keys.
+        await client.query('CREATE TEMP TABLE shape_probe (LIKE magento_first_sync_fields INCLUDING CONSTRAINTS INCLUDING DEFAULTS) ON COMMIT DROP');
+        const seo={target:'meta_title',scope:'all',state:'remote_retained',before:{known:true,present:true,value:'Amber title'},
+          remote:{known:true,present:true,value:'Magento title'},after:null,
+          source:{kind:'derived',field:'meta_title',routeKey:'CH:all',decision:'retain_remote',retention:'magento_managed_seo'}};
+        let probe=0;
+        const insert=async evidence=>{
+          await client.query(`SAVEPOINT p${++probe}`);
+          try{
+            await client.query(`INSERT INTO shape_probe(session_id,revision,target,scope,state,evidence) SELECT session_id,revision+1000+$4,$1,$2,$3,$5::jsonb FROM magento_first_sync_fields LIMIT 1`,
+              [evidence.target,evidence.scope,evidence.state,probe,JSON.stringify(evidence)]);
+            await client.query(`RELEASE SAVEPOINT p${probe}`);return true;
+          }catch(error){await client.query(`ROLLBACK TO SAVEPOINT p${probe}`);assert.equal(error.constraint,'first_sync_remote_retained_shape',error.message);return false;}
+        };
+        assert.equal(await insert(seo),true);
+        assert.equal(await insert({...seo,target:'meta_description',scope:'en',source:{...seo.source,field:'meta_description'}}),true);
+        assert.equal(await insert({...seo,remote:{known:true,present:false,value:''}}),true,'an empty Magento SEO value is retained as read');
+        for(const malformed of [
+          {...seo,after:'Amber title'},
+          {...seo,remote:{known:false}},
+          {...seo,source:{...seo.source,field:'meta_description'}},
+          {...seo,target:'name',source:{...seo.source,field:'name'}},
+          {...seo,scope:'uk'},
+          {...seo,source:{...seo.source,kind:'semantic'}},
+          {...seo,source:{...seo.source,retention:undefined}},
+          {...seo,state:'equal'},
+          {target:'kolir',scope:'all',state:'remote_retained',before:{known:true,present:false},remote:{known:true,present:true,value:'1'},after:null,
+            source:{kind:'semantic',decision:'retain_remote',retention:'magento_managed_seo'}},
+        ])assert.equal(await insert(malformed),false,JSON.stringify(malformed));
+        await client.query('ROLLBACK');
+      }finally{client.release();}
+      const guard=(await db.query("SELECT prosrc FROM pg_proc WHERE proname='guard_first_sync_evidence'")).rows[0].prosrc;
+      assert.match(guard,/magento_managed_seo/);assert.match(guard,/FIRST_SYNC_REMOTE_RETENTION_UNPROVEN/);
     });
   }finally{if(db)await db.end();if(created)await control.query('DROP DATABASE '+name);await control.end();}
 });
