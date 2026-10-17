@@ -124,9 +124,15 @@ async function captureCurrent(client,observation,history,progress,reject) {
   // Unknown bytes/membership can hide this SKU. Never infer absence from an
   // empty indexed-membership query, nor waive corrupt/unindexed retained files.
   if(retained.diagnostics.length) return reject('FIRST_SYNC_RETAINED_FILES_UNRESOLVED',{legacySnapshotFlag});
-  if(input.members.some(m=>Number(m.product_id)===i.productId)
-    || retained.snapshots.some(s=>s.memberIds.includes(i.productId))
-    || retained.proposed.some(m=>Number(m.product_id)===i.productId)) return reject('FIRST_SYNC_RETAINED_FILE_REVIEW_REQUIRED',{legacySnapshotFlag});
+  const memberOf=new Set([...input.members.filter(m=>Number(m.product_id)===i.productId).map(m=>m.snapshot_id),
+    ...retained.snapshots.filter(s=>s.memberIds.includes(i.productId)).map(s=>s.snapshotId),
+    ...retained.proposed.filter(m=>Number(m.product_id)===i.productId).map(m=>m.snapshot_id)]);
+  // Only a recorded migration-082 disposition of the exact stored bytes resolves
+  // a file's membership. Products outside such files keep their exact proof hash.
+  const dispositions=memberOf.size
+    ? (await require('./retained-export-disposition').resolvedSnapshotsOnClient(client,retained,i.originHash)).filter(d=>memberOf.has(d.snapshotId))
+    : [];
+  if([...memberOf].some(id=>!dispositions.some(d=>d.snapshotId===id))) return reject('FIRST_SYNC_RETAINED_FILE_REVIEW_REQUIRED',{legacySnapshotFlag});
   // Migration 032 can set this flag from cursor/ranges alone. Canonical cutover
   // accepts these historical indicators; they are not delivery receipts. Seal
   // true only: old flag-false receipts keep their exact v1 proof and price-stream
@@ -134,7 +140,8 @@ async function captureCurrent(client,observation,history,progress,reject) {
   return {format:FORMAT,scope:SCOPE,doesNotAcknowledgeExport:true,identity:i,baseline:base.proof,reviewState:stateView(row),
     ...(legacySnapshotFlag ? {legacySnapshotFlag:true} : {}),
     historyHash:c.hash(history), retainedHash:c.hash({snapshots:retained.snapshots.map(s=>({id:s.snapshotId,fingerprint:s.beforeFingerprint})),
-      diagnostics:retained.diagnostics,events:input.events,cursor:input.state,...(legacySnapshotFlag ? {legacySnapshotFlag:true} : {})}),
+      diagnostics:retained.diagnostics,events:input.events,cursor:input.state,...(legacySnapshotFlag ? {legacySnapshotFlag:true} : {}),
+      ...(dispositions.length ? {dispositions} : {})}),
     rootAdmissionEventId:progress?.historyAdmissionEventId || null};
 }
 async function assessProposal(client,config,observation,{history,progress,facts,evidence}) {

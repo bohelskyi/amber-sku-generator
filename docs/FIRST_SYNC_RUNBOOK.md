@@ -26,6 +26,11 @@ enqueues or writes Magento directly.
      Run `--mode preview --preview-all` to see every blocker in one run, then
      `--mode apply` per scope file. Apply stops at the first non-admitted item; rerun it
      after transient `MAGENTO_TIMEOUT` (already admitted rows report `already_admitted`).
+   - Ordinary legacy products listed in a retained legacy export file report
+     `FIRST_SYNC_RETAINED_FILE_REVIEW_REQUIRED` in the review assessment. Record the
+     file's disposition from Magento readback with
+     [`retained-export-disposition.js`](RETAINED_EXPORT_DISPOSITION.md), then run the
+     history batch for them.
    - Products created by a correction/recount (lifecycle `hold/historical_ambiguity`
      with a correction ID): the batch reports `HISTORY_BATCH_ADMISSION_NOT_AVAILABLE`.
      Use the product problem page action «Дозволити оновлення після переобліку»
@@ -97,6 +102,7 @@ Every publication has side effects on products that are **not yet synced**:
 | Script | Purpose | Doc |
 | --- | --- | --- |
 | `first-sync-history-batch.js` | Legacy history admission, ≤50 per scope | [history batch](FIRST_SYNC_HISTORY_BATCH.md) |
+| `retained-export-disposition.js` | Record a retained export file as imported, from Magento readback | [retained export disposition](RETAINED_EXPORT_DISPOSITION.md) |
 | `first-sync-keep-local.js` | Amber-wins decisions (price, rounding weight, CH dimensions) | [CH decisions](FIRST_SYNC_CH_DECISIONS.md) |
 | `first-sync-retain-remote.js` | Temporary legacy SV retain_remote | [retain remote](FIRST_SYNC_RETAIN_REMOTE.md) |
 | `name-completion-batch.js` | Fill missing names from Magento | [name completion](NAME_COMPLETION_BATCH.md) |
