@@ -1,7 +1,7 @@
 # SV campaign review evidence
 
 This note records the implementation review and bounded synthetic verification
-of the workflow in [SV_CAMPAIGN.md](SV_CAMPAIGN.md). It contains no production
+of the workflow in [SV_CAMPAIGN.md](../../SV_CAMPAIGN.md). It contains no production
 observations, identities or artifacts. Source inspection and disposable local
 PostgreSQL tests establish implementation behavior; they do not establish
 deployment, live Magento readiness or delivery.
@@ -10,10 +10,10 @@ deployment, live Magento readiness or delivery.
 
 | Finding | Reviewed behavior | Main code paths |
 | --- | --- | --- |
-| A helper-only outstanding-work check could race another reviewed handoff. | Canonical controlled preview reports `EXISTING_HANDOFF` for a pending/protected item matching either product or public identity. Apply repeats this check under its existing transaction locks before recording a handoff. Different stale commands fail; replay of the same committed preview returns its prior receipt. | [`binding-controlled-actions.js`](../server/src/services/magento/binding-controlled-actions.js): `inspect`, `apply`; [`sv-campaign-outbound.js`](../server/scripts/sv-campaign-outbound.js): `handoff`. |
-| Initial-name selection previously required history admission even for a genuinely pristine canonical first-sync product. | An explicit `allowPristineFirst: true` option admits only canonical `first`/`first` with strictly null progress and history admission and both admission guards false. The history root remains null. Existing complete-manifest validation and canonical commit remain in use. | [`first-sync-initial-name-plan.js`](../server/scripts/first-sync-initial-name-plan.js): `selectionFor`; [`first-sync-initial-names.js`](../server/scripts/first-sync-initial-names.js): `previewItem`, `runItem`; [`sv-campaign-stages.js`](../server/scripts/sv-campaign-stages.js): names branch. |
-| A names commit persists unresolved field evidence as well as name receipts. Treating every identical prior record as settled skipped later price/weight choices. | `selectChoices` only skips an identical prior row when it is canonically received or remains pending outward confirmation. Persisted conflict/review/unknown rows are reconsidered using the unchanged allowlist, availability and rounding checks. An unrelated persisted size conflict still fails. | [`sv-campaign-policy.js`](../server/scripts/sv-campaign-policy.js): `selectChoices`; [`sv-campaign-policy.test.js`](../server/test/sv-campaign-policy.test.js): full names-manifest regression and unrelated-conflict regression. |
-| Progress omitted early review/uncertain outcomes and verified terminal resume skips. | Every durably processed terminal outcome uses the same progress emission after lane release. Verified terminal resume skips count once. Failed verification or durability does not create successful progress. | [`sv-campaign.js`](../server/scripts/sv-campaign.js): `runProducts`; [`sv-campaign.test.js`](../server/test/sv-campaign.test.js). |
+| A helper-only outstanding-work check could race another reviewed handoff. | Canonical controlled preview reports `EXISTING_HANDOFF` for a pending/protected item matching either product or public identity. Apply repeats this check under its existing transaction locks before recording a handoff. Different stale commands fail; replay of the same committed preview returns its prior receipt. | [`binding-controlled-actions.js`](../../../server/src/services/magento/binding-controlled-actions.js): `inspect`, `apply`; [`sv-campaign-outbound.js`](../../../server/scripts/sv-campaign-outbound.js): `handoff`. |
+| Initial-name selection previously required history admission even for a genuinely pristine canonical first-sync product. | An explicit `allowPristineFirst: true` option admits only canonical `first`/`first` with strictly null progress and history admission and both admission guards false. The history root remains null. Existing complete-manifest validation and canonical commit remain in use. | [`first-sync-initial-name-plan.js`](../../../server/scripts/first-sync-initial-name-plan.js): `selectionFor`; [`first-sync-initial-names.js`](../../../server/scripts/first-sync-initial-names.js): `previewItem`, `runItem`; [`sv-campaign-stages.js`](../../../server/scripts/sv-campaign-stages.js): names branch. |
+| A names commit persists unresolved field evidence as well as name receipts. Treating every identical prior record as settled skipped later price/weight choices. | `selectChoices` only skips an identical prior row when it is canonically received or remains pending outward confirmation. Persisted conflict/review/unknown rows are reconsidered using the unchanged allowlist, availability and rounding checks. An unrelated persisted size conflict still fails. | [`sv-campaign-policy.js`](../../../server/scripts/sv-campaign-policy.js): `selectChoices`; [`sv-campaign-policy.test.js`](../../../server/test/sv-campaign-policy.test.js): full names-manifest regression and unrelated-conflict regression. |
+| Progress omitted early review/uncertain outcomes and verified terminal resume skips. | Every durably processed terminal outcome uses the same progress emission after lane release. Verified terminal resume skips count once. Failed verification or durability does not create successful progress. | [`sv-campaign.js`](../../../server/scripts/sv-campaign.js): `runProducts`; [`sv-campaign.test.js`](../../../server/test/sv-campaign.test.js). |
 
 The local decision policy remains fixed: saved positive Manager price, verified
 UAH for a price change, coherent positive physical weight and only the canonical
@@ -43,7 +43,7 @@ insufficient.
 | `controlled.handoffExclusivityVersion === 1` | `SV_CAMPAIGN_ATOMIC_HANDOFF_GUARD_REQUIRED` |
 | `initialNames.pristineFirstVersion === 1` | `SV_CAMPAIGN_PRISTINE_NAMES_CONTRACT_REQUIRED` |
 
-[`sv-campaign.js`](../server/scripts/sv-campaign.js), `main`, checks these before
+[`sv-campaign.js`](../../../server/scripts/sv-campaign.js), `main`, checks these before
 product processing. Exported outbound `handoff` independently checks the atomic
 handoff capability. The update adds no database migration, persistent campaign
 claim or replacement worker policy.
@@ -56,18 +56,18 @@ the exact observation, a positive history root and the matching progress root.
 An existing session without admission does not become pristine.
 
 `readFirstSyncEligibility` in
-[`first-sync-eligibility.js`](../server/src/services/magento/first-sync-eligibility.js)
+[`first-sync-eligibility.js`](../../../server/src/services/magento/first-sync-eligibility.js)
 has one final runtime return which always includes `admissionGuards`, sourced
 from SQL `EXISTS` facts. Its internal classifier's early ordinary/first/review/
 create returns do not bypass that wrapper. Every return from
-[`first-sync.service.js`](../server/src/services/magento/first-sync.service.js),
+[`first-sync.service.js`](../../../server/src/services/magento/first-sync.service.js),
 `inspect`, retains that `first` object. Requiring both guard values to be exactly
 false is therefore supported for ordinary, historical and pristine lanes.
 
 ## Source lock and connection audit
 
 This budget assumes sequential SKU processing and the supplied canonical runtime
-factory. [`first-sync-campaign-preview.js`](../server/scripts/first-sync-campaign-preview.js),
+factory. [`first-sync-campaign-preview.js`](../../../server/scripts/first-sync-campaign-preview.js),
 `createRuntime`, creates a pool with `max: 4`, connection timeout 5 seconds,
 statement timeout 10 seconds and query timeout 12 seconds. Those limits are not
 a deadline for an entire product stage or a session advisory lock.
@@ -82,12 +82,12 @@ The source-audited peak is three physical helper-pool clients. Controlled handof
 apply and receipt verification outside the SKU guard use at most two including
 A. The following call chains support that bound:
 
-- History: [`first-sync-history-batch.js`](../server/scripts/first-sync-history-batch.js),
+- History: [`first-sync-history-batch.js`](../../../server/scripts/first-sync-history-batch.js),
   `runItem`, finishes `first.review` before calling admission apply. The
-  [`first-sync-cutover-admission.js`](../server/src/services/magento/first-sync-cutover-admission.js)
+  [`first-sync-cutover-admission.js`](../../../server/src/services/magento/first-sync-cutover-admission.js)
   boundary owns B; authority, inspection and transaction use C sequentially.
 - Names: `first-sync-initial-names.runItem` owns the canonical guard, then calls
-  [`first-sync-name-commit.js`](../server/scripts/first-sync-name-commit.js),
+  [`first-sync-name-commit.js`](../../../server/scripts/first-sync-name-commit.js),
   `runNameCommit`. Its Administrator session lock and the canonical transaction's
   Administrator lock use the same C connection.
 - Fields: `first-sync.service.applyWithPreparedValidation` uses one guard;
@@ -100,17 +100,17 @@ A. The following call chains support that bound:
   ledger and local-apply callbacks. These callbacks do not borrow another pool
   client for the local name/field updates.
 
-[`sync-job-transaction.js`](../server/src/services/magento/sync-job-transaction.js),
+[`sync-job-transaction.js`](../../../server/src/services/magento/sync-job-transaction.js),
 `readState`, acquires Administrator authority, shared lifecycle gate, binding
 lock and product/lifecycle rows in that order. Controlled handoff apply uses
-[`access-admin-transaction.js`](../server/src/services/access-admin-transaction.js)
+[`access-admin-transaction.js`](../../../server/src/services/access-admin-transaction.js)
 for Administrator/shared lifecycle locks, then binding and product/name-row
 locks before repeating inspection and recording the handoff.
 
 No called stage helper reacquires A's public-identity advisory key. First-sync
 ledger locking uses a separate `amber_magento_first_sync:<origin>:<identity>`
 key. The automatic worker's
-[`automatic-sync-worker.js`](../server/src/services/magento/automatic-sync-worker.js)
+[`automatic-sync-worker.js`](../../../server/src/services/magento/automatic-sync-worker.js)
 uses `pg_try_advisory_lock` for A's key and skips a locked product. The lane is
 not a durable claim or global worker pause. Handoff exclusivity covers concurrent
 submissions through the canonical controlled-action transaction; it does not
@@ -128,7 +128,7 @@ that the command used resume mode. Emission occurs after releasing the lane.
 Verification failure, global stop and failed journal durability do not count as
 completed progress. Summary counts and journal meanings remain unchanged.
 
-[`sv-campaign-journal.js`](../server/scripts/sv-campaign-journal.js) fsyncs each
+[`sv-campaign-journal.js`](../../../server/scripts/sv-campaign-journal.js) fsyncs each
 hash-chained record and validates sequence, previous hash and record hash. These
 checks detect inconsistent edits, missing/reordered interior records and an
 incomplete trailing record. They do not authenticate operator files or detect
@@ -143,11 +143,11 @@ The pristine extension does not relax `report.evaluation.ready === true` or
 allow arbitrary preview blockers. Initial names still allow only
 `NAME_BASELINE_REQUIRED` alongside otherwise ready canonical evaluation.
 
-[`binding-evidence-products.js`](../server/src/services/magento/binding-evidence-products.js),
+[`binding-evidence-products.js`](../../../server/src/services/magento/binding-evidence-products.js),
 `evaluate`, temporarily suppresses the legacy `magento_name_review_required`
 flag, restoring the original product afterward. That flag alone does not make
 the preview evaluator unready. However,
-[`export-templates/evaluate.js`](../server/src/services/export-templates/evaluate.js)
+[`export-templates/evaluate.js`](../../../server/src/services/export-templates/evaluate.js)
 can produce `effective_names_required` or `effective_names_invalid`; missing
 names may also fail the full-product row contract. `sync-preview.planPreview`
 then emits `PRODUCT_EVALUATION_NOT_READY`.
@@ -165,8 +165,8 @@ database, live Magento reads or remote writes were involved.
 
 | Verification | Observed result |
 | --- | --- |
-| [`sv-campaign-handoff-race.test.js`](../server/integration-test/sv-campaign-handoff-race.test.js) | Two independent pools/physical sessions reached an advisory-lock wait before the barrier was released. One different command committed; the other failed `MAGENTO_CONTROLLED_ACTION_STALE` with `EXISTING_HANDOFF`. There was one pending handoff item, one audit and zero Magento jobs. Replaying the winner's identical preview returned the same receipt with `alreadyApplied: true`. |
-| [`sv-campaign-locks.test.js`](../server/integration-test/sv-campaign-locks.test.js), historical composition | Real history admission, names, Manager field choices and handoff completed while retaining the public-identity lane. |
+| [`sv-campaign-handoff-race.test.js`](../../../server/integration-test/sv-campaign-handoff-race.test.js) | Two independent pools/physical sessions reached an advisory-lock wait before the barrier was released. One different command committed; the other failed `MAGENTO_CONTROLLED_ACTION_STALE` with `EXISTING_HANDOFF`. There was one pending handoff item, one audit and zero Magento jobs. Replaying the winner's identical preview returned the same receipt with `alreadyApplied: true`. |
+| [`sv-campaign-locks.test.js`](../../../server/integration-test/sv-campaign-locks.test.js), historical composition | Real history admission, names, Manager field choices and handoff completed while retaining the public-identity lane. |
 | Same test, pristine composition | A synthetic AG-prefixed pristine identity followed names, Manager field choices and handoff with a null history-admission root. |
 | Same test, resumed composition | Saved names progressed through the zero-choice equal commit into ordinary mode; repeated ordinary processing used the normal handoff path. |
 
@@ -181,11 +181,11 @@ the bounded sequential source audit; it is not an assertion about unrelated
 future runtime changes or arbitrary concurrent workloads.
 
 Focused regression coverage also exists in
-[`magento-controlled-handoff-exclusivity.test.js`](../server/test/magento-controlled-handoff-exclusivity.test.js),
-[`first-sync-initial-names.test.js`](../server/test/first-sync-initial-names.test.js),
-[`sv-campaign-policy.test.js`](../server/test/sv-campaign-policy.test.js),
-[`sv-campaign-stages.test.js`](../server/test/sv-campaign-stages.test.js) and
-[`sv-campaign.test.js`](../server/test/sv-campaign.test.js).
+[`magento-controlled-handoff-exclusivity.test.js`](../../../server/test/magento-controlled-handoff-exclusivity.test.js),
+[`first-sync-initial-names.test.js`](../../../server/test/first-sync-initial-names.test.js),
+[`sv-campaign-policy.test.js`](../../../server/test/sv-campaign-policy.test.js),
+[`sv-campaign-stages.test.js`](../../../server/test/sv-campaign-stages.test.js) and
+[`sv-campaign.test.js`](../../../server/test/sv-campaign.test.js).
 
 The review package contains these final logs under `verification/`:
 

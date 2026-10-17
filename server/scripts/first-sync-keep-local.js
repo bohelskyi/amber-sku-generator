@@ -64,6 +64,9 @@ function planFor(inspection, targets, roundedWeight) {
   const imports = fields.filter(row => row.received !== true && row.status === 'imported').map(key);
   return { choices, imports, notRounding };
 }
+// A name equal to Magento is receipted as name_received without changing Amber;
+// only a row whose fresh status is an import (or an accepted remote value) imports.
+const isImport = row => row.status === 'imported' || row.record?.state === 'imported';
 function validatePrepared(prepared, choices, allowImports) {
   const selected = new Set(choices.map(key));
   for (const row of prepared?.rows || []) {
@@ -71,7 +74,7 @@ function validatePrepared(prepared, choices, allowImports) {
     if (selected.has(key(row))) {
       if (row.record.state !== 'pending_outward_confirmation' || row.record.source?.decision !== 'keep_local')
         fail('KEEP_LOCAL_TRANSITION_CHANGED');
-    } else if (['imported', 'name_received'].includes(row.record.state) && !allowImports) fail('KEEP_LOCAL_OTHER_IMPORTS_PRESENT');
+    } else if (isImport(row) && !allowImports) fail('KEEP_LOCAL_OTHER_IMPORTS_PRESENT');
   }
   if (choices.some(choice => !(prepared?.rows || []).some(row => key(row) === key(choice)))) fail('KEEP_LOCAL_TRANSITION_CHANGED');
 }

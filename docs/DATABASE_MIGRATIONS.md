@@ -131,6 +131,29 @@ New paths touching these resources must follow existing lock order and final-sta
 | `056_magento_configuration_reseal.sql` | Linked replacement of sealed, undispatched configuration actions; all dispatched reservations remain permanent. |
 | `057_catalog_english_option_labels.sql` | Nullable authoritative English catalog metadata and immutable reviewed scoped-option label action evidence. |
 | `058_correction_batch_phase_receipts.sql` | Unique immutable batch phase identities and strict receipt shape in the existing audit ledger. |
+| `059_magento_attribute_actions.sql` | Controlled Magento attribute creation and additive set membership. See [MAGENTO_ATTRIBUTES](MAGENTO_ATTRIBUTES.md). |
+| `060_public_identity_characteristics.sql` | Native products: public identity plus immutable characteristic versions. See [MANAGER_PRODUCT_WORKFLOWS](MANAGER_PRODUCT_WORKFLOWS.md). |
+| `061_catalog_numeric_archive.sql` | Question archive flag and numeric answer validation metadata. See the 060–065 section below. |
+| `062_product_photos.sql` | Actor-owned original product photos and media jobs. See [PRODUCT_PHOTOS](PRODUCT_PHOTOS.md). |
+| `063_reviewed_catalog_deletion.sql` | Reviewed Administrator catalog deletion ledger. See [REVIEWED_CATALOG_DELETION](REVIEWED_CATALOG_DELETION.md). |
+| `064_product_archive_visibility.sql` | Archive visibility and reviewed restore. See [PRODUCT_LIFECYCLE](PRODUCT_LIFECYCLE.md). |
+| `065_product_media_native_fence.sql` | Native generation and media receipt fences. See [PRODUCT_PHOTOS](PRODUCT_PHOTOS.md), [PRODUCT_LIFECYCLE](PRODUCT_LIFECYCLE.md). |
+| `066_historical_product_reactivation.sql` | Reviewed historical reactivation intents (v1 protocol). See [HISTORICAL_REACTIVATION_PROTOCOL_V1](archive/implementation/HISTORICAL_REACTIVATION_PROTOCOL_V1.md). |
+| `067_product_integration_tasks.sql` | Durable local integration tasks. See [PRODUCT_INTEGRATION_TASKS](PRODUCT_INTEGRATION_TASKS.md). |
+| `068_standard_historical_reactivation.sql` | Standard-REST reactivation intents (current protocol). See [HISTORICAL_STANDARD_REACTIVATION](HISTORICAL_STANDARD_REACTIVATION.md). |
+| `069_native_test_product_identity.sql` | Permanent TEST-###### identity namespace. See [NATIVE_TEST_PRODUCTS](NATIVE_TEST_PRODUCTS.md). |
+| `070_reviewed_remote_only_cleanup.sql` | Reviewed remote-only attribute/option deletion. See [REVIEWED_CATALOG_DELETION](REVIEWED_CATALOG_DELETION.md). |
+| `071_historical_review_operations.sql` | Actor-owned historical review operations. See [HISTORICAL_STANDARD_REACTIVATION](HISTORICAL_STANDARD_REACTIVATION.md), [CANONICAL_WEIGHT_REPAIR](CANONICAL_WEIGHT_REPAIR.md). |
+| `072_reviewed_canonical_weight_repair.sql` | Reviewed canonical weight repair bookkeeping. See [CANONICAL_WEIGHT_REPAIR](CANONICAL_WEIGHT_REPAIR.md). |
+| `073_magento_first_sync_ledger.sql` | First-sync sessions, progress and field receipts. See [MAGENTO_FIRST_SYNC_FIELDS](MAGENTO_FIRST_SYNC_FIELDS.md). |
+| `074_creation_sku_reservations.sql` | Durable pre-save public article reservations. See [MANAGER_PRODUCT_WORKFLOWS](MANAGER_PRODUCT_WORKFLOWS.md). |
+| `075_nm_first_sync_seo_receipts.sql` | NM first-sync SEO snapshot receipts. See [MAGENTO_FIRST_SYNC_FIELDS](MAGENTO_FIRST_SYNC_FIELDS.md). |
+| `076_first_sync_local_seo_authority.sql` | Audited local SEO authority change for unfinished NM sessions. See [MAGENTO_FIRST_SYNC_FIELDS](MAGENTO_FIRST_SYNC_FIELDS.md). |
+| `077_magento_category_binding_evidence.sql` | Larger bounded evidence for category transport bindings. See [MAGENTO_INTEGRATION](MAGENTO_INTEGRATION.md). |
+| `078_daily_exchange_rate_refresh.sql` | Daily exchange-rate refresh scheduling metadata. See [PRICING](PRICING.md). |
+| `079_canonical_weight_repair_all_sv.sql` | Weight repair candidates for every legacy SV product. See [CANONICAL_WEIGHT_REPAIR](CANONICAL_WEIGHT_REPAIR.md). |
+| `080_first_sync_remote_retained.sql` | Temporary `remote_retained` first-sync state for legacy SV. See [FIRST_SYNC_RETAIN_REMOTE](FIRST_SYNC_RETAIN_REMOTE.md). |
+| `081_first_sync_remote_retention_closed.sql` | Refuses new `remote_retained` rows; existing receipts stay terminal. See [FIRST_SYNC_RETAIN_REMOTE](FIRST_SYNC_RETAIN_REMOTE.md). |
 
 ## Test deletion migration
 
@@ -359,7 +382,7 @@ immutable. See [Manager workflows](MANAGER_PRODUCT_WORKFLOWS.md),
 
 ## 066–067 — explicit historical decisions and integration tasks
 
-Migration 066 adds permanent reviewed historical-reactivation intents and UPDATE-only identity fences. It enrolls no existing archive and preserves unknown prior facts. A new decision requires exact current product/counterpart proof and verified status 2 before local activation; the atomic remote adapter remains an installation prerequisite. See [historical reactivation](HISTORICAL_REACTIVATION.md).
+Migration 066 adds permanent reviewed historical-reactivation intents and UPDATE-only identity fences. It enrolls no existing archive and preserves unknown prior facts. A new decision requires exact current product/counterpart proof and verified status 2 before local activation; the atomic remote adapter remains an installation prerequisite. See the [standard reactivation protocol](HISTORICAL_STANDARD_REACTIVATION.md) (the original v1 protocol is [archived](archive/implementation/HISTORICAL_REACTIVATION_PROTOCOL_V1.md)).
 
 Migration 067 adds durable local integration tasks and immutable creation-context attempts. It creates no historical task, product, SKU reservation, sync job, permission or remote operation. Task resolution rechecks the current local configuration; it never confirms Magento delivery. See [integration tasks](PRODUCT_INTEGRATION_TASKS.md).
 
