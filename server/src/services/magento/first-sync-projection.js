@@ -392,10 +392,6 @@ function projectFirstSyncFields(input) {
       const output = forward(target, scope);
       if (candidate && output.verified && output.value === candidate.evaluatedOutput) local.forwardOptionId = candidate.optionId;
       else if (local.present) reason ||= 'LOCAL_FORWARD_OPTION_NOT_PROVEN';
-      // Temporary legacy SV retention: Amber lacks the answer and the published
-      // output is verified empty, so ordinary delivery never sends this field.
-      if (isLegacySv(product) && local.known && !local.present && output.verified
-        && (output.value === '' || output.value == null)) remoteRetention = 'legacy-sv-empty-output-v1';
       importBlocker = descriptor?.key === 'is_calibrated' ? 'FIRST_SYNC_CANONICAL_CALIBRATION_REVIEW_REQUIRED'
         : isLegacySv(product) ? local.present ? 'FIRST_SYNC_LEGACY_MISSING_ONLY_REVIEW_REQUIRED' : null
         : product.characteristic_version_id != null && !product.full_sku ? null

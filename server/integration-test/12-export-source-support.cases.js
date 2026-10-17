@@ -49,10 +49,15 @@ test('SUPPORT HTTP existing HOME-v2 draft: detached prepare/CAS/audit, full vali
   assert.equal(candidate.response.status, 200, candidate.text);
   assert.equal(candidate.data.definition.evaluatorVersion, 'magento-declarative-3');
   assert.equal(candidate.data.definition.sourceContractVersion, 'public-product-identity-v1');
+  assert.equal(candidate.data.definition.sourceSupport.version, 'historical-source-support-v1', 'explicit v1 stays compatible');
+  const explicit = await request('/api/admin/export-templates/candidate?supportPolicy=historical-source-support-v2', { authentication: actor });
   const current = await request('/api/admin/export-templates/candidate', { authentication: actor });
-  assert.deepEqual(current.data, candidate.data, 'new current candidates require no explicit policy flag');
+  assert.deepEqual(current.data, explicit.data, 'new current candidates require no explicit policy flag');
+  assert.equal(current.data.definition.sourceSupport.version, 'historical-source-support-v2');
+  assert.deepEqual({ ...current.data.definition, sourceSupport: current.data.definition.sourceSupport.sources },
+    { ...candidate.data.definition, sourceSupport: candidate.data.definition.sourceSupport.sources }, 'only the proof version differs');
   const system = await request('/api/admin/export-templates/system', { authentication: actor });
-  assert.equal(system.data.definition.sourceSupport.version, 'historical-source-support-v1');
+  assert.equal(system.data.definition.sourceSupport.version, 'historical-source-support-v2');
   assert.equal(system.data.definition.evaluatorVersion, 'magento-declarative-3');
   assert.equal(system.data.definition.sourceContractVersion, 'public-product-identity-v1');
   assert.equal((await pool.query('SELECT count(*) FROM export_templates')).rows[0].count, countBefore);
@@ -124,10 +129,10 @@ test('SUPPORT lifecycle current candidate/system-copy drafts start current; cata
   const candidate = await request(root + '/candidate', { authentication: actor });
   assert.equal(candidate.response.status, 200, candidate.text);
   assert.deepEqual(candidate.data.diagnostics, []);
-  assert.equal(candidate.data.definition.sourceSupport.version, 'historical-source-support-v1');
+  assert.equal(candidate.data.definition.sourceSupport.version, 'historical-source-support-v2');
   assert.equal(candidate.data.definitionHash, compileDefinition(candidate.data.definition).hash);
   const system = await request(root + '/system', { authentication: actor });
-  assert.equal(system.data.definition.sourceSupport.version, 'historical-source-support-v1');
+  assert.equal(system.data.definition.sourceSupport.version, 'historical-source-support-v2');
   assert.equal(system.data.definition.evaluatorVersion, 'magento-declarative-3');
   for (const boundary of ['new-current', 'current-system-copy']) {
     // Both explicit client creation paths request the authoritative current candidate.

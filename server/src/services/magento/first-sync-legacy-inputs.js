@@ -1,5 +1,6 @@
 // Missing-only legacy SV inputs. Does not infer historical category flags,
-// rewrite a frozen publication or confer first-sync/remote dispatch authority.
+// rewrite a frozen publication, decode or rebuild full_sku, or confer
+// first-sync/remote dispatch authority.
 const c = require('./binding-contract');
 const schemas = require('../sku-schema.service');
 const { getRuleDependencies, isRuleMatched } = require('../../utils/rules');
@@ -16,6 +17,9 @@ function snapshotQuestions(questions) {
       visible_if_json:o.visible_if_json || null,hidden_if_json:o.hidden_if_json || null,archived:Boolean(o.archived),
     }))}));
 }
+// Historical internal SKUs are opaque identifiers (catalog owner, 2026-10-14): the
+// imported answers themselves may be legacy SKU-question answers, but no OTHER
+// historical or current SKU question may depend on them.
 function assertIndependent(schema,current,keys) {
   const questions=[...schema.questions,...current.questions], affected=new Set(keys);
   let changed=true;
@@ -25,10 +29,28 @@ function assertIndependent(schema,current,keys) {
       affected.add(q.key);changed=true;
     }
   }}
-  if(schema.questions.some(q => affected.has(q.key))
-    || current.questions.some(q => q.include_in_sku!==0 && affected.has(q.key))) {
+  const dependent=[...affected].filter(key => !keys.includes(key));
+  if(schema.questions.some(q => dependent.includes(q.key))
+    || current.questions.some(q => q.include_in_sku!==0 && dependent.includes(q.key))) {
     fail('FIRST_SYNC_LEGACY_SKU_CORRECTION_REQUIRED');
   }
+}
+// A legacy SKU-question answer keeps its pinned meaning: the semantic value_id must
+// be one active option of the single pinned schema question and of the single
+// current catalog question, visible for the stored answers. No option is
+// reinterpreted, no SKU code is decoded and full_sku is never rebuilt.
+function assertSkuAnswer(schema,target,key,value,answers,isCalibrated) {
+  const pinned=schema.questions.filter(q=>q.key===key);
+  if(pinned.length>1 || typeof value!=='string' && typeof value!=='number' || !/^(0|[1-9][0-9]*)$/.test(String(value))
+    || !Number.isSafeInteger(Number(value)))fail('FIRST_SYNC_LEGACY_SKU_ANSWER_INVALID');
+  const context={...answers,is_calibrated:present(answers.is_calibrated)?answers.is_calibrated:isCalibrated};
+  const visible=(q,o)=>isRuleMatched(q.visible_if_json,context) && isRuleMatched(o.visible_if_json,context)
+    && !(getRuleDependencies(o.hidden_if_json).length && isRuleMatched(o.hidden_if_json,context));
+  const matches=q=>(q.options || []).filter(o=>String(o.value_id)===String(value));
+  const frozen=pinned.length?matches(pinned[0]):[], live=matches(target);
+  if(target.archived || target.input_type!=='options' || live.length!==1 || live[0].archived || !visible(target,live[0])
+    || pinned.length && (frozen.length!==1 || frozen[0].archived || !visible(pinned[0],frozen[0])))fail('FIRST_SYNC_LEGACY_SKU_ANSWER_INVALID');
+  return {key,valueId:Number(value),pinned:pinned.length===1};
 }
 // Rule inputs must have a defined historical meaning before they are evaluated.
 // Unknown/self/forward references and malformed trees stay with reviewed recount.
@@ -101,34 +123,6 @@ function enumerate(schema, encodedPart, answers) {
   if(stored)add(stored.map(a=>({key:a.key,valueId:a.value_id,placeholder:a.is_placeholder})));
   return [...results.values()];
 }
-function interpretations(product,schema,answers) {
-  const variation=parseVariationSku(product.full_sku);
-  if(variation.normalizedSku!==product.full_sku || !variation.baseFullSku.startsWith(product.category)) fail('FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN');
-  const parsed=parseVersionedSkuPart(variation.baseFullSku.slice(product.category.length));
-  if(parsed.version!==Number(schema.version)) fail('FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN');
-  const prefix=product.category+parsed.marker,sequence=Number(product.sequence_number);
-  if(typeof product.base_sku!=='string' || !product.base_sku.startsWith(prefix)
-    || product.sequence_number==null || !Number.isSafeInteger(sequence) || sequence<0
-    || appendSkuSuffix(product.base_sku,sequence)!==variation.baseFullSku)fail('FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN');
-  const encodedPart=product.base_sku.slice(prefix.length),suffixRaw=String(sequence).padStart(3,'0');
-  if(!encodedPart || encodedPart.length>256)fail('FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN');
-  const results=new Map();
-  for(const semantics of enumerate(schema,encodedPart,answers)){
-      // Stored answers must agree with every supported interpretation, including
-      // hidden omission. An absent stored answer cannot manufacture semantic zero.
-      if(schema.questions.some(q=>{
-        if(!present(answers[q.key]))return false;
-        const a=semantics.find(answer=>answer.key===q.key);
-        return !a || (a.placeholder ? String(answers[q.key])!=='0' : String(answers[q.key])!==String(a.valueId));
-      })) {
-        fail('FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN');
-      }
-      const result={encodedPart,suffixRaw,semantics};
-      results.set(c.hash(result),result);
-  }
-  if(results.size!==1)fail('FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN');
-  return {...[...results.values()][0],prefix,baseSku:product.base_sku,sequenceNumber:sequence,variationNumber:variation.variationNumber};
-}
 function inspectLegacyInputs({product,schema,current,patch,weight,hasWeight}) {
   if(!isLegacySv(product) || product.status!=='active' || product.corrected_to_product_id
     || !schema || schema.category_code!==product.category || String(schema.id)!==String(product.sku_schema_version_id)
@@ -136,31 +130,27 @@ function inspectLegacyInputs({product,schema,current,patch,weight,hasWeight}) {
     || !Array.isArray(current.questions) || schemas.hashSnapshot(snapshotQuestions(schema.questions))!==schema.config_hash) {
     fail('FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN');
   }
-  const previous=product.details?.answers || {}, keys=Object.keys(patch);
+  const previous=product.details?.answers || {}, keys=Object.keys(patch), skuAnswers=[];
   for(const key of keys){
     const targets=current.questions.filter(q=>q.key===key);
-    if(schema.questions.some(q=>q.key===key) || targets.some(q=>q.include_in_sku!==0)) fail('FIRST_SYNC_LEGACY_SKU_CORRECTION_REQUIRED');
+    // A NULL current flag has no proven meaning; it never counts as non-SKU.
+    if(targets.some(q=>![0,1].includes(q.include_in_sku)))fail('FIRST_SYNC_LEGACY_SKU_CORRECTION_REQUIRED');
     if(targets.length!==1)fail('FIRST_SYNC_CANONICAL_TARGET_UNAVAILABLE');
     if(present(previous[key]))fail('FIRST_SYNC_LEGACY_MISSING_ONLY_REVIEW_REQUIRED');
+    if(key!=='weight' && (targets[0].include_in_sku===1 || schema.questions.some(q=>q.key===key))) {
+      skuAnswers.push(assertSkuAnswer(schema,targets[0],key,patch[key],previous,product.details?.isCalibrated));
+    }
   }
   assertIndependent(schema,current,keys);
-  assertSupportedGrammar(schema);
-  const before=interpretations(product,schema,previous),after=interpretations(product,schema,{...previous,...patch});
-  if(c.hash(before)!==c.hash(after))fail('FIRST_SYNC_LEGACY_SKU_CORRECTION_REQUIRED');
   if(hasWeight){
     if(present(product.weight) || present(previous.weight))fail('FIRST_SYNC_LEGACY_MISSING_ONLY_REVIEW_REQUIRED');
     const decimal=normalizeDecimal(weight,3);
     if(!decimal || Number(decimal)<=0 || Number(decimal)>=100000000000
       || normalizeDecimal(Number(decimal),3)!==decimal)fail('FIRST_SYNC_CANONICAL_WEIGHT_INVALID');
-    const base=before.prefix+before.encodedPart;
-    let reconstructed=appendSkuSuffix(base,Math.round(Number(decimal)));
-    if(before.variationNumber!==null)reconstructed+='-'+String(before.variationNumber).padStart(3,'0');
-    if(!before.suffixRaw || product.base_sku!==base || reconstructed!==product.full_sku) {
-      fail('FIRST_SYNC_LEGACY_WEIGHT_IDENTITY_REVIEW_REQUIRED');
-    }
   }
-  return {proof:{version:2,sku:product.full_sku,schemaVersionId:schema.id,schemaHash:schema.config_hash,
-    interpretation:before,currentSkuFlags:current.questions.map(q=>({key:q.key,includeInSku:q.include_in_sku})),...(hasWeight?{weightCompatibility:'sequence-or-rounded-weight'}:{})}};
+  return {proof:{version:3,skuPolicy:'opaque-legacy-sku-v1',sku:product.full_sku,schemaVersionId:schema.id,schemaHash:schema.config_hash,
+    skuAnswers,currentSkuFlags:current.questions.map(q=>({key:q.key,includeInSku:q.include_in_sku})),
+    ...(hasWeight?{weightPolicy:'missing-only-without-sku-agreement'}:{})}};
 }
 // Classification for the SEPARATE Administrator attestation command. No missing
 // field is proved here: an attached bootstrap cannot reinterpret an older SKU.

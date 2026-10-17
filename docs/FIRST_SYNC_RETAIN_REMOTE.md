@@ -1,111 +1,108 @@
-# Temporary legacy SV remote retention in first sync
+# Legacy SV remote retention in first sync (removed) and retained-value import
 
-**Status: temporary.** This decision exists only to finish the mass first sync. It
-must be removed together with the remaining legacy SKU dependencies; see
-[Follow-up: remove legacy SKU dependencies](#follow-up-remove-legacy-sku-dependencies).
+**Status: the temporary legacy SV decision `retain_remote` is removed** (migration
+[082](../server/migrations/082_first_sync_remote_retention_closed.sql)). Receipts
+recorded with it stay terminal, immutable first-sync history. Their values are
+imported into Amber with the reviewed command described below.
 
-## Problem
+## History
 
-For current legacy SV products (historical internal SKU and pinned SKU schema), the
-old schema encodes material and colour into the internal SKU. When Amber has no
-answer for such a question and Magento has a value, first sync wants to import the
-Magento value, but the canonical legacy input check refuses it with
-`FIRST_SYNC_LEGACY_SKU_CORRECTION_REQUIRED`: the stored answers would no longer
-reproduce the internal SKU, and the published template's legacy source check
-(`export-templates/source-support.js`, `reconstruct`) would then reject the
-product's semantic fields. The field stays `review_required`, the first-sync
-session cannot complete and the product never reaches ordinary delivery, so
-price changes in Amber do not reach Magento.
+During the mass Magento first sync, current legacy SV products (historical internal
+SKU and pinned SKU schema) could not import a Magento material or colour that Amber
+lacked: the first-sync legacy check refused it with
+`FIRST_SYNC_LEGACY_SKU_CORRECTION_REQUIRED` because the stored answers would no
+longer rebuild the internal SKU. On 2026-10-14 the catalog owner decided that
+Magento keeps such values during the mass first sync and Amber stays empty.
+Migration [080](../server/migrations/080_first_sync_remote_retained.sql) added the
+terminal state `remote_retained` (`after: null`, `source.decision: retain_remote`)
+and the operator script `first-sync-retain-remote.js` recorded it.
 
-Business decision (catalog owner, 2026-10-14): during the mass first sync Magento
-keeps such values and Amber stays empty; the values are imported later, after the
-legacy SKU dependencies are removed.
+The same decision made historical internal SKUs **opaque identifiers**: they are
+kept only for lookup; Amber no longer decodes or regenerates them. See
+[SKU and catalog](SKU_CATALOG.md#opaque-legacy-internal-skus).
 
-## Decision and receipt
+## What replaced it
 
-The first-sync choice `retain_remote` is available (`canRetainRemote: true`) only
-when all of these hold:
+1. First sync imports a missing legacy SKU-question answer (for example SV
+   `material`, `color`) and a missing weight without SKU agreement; see
+   [missing legacy SV inputs](MAGENTO_FIRST_SYNC_FIELDS.md#missing-legacy-sv-inputs).
+2. Export-template source support `historical-source-support-v2` checks a legacy
+   product's stored semantic value against its pinned schema question's options
+   instead of rebuilding the internal SKU; see
+   [historical source support](EXPORT_TEMPLATES.md#historical-source-support).
+   Published templates keep v1 until an explicit reviewed update, new template
+   publication and binding successor.
+3. The explicit `retain_remote` choice, `canRetainRemote`, the legacy
+   `remoteRetention` projection marker and `first-sync-retain-remote.js` are
+   removed. A request with `choice: retain_remote` is invalid. Migration 082 refuses
+   any new legacy semantic `remote_retained` row (`FIRST_SYNC_REMOTE_RETENTION_CLOSED`);
+   the state stays in the terminal and completion sets so existing sessions remain
+   complete. The separate automatic receipt for `magento_managed` SEO
+   (`source.retention: magento_managed_seo`, migration 081; see
+   [CH first-sync decisions](FIRST_SYNC_CH_DECISIONS.md)) is unchanged and is never
+   imported.
 
-- current legacy SV product (`full_sku` and `sku_schema_version_id` present,
-  `characteristic_version_id` absent);
-- a semantic option characteristic in scope `all` with a proven mapping and no
-  projection/read reason;
-- Amber has no answer and the published template's output for that field is
-  verified empty (`remoteRetention: legacy-sv-empty-output-v1` in the projection);
-- Magento has a value that the planner would import (`EMPTY_LOCAL_UNIQUE_REMOTE_OPTION`
-  or `EMPTY_LOCAL_VALID_REMOTE`) and no receipt exists yet.
+## Importing retained values
 
-The choice records the terminal state `remote_retained` with `after: null` and
-`source.decision: retain_remote`. Nothing is written to the product, to delivery
-requests or to Magento. Ordinary delivery omits empty outputs
-(`sync-preview.js`, "never synthesize clearing blanks"), so Magento keeps its value.
-Without an explicit choice the canonical import path is unchanged.
+The completed first-sync ledger cannot change. `retained-remote-import`
+(`server/src/services/magento/retained-remote-import.js`) therefore writes only the
+Amber product, through the canonical first-sync setter (`applyFirstSyncLocal`), plus
+its own audit receipt `product.magento_retained_values_imported`.
 
-Migration [080](../server/migrations/080_first_sync_remote_retained.sql) adds the state
-to the field ledger, a shape constraint (`first_sync_remote_retained_shape`) that
-ties the state to the decision and its evidence, a trigger check that the product
-is a current legacy SV product, and includes the state in the terminal and
-completion sets. 073/075/076 remain unchanged history.
+For one product it requires: Administrator with `export_templates.manage`,
+`exports.view` and `products.recount`; the current published binding; a current
+legacy SV product whose first sync is complete (`ordinary`) and has
+legacy semantic `remote_retained` fields (SEO receipts are skipped). Each retained field is checked against a fresh GET-only
+Magento observation and a no-receipt projection of the current publication:
 
-## Operator script
+| Field status | Meaning |
+| --- | --- |
+| `importable` | Amber is empty, Magento still holds the retained value, and the canonical setter proves the missing-only import (pinned/current option, unchanged final price, exact forward output). |
+| `already_imported` | Amber already holds the value and it equals Magento. |
+| `blocked` | `code` says why, for example `REMOTE_CHANGED` (Magento differs from the retained value), `LOCAL_VALUE_PRESENT`, `FIRST_SYNC_LEGACY_SKU_ANSWER_INVALID` or `FIRST_SYNC_CANONICAL_PRICE_REVIEW_REQUIRED`. Nothing is written for it. |
 
-`server/scripts/first-sync-retain-remote.js` applies the choice sequentially, one
-product at a time, through the canonical `first-sync.service` review and
-`applyWithPreparedValidation`. Magento transport is GET-only. Preview only runs the
-canonical review, which records nothing but takes its usual Administrator/product
-locks, so both modes use the ordinary database pool (a read-only pool fails with
-SQLSTATE 25006).
+Each field is proved alone and then together with the others. Apply revalidates
+the product/binding snapshot, rebuilds the preview under the transaction and
+refuses a changed token (`MAGENTO_RETAINED_IMPORT_PREVIEW_STALE`). It never
+changes `full_sku`, `sku_registry`, the pinned schema or option meanings, names or
+Magento; replaying the same token returns the recorded receipt.
+
+### Operator script
+
+Use the current published binding revision. SV material and colour are not
+source-support targets (only `NM.extra` and `AR.size` are), so this import does not
+wait for the v2 template publication; the forward output is still proved against
+whichever publication is current.
 
 ```text
-node /app/scripts/first-sync-retain-remote.js --mode preview --server-root /app \
+node /app/scripts/first-sync-retained-import.js --mode preview --server-root /app \
   --input INPUT.json --output NEW_PREVIEW.jsonl \
   --expected-database amber --actor-id ADMIN_ID --installation-key amber
 
-node /app/scripts/first-sync-retain-remote.js --mode apply --server-root /app \
+node /app/scripts/first-sync-retained-import.js --mode apply --server-root /app \
   --input INPUT.json --output NEW_APPLY.jsonl \
   --expected-database amber --actor-id ADMIN_ID --installation-key amber
 ```
 
-Optional: `--allow-imports` (apply only) also commits other Magento values the fresh
-plan receipts; `--schema-cache-seconds 0-600` reuses Magento schema reads within one run.
+`INPUT.json` is `{ "bindingRevisionId": "...", "items": [{ "sku": "..." }] }`. List
+the products from the retained receipts:
 
-`INPUT.json` is `{ "bindingRevisionId": "...", "items": [{ "sku": "..." }] }`, the same
-shape as the campaign input. Each output line is one product:
+```sql
+SELECT DISTINCT s.public_sku FROM magento_first_sync_fields f
+JOIN magento_first_sync_sessions s ON s.id=f.session_id
+WHERE f.state='remote_retained' AND f.evidence->'source'->>'retention' IS NULL
+  AND f.evidence->'source'->>'kind'='semantic' ORDER BY 1;
+```
 
-| `status` | Meaning |
-| --- | --- |
-| `retainable` | Preview: fields that would be retained, plus any other pending Magento imports. |
-| `retained` / `already_retained` | Apply recorded the receipt (`complete` shows whether the session finished). |
-| `nothing_to_retain` | No eligible field. |
-| `skipped` | Product is not in first-sync mode (for example already ordinary). |
-| `review` | Refused with `code`; nothing was recorded for that product. |
+Each output line is one product: `importable` (preview), `imported` /
+`already_applied` (apply), `already_imported`, `nothing_retained`, `blocked` (no
+importable field; `blocked` lists the codes) or `review` with `code`. Global
+authority/publication failures stop the run. Exit code 2 means some products need
+review. Retrying is safe.
 
-When the fresh plan would also commit other Magento imports (for example a missing
-size), apply skips the product with `RETAIN_REMOTE_OTHER_IMPORTS_PRESENT` unless
-`--allow-imports` is passed. Authority/publication failures stop the run. The fresh
-prepared plan is revalidated before commit; a changed transition refuses with
-`RETAIN_REMOTE_TRANSITION_CHANGED`. Retrying is safe: retained fields are terminal
-and are not offered again.
+## Legacy conflicts resolved in Magento's favour
 
-After retention, run the SV campaign again; retained rows are settled receipts and
-the campaign continues with names, price/weight choices, equal receipts and handoff.
-
-## Follow-up: remove legacy SKU dependencies
-
-Decided by the catalog owner on 2026-10-14: historical internal SKUs are kept only
-as identifiers for lookup; Amber no longer decodes or regenerates them. After the
-mass first sync, remove the remaining dependencies and then import retained values:
-
-1. `server/src/services/export-templates/source-support.js` (`reconstruct`,
-   `checkSourceSupport`): validate a legacy product's semantic value against its
-   pinned schema question options instead of requiring the stored answers to
-   rebuild the internal SKU. Needs a new evaluator version, template publication
-   and binding successor.
-2. `server/src/services/magento/first-sync-legacy-inputs.js` (`inspectLegacyInputs`,
-   `interpretations`, weight/suffix check): allow missing-only import of legacy
-   SKU-question answers and weights without SKU agreement; never change `full_sku`,
-   the schema or option meanings.
-3. Import the values recorded as `remote_retained` (and other legacy conflicts the
-   catalog owner resolves in Magento's favour, such as SV1121001 weight 8455 g).
-4. Remove the `retain_remote` decision once no new retention is needed, and update
-   [SKU catalog](SKU_CATALOG.md) for the opaque legacy SKU rule.
+A populated Amber value is never overwritten by these tools, including weight (for
+example SV1121001: Magento 8455 g, Amber 123 g). For SV, weight is a pricing input,
+so such a decision changes the final price and goes through the ordinary reviewed
+recount workflow ([recount and corrections](RECOUNT_CORRECTIONS.md)), not first sync.

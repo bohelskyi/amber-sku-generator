@@ -422,7 +422,9 @@ async function prepareMagentoCandidate(options = {}) {
   return captureMagentoCandidate(options, true);
 }
 async function captureMagentoCandidate(options, attachCurrentSupport) {
-  if (options.supportPolicy !== undefined && options.supportPolicy !== require('./source-support').VERSION) {
+  const { VERSION, LEGACY_VERSION } = require('./source-support');
+  // An explicit v1 request stays compatible and yields a v1 (SKU-reconstruction) candidate.
+  if (options.supportPolicy !== undefined && ![VERSION, LEGACY_VERSION].includes(options.supportPolicy)) {
     throw error(400, 'TEMPLATE_COMMAND_INVALID', 'Unknown source support policy');
   }
   return readTransaction(options, async (client) => {
@@ -440,6 +442,9 @@ async function captureMagentoCandidate(options, attachCurrentSupport) {
     // Only explicit current-candidate creation uses this default. Stored drafts,
     // publication clones and the read-only system profile are never rewritten.
     if (attachCurrentSupport) definition = pureCall(() => upgradeSourceSupport(definition, evidence));
+    if (attachCurrentSupport && options.supportPolicy === LEGACY_VERSION && definition.sourceSupport) {
+      definition.sourceSupport.version = LEGACY_VERSION; pureCall(() => compileDefinition(definition));
+    }
     const diagnostics = validateSourceReferences(definition, evidence);
     return { definition, definitionHash: hashJsonData(definition), diagnostics,
       candidateOnly: true, capturedRules: true, productionAcceptanceVerified: false };

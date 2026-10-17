@@ -10,7 +10,7 @@ Checksums canonicalize CRLF and lone CR to LF before hashing, so Windows and Lin
 
 ## Forward-only rule
 
-Checked-in migrations now span `000`–`080`. Migrations `000`–`079` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
+Checked-in migrations now span `000`–`082`. Migrations `000`–`081` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
 
 - never edit, reorder, rename, or replace an applied migration;
 - add the next lexically ordered forward migration;
@@ -154,6 +154,7 @@ New paths touching these resources must follow existing lock order and final-sta
 | `079_canonical_weight_repair_all_sv.sql` | Weight repair candidates for every legacy SV product. See [CANONICAL_WEIGHT_REPAIR](CANONICAL_WEIGHT_REPAIR.md). |
 | `080_first_sync_remote_retained.sql` | Temporary `remote_retained` first-sync state for legacy SV. See [FIRST_SYNC_RETAIN_REMOTE](FIRST_SYNC_RETAIN_REMOTE.md). |
 | `081_first_sync_magento_managed_seo.sql` | Automatic `remote_retained` receipt for derived SEO with an approved `magento_managed` policy. See [FIRST_SYNC_CH_DECISIONS](FIRST_SYNC_CH_DECISIONS.md). |
+| `082_first_sync_remote_retention_closed.sql` | Refuses new legacy semantic `remote_retained` rows; the 081 SEO receipt and existing receipts are unchanged. See [FIRST_SYNC_RETAIN_REMOTE](FIRST_SYNC_RETAIN_REMOTE.md). |
 
 ## Test deletion migration
 
@@ -484,7 +485,7 @@ trigger check that the product is a current legacy SV product, and includes the
 state in the terminal and completion sets by replacing `guard_first_sync_evidence`
 and `require_first_sync_progress`. It writes no product, receipt or delivery data;
 073/075/076 checksums are unchanged. See
-[temporary legacy SV remote retention](FIRST_SYNC_RETAIN_REMOTE.md).
+[legacy SV remote retention](FIRST_SYNC_RETAIN_REMOTE.md).
 
 ## 081 — magento_managed SEO remote retention
 
@@ -496,3 +497,17 @@ null); the 080 semantic shape now additionally requires no `retention`. It repla
 `guard_first_sync_evidence` only to skip the legacy-SV product check for that
 retention. It writes no data; 080's checksum is unchanged. See
 [CH first-sync decisions](FIRST_SYNC_CH_DECISIONS.md#seo-magento-may-keep-ch-meta-title-and-description).
+
+## 082 — close legacy SV remote retention
+
+[082_first_sync_remote_retention_closed.sql](../server/migrations/082_first_sync_remote_retention_closed.sql)
+adds the `BEFORE INSERT` trigger `first_sync_field_closed_retention` on
+`magento_first_sync_fields`, which refuses every new `remote_retained` row whose
+`source.retention` is not `magento_managed_seo` (the legacy SV semantic retention
+of 080) with `FIRST_SYNC_REMOTE_RETENTION_CLOSED`. Its name sorts before
+`first_sync_field_guard`, so the refusal is reported first. The automatic 081 SEO
+receipt, existing receipts, the shape constraint and the terminal/completion sets
+are unchanged, so completed sessions stay complete. It writes no product, receipt
+or delivery data; 081 and earlier checksums are unchanged. Retained legacy values
+are imported into Amber by the reviewed command in
+[legacy SV remote retention](FIRST_SYNC_RETAIN_REMOTE.md#importing-retained-values).

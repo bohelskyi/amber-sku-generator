@@ -36,10 +36,12 @@ enqueues or writes Magento directly.
      with `--targets`.
    - Missing names/values come from Magento: [name completion](NAME_COMPLETION_BATCH.md),
      [initial names](FIRST_SYNC_INITIAL_NAMES.md).
-   - Legacy SV characteristic empty in Amber and not emitted by the template:
-     [`first-sync-retain-remote.js`](FIRST_SYNC_RETAIN_REMOTE.md) (temporary).
+   - Legacy SV characteristic empty in Amber (for example material, colour) is
+     imported missing-only by ordinary first sync (opaque legacy SKU rule). The
+     temporary `retain_remote` decision is removed; already retained values are
+     imported with [`first-sync-retained-import.js`](FIRST_SYNC_RETAIN_REMOTE.md#importing-retained-values).
    - SV cohorts: [SV campaign](SV_CAMPAIGN.md) wraps history, names, fields and handoff.
-   - Anything else (real value conflicts, SKU-driving answers) is a per-product owner
+   - Anything else (real value conflicts, populated legacy answers) is a per-product owner
      decision: fix Amber (product edit or correction) or record keep_local/accept_remote.
 3. **Correcting Amber data** creates a new product version for corrections. That
    version starts on `hold/historical_ambiguity`; confirm it with step 1's recount
@@ -51,8 +53,8 @@ enqueues or writes Magento directly.
 5. **Verify.** Re-run the per-SKU review: synced products report `mode: ordinary`.
 
 Useful flags: `--schema-cache-seconds 120` on history batch, keep-local and
-retain-remote reuses Magento schema/topology reads within one run (~3× faster; do not
-edit Magento attributes during such a run). `--allow-imports` lets keep-local/retain
+retained-import reuses Magento schema/topology reads within one run (~3× faster; do not
+edit Magento attributes during such a run). `--allow-imports` lets keep-local
 apply when the fresh plan also receipts Magento values.
 
 ## Changing bindings or the template
@@ -98,7 +100,7 @@ Every publication has side effects on products that are **not yet synced**:
 | --- | --- | --- |
 | `first-sync-history-batch.js` | Legacy history admission, ≤50 per scope | [history batch](FIRST_SYNC_HISTORY_BATCH.md) |
 | `first-sync-keep-local.js` | Amber-wins decisions (price, rounding weight, CH dimensions) | [CH decisions](FIRST_SYNC_CH_DECISIONS.md) |
-| `first-sync-retain-remote.js` | Temporary legacy SV retain_remote | [retain remote](FIRST_SYNC_RETAIN_REMOTE.md) |
+| `first-sync-retained-import.js` | Import legacy SV values left in Magento by the removed retain_remote | [retained import](FIRST_SYNC_RETAIN_REMOTE.md#importing-retained-values) |
 | `name-completion-batch.js` | Fill missing names from Magento | [name completion](NAME_COMPLETION_BATCH.md) |
 | `first-sync-initial-names.js` | Initial names for `NAME_BASELINE_REQUIRED` | [initial names](FIRST_SYNC_INITIAL_NAMES.md) |
 | `first-sync-local-discovery.js`, `first-sync-local-batch.js` | Sealed local authority packets (≤10) | [discovery](FIRST_SYNC_LOCAL_DISCOVERY.md), [local batch](FIRST_SYNC_LOCAL_BATCH.md) |
@@ -112,8 +114,9 @@ Every publication has side effects on products that are **not yet synced**:
 
 ## Open follow-ups
 
-- Remove legacy SKU dependencies after the mass sync (see [retain remote](FIRST_SYNC_RETAIN_REMOTE.md)).
-- `first-sync-keep-local.js` / `first-sync-retain-remote.js` count an equal-name
+- After the mass sync: run `first-sync-retained-import.js`; publish the v2 source-support
+  template and binding successor for NM/AR (see [retained import](FIRST_SYNC_RETAIN_REMOTE.md)).
+- `first-sync-keep-local.js` counts an equal-name
   `name_received` receipt as an import; use `--allow-imports` when the preview lists no imports.
 - Successor preparation could carry unchanged reviewed category paths instead of
   relying on the sample.

@@ -22,7 +22,7 @@ contracts and procedures. Archived records are dated history, not current behavi
 | [Export templates](EXPORT_TEMPLATES.md) | Template API, editor, immutable publications, template-level catalog fixes. |
 | [Shared export sessions](SHARED_EXPORT_SESSIONS.md) | Private/shared workflows, invitations, attempts and recovery. |
 | [Authentication and RBAC](AUTH_RBAC.md) | OIDC, sessions, active-user/CSRF boundary, permissions. |
-| [Database and migrations](DATABASE_MIGRATIONS.md) | Runner, forward-only rule, lock order, migration inventory 000–081. |
+| [Database and migrations](DATABASE_MIGRATIONS.md) | Runner, forward-only rule, lock order, migration inventory 000–082. |
 | [Operations](OPERATIONS.md) | Topology, deployments, health, shutdown, backup/restore, audit. |
 | [Application UX](APPLICATION_UX.md) | Navigation, shared UI primitives, terminology, acceptance boundaries. |
 
@@ -48,7 +48,7 @@ index, publication side effects and traps. Per-tool details:
 
 - [History admission batch](FIRST_SYNC_HISTORY_BATCH.md)
 - [CH decisions and keep-local batch](FIRST_SYNC_CH_DECISIONS.md)
-- [Temporary legacy SV retain_remote](FIRST_SYNC_RETAIN_REMOTE.md)
+- [Legacy SV retained-value import (retain_remote removed)](FIRST_SYNC_RETAIN_REMOTE.md)
 - [Name completion batch](NAME_COMPLETION_BATCH.md), [initial names](FIRST_SYNC_INITIAL_NAMES.md), [campaign names adapter](FIRST_SYNC_CAMPAIGN_NAMES.md)
 - [Local discovery](FIRST_SYNC_LOCAL_DISCOVERY.md), [local authority batch](FIRST_SYNC_LOCAL_BATCH.md), [exact-SKU campaign](FIRST_SYNC_CAMPAIGN.md)
 - [SV classification](FIRST_SYNC_LOCAL_CLASSIFY.md), [SV campaign](SV_CAMPAIGN.md)

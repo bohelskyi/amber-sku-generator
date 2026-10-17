@@ -395,7 +395,8 @@ test('actual schema6 first-sync size adoption uses the published conditional rou
       for(const key of ['full_sku','base_sku','sequence_number','sku_schema_version_id','public_product_identity_id','characteristic_version_id','status'])assert.equal(after[key],before[key]);
       const audit=(await db.query("SELECT details FROM audit_events WHERE event_key='product.first_sync_canonical_adopted' AND subject_id=$1",[String(x.id)])).rows;
       assert.equal(audit.length,1);assert.equal(audit[0].details.evidence.legacyProof.schemaHash,fixture.data.provenance.frozenHash);
-      assert.equal(audit[0].details.evidence.legacyProof.interpretation.sequenceNumber,58);
+      assert.equal(audit[0].details.evidence.legacyProof.skuPolicy,'opaque-legacy-sku-v1');assert.equal(audit[0].details.evidence.legacyProof.sku,before.full_sku);
+      assert.equal(audit[0].details.evidence.legacyProof.weightPolicy,'missing-only-without-sku-agreement');
       assert.equal((await record(x,args)).alreadyApplied,true);assert.deepEqual(await actual(x.id),after);
     });
     await t.test('legacy price-authority flag is copied exactly and blocks canonical adoption in the1835 variant',async()=>{

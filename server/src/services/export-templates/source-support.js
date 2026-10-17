@@ -3,7 +3,14 @@
 const { fail } = require('./input-projection');
 const { CHARACTERISTIC_CONTRACT, CHARACTERISTIC_EVALUATOR, EXTENSIBLE_EVALUATOR, isPublicEvaluator } = require('./version-contract');
 const { parseVariationSku, parseVersionedSkuPart, buildSkuSuffixDecodeAttempts, decodeStoredSkuAnswers } = require('../../utils/sku');
-const VERSION = 'historical-source-support-v1';
+// v1 (frozen in existing publications) proves a legacy semantic value by rebuilding
+// the stored internal SKU from its answers. v2 treats historical internal SKUs as
+// opaque identifiers (catalog owner, 2026-10-14): the stored value must be an
+// option of the pinned schema question. Only an explicit reviewed source-support
+// update, template publication and binding successor move a definition to v2.
+const LEGACY_VERSION = 'historical-source-support-v1';
+const VERSION = 'historical-source-support-v2';
+const VERSIONS = [LEGACY_VERSION, VERSION];
 const EVALUATOR = 'magento-declarative-2';
 const PUBLIC_EVALUATOR = 'magento-declarative-3';
 const TARGETS = ['NM.extra', 'AR.size'];
@@ -17,7 +24,7 @@ function validateSupport(d, { check, shape, list, membership }) {
   if (!Object.hasOwn(d, 'sourceSupport')) { check(d.evaluatorVersion !== EVALUATOR, 'Source support policy required'); return; }
   check([EVALUATOR, PUBLIC_EVALUATOR, EXTENSIBLE_EVALUATOR, CHARACTERISTIC_EVALUATOR].includes(d.evaluatorVersion), 'Source support evaluator required');
   shape(d.sourceSupport, ['version', 'sources']);
-  check(d.sourceSupport.version === VERSION, 'Unknown source support version');
+  check(VERSIONS.includes(d.sourceSupport.version), 'Unknown source support version');
   const expected = TARGETS.filter((key) => Object.values(d.sources).some((s) => location(s) === key));
   shape(d.sourceSupport.sources, expected);
   for (const key of expected) {
@@ -47,8 +54,12 @@ function upgradeSourceSupport(definition, evidence) {
   const { compileDefinition } = require('./definition');
   compileDefinition(definition);
   const next = structuredClone(definition);
-  // Repeated preparation never promotes newly published live values.
-  if (next.sourceSupport) return next;
+  // Repeated preparation never promotes newly published live values; a v1 policy
+  // keeps its exact value lists and changes only its legacy proof version.
+  if (next.sourceSupport) {
+    if (next.sourceSupport.version === LEGACY_VERSION) { next.sourceSupport.version = VERSION; compileDefinition(next); }
+    return next;
+  }
   if (!isPublicEvaluator(next.evaluatorVersion)) next.evaluatorVersion = EVALUATOR;
   next.sourceSupport = { version: VERSION, sources: {} };
   for (const key of TARGETS) {
@@ -79,7 +90,7 @@ function sourceSupportUpdate(definition) {
     if (cause.code !== 'TEMPLATE_INVALID') throw cause;
     return { status: 'unsupported', currentPolicy: VERSION, code: cause.code };
   }
-  return { status: definition.sourceSupport ? 'current' : 'available', currentPolicy: VERSION };
+  return { status: definition.sourceSupport?.version === VERSION ? 'current' : 'available', currentPolicy: VERSION };
 }
 
 // Server loaders supply the immutable schemas separately. JSON from a request or
@@ -143,6 +154,7 @@ function checkSourceSupport(d, descriptor, product, raw, context) {
       || !p.semanticValues.includes(String(raw))) reject('semantic value is not supported by this template and characteristic version');
     return;
   }
+  if (d.sourceSupport.version !== LEGACY_VERSION) { checkPinnedOption(p, key, descriptor, product, raw, context, reject); return; }
   const decoded = reconstruct(product, context);
   const question = context.schema?.questions.filter((q) => q.key === descriptor.key);
   if (!decoded || question?.length !== 1) reject('schema ownership or stored SKU reconstruction failed');
@@ -158,6 +170,23 @@ function checkSourceSupport(d, descriptor, product, raw, context) {
     || !answer?.is_placeholder || answer.value_id !== null) reject('value is neither an authorized semantic value nor a proven numeric-zero placeholder');
 }
 
+// Opaque legacy rule: no SKU parsing. The pinned schema (server evidence only)
+// must own the product and its single question must define the semantic value.
+function checkPinnedOption(p, key, descriptor, product, raw, context, reject) {
+  const schema = context.schema;
+  const question = schema && schema.category_code === product.category && String(schema.id) === String(product.sku_schema_version_id)
+    ? schema.questions.filter((q) => q.key === descriptor.key) : null;
+  if (question?.length !== 1) reject('authoritative pinned schema question required');
+  const q = question[0];
+  if (q.options.some((o) => String(o.value_id) === String(raw))) {
+    if (!p.semanticValues.includes(String(raw))) reject('semantic value is not supported by this template and product schema');
+    return;
+  }
+  if (key !== 'NM.extra' || raw !== 0 || p.placeholder !== 'numeric-zero-v1'
+    || Number(q.required) !== 0 || q.options.some((o) => /^0+$/.test(String(o.sku_code))))
+    reject('value is neither a pinned schema option nor a proven numeric-zero placeholder');
+}
+
 function sourceSupportChecker(definition, product) {
   const evidence = projections.get(product);
   const prospective = prospectiveProjections.get(product);
@@ -167,5 +196,5 @@ function sourceSupportChecker(definition, product) {
 
 const isApprovedDeferredValue = (key, value) => DEFERRED[key]?.includes(String(value)) === true;
 
-module.exports = { VERSION, EVALUATOR, PUBLIC_EVALUATOR, validateSupport, upgradeSourceSupport, sourceSupportUpdate, policyFor,
+module.exports = { VERSION, LEGACY_VERSION, EVALUATOR, PUBLIC_EVALUATOR, validateSupport, upgradeSourceSupport, sourceSupportUpdate, policyFor,
   projectSupportProducts, projectProspectiveSupportProduct, sourceSupportChecker, isApprovedDeferredValue };

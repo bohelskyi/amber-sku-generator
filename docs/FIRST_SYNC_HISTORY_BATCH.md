@@ -78,7 +78,7 @@ stop. Apply always stops at the first non-admitted item.
 responses of Magento schema/topology endpoints (store topology and configs,
 attribute sets and memberships, attributes and their options, category tree) for at
 most N seconds. Product, inventory and every other read stay fresh; failures are
-never reused. `first-sync-keep-local.js` and `first-sync-retain-remote.js` accept the
+never reused. `first-sync-keep-local.js` and `first-sync-retained-import.js` accept the
 same option. A Magento schema change inside the window is observed only after the
 window expires or by the next run, so keep the window short and do not edit Magento
 attributes while a cached run is in progress.

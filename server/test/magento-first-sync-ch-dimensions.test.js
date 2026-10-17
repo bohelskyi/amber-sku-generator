@@ -97,7 +97,6 @@ test('Amber may keep its CH bead dimensions; Magento never imports into the answ
   for (const target of ['dovzhyna_namystyny', 'diametr_namystyny', 'rozmir_kameniu']) {
     assert.equal(row(open, target).canKeepLocal, true);
     assert.equal(row(open, target).canAcceptRemote, false);
-    assert.equal(row(open, target).canRetainRemote, false);
   }
   const choices = ['dovzhyna_namystyny', 'diametr_namystyny', 'rozmir_kameniu']
     .map(target => ({ target, scope: 'all', choice: 'keep_local' }));
@@ -143,7 +142,7 @@ test('approved magento_managed CH SEO becomes an automatic terminal remote_retai
   assert.equal(seo.record.after, null);
   assert.deepEqual([seo.record.source.decision, seo.record.source.retention, seo.record.source.field],
     ['retain_remote', 'magento_managed_seo', 'meta_title']);
-  assert.deepEqual([seo.canKeepLocal, seo.canAcceptRemote, seo.canRetainRemote, seo.terminal], [false, false, false, true]);
+  assert.deepEqual([seo.canKeepLocal, seo.canAcceptRemote, Object.hasOwn(seo, 'canRetainRemote'), seo.terminal], [false, false, false, true]);
   assert.equal(prepared.blockers.some(blocker => blocker.target === 'meta_title'), false);
   // An earlier non-terminal record of the field is settled, not left unsettled.
   const prior = prepareProgress(owned, null).rows.find(value => value.target === 'meta_title').record;

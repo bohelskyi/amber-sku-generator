@@ -362,29 +362,20 @@ test('legacy correction presentation does not rewrite explicit or prior keep-loc
   assert.equal(ordinary.reason, 'POPULATED_OPTION_VALUES_DIFFER');
 });
 
-test('retain_remote is a terminal no-import receipt only for proven empty legacy SV characteristic outputs', () => {
+test('retain_remote is no longer a decision; recorded remote_retained receipts stay terminal', () => {
   const option = field('kolir', { kind: 'option', type: 'option', required: false, local: absent(), remote: present('5747'),
     reverseCandidates: [{ value: '1', optionId: '5747' }] });
-  const retained = { 'all/kolir': { persistence: 'characteristic', remoteRetention: 'legacy-sv-empty-output-v1',
+  const meta = { 'all/kolir': { persistence: 'characteristic',
     source: { kind: 'semantic', key: 'color', productId: 7, bindingRevisionId: '11111111-1111-4111-8111-111111111111',
       definitionHash: 'a'.repeat(64), routeKey: 'SV.souvenir!=value_id:5' } } };
-  const base = projection([option, field('price', { local: present('1'), remote: present('1') })], retained);
+  const base = projection([option, field('price', { local: present('1'), remote: present('1') })], meta);
   const plain = prepareProgress(base);
-  assert.equal(row(plain, 'kolir').canRetainRemote, true);
-  assert.equal(row(plain, 'kolir').record.state, 'imported', 'without a choice the canonical import path is unchanged');
-  assert.equal(row(plain, 'price').canRetainRemote, false);
-  const chosen = prepareProgress(base, null, { target: 'kolir', scope: 'all', choice: 'retain_remote' });
-  const kept = row(chosen, 'kolir');
-  assert.equal(kept.record.state, 'remote_retained'); assert.equal(kept.record.after, null);
-  assert.equal(kept.record.source.decision, 'retain_remote'); assert.equal(kept.terminal, true);
-  assert.deepEqual(kept.record.before, absent()); assert.deepEqual(kept.record.remote, present('5747'));
-  assert.equal(chosen.complete, true); assert.equal(chosen.readyForOutbound, true);
-  assert.throws(() => prepareProgress(base, null, { target: 'price', scope: 'all', choice: 'retain_remote' }), /DECISION_NOT_AVAILABLE/);
-  const unmarked = projection([option], { 'all/kolir': { ...retained['all/kolir'], remoteRetention: undefined } });
-  assert.throws(() => prepareProgress(unmarked, null, { target: 'kolir', scope: 'all', choice: 'retain_remote' }), /DECISION_NOT_AVAILABLE/);
-  const populated = projection([{ ...option, local: present('1') }], retained);
-  assert.throws(() => prepareProgress(populated, null, { target: 'kolir', scope: 'all', choice: 'retain_remote' }), /DECISION_NOT_AVAILABLE/);
-  const later = prepareProgress(projection([option], retained, received(kept.record)), received(kept.record));
-  assert.equal(row(later, 'kolir').terminal, true); assert.equal(row(later, 'kolir').canRetainRemote, false);
-  assert.equal(row(later, 'kolir').record.state, 'remote_retained');
+  assert.equal(row(plain, 'kolir').record.state, 'imported', 'the canonical import path is unchanged');
+  assert.equal(Object.hasOwn(row(plain, 'kolir'), 'canRetainRemote'), false);
+  assert.throws(() => prepareProgress(base, null, { target: 'kolir', scope: 'all', choice: 'retain_remote' }), /DECISION_INVALID/);
+  const retained = { target: 'kolir', scope: 'all', state: 'remote_retained', before: absent(), remote: present('5747'), after: null,
+    source: { ...meta['all/kolir'].source, decision: 'retain_remote' }, mappingHash: 'b'.repeat(64) };
+  const later = prepareProgress(projection([option], meta, received(retained)), received(retained));
+  assert.equal(row(later, 'kolir').terminal, true); assert.equal(row(later, 'kolir').record.state, 'remote_retained');
+  assert.equal(row(later, 'kolir').canAcceptRemote, false);
 });
