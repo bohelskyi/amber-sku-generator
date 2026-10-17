@@ -97,7 +97,6 @@ test('Amber may keep its CH bead dimensions; Magento never imports into the answ
   for (const target of ['dovzhyna_namystyny', 'diametr_namystyny', 'rozmir_kameniu']) {
     assert.equal(row(open, target).canKeepLocal, true);
     assert.equal(row(open, target).canAcceptRemote, false);
-    assert.equal(row(open, target).canRetainRemote, false);
   }
   const choices = ['dovzhyna_namystyny', 'diametr_namystyny', 'rozmir_kameniu']
     .map(target => ({ target, scope: 'all', choice: 'keep_local' }));

@@ -5,10 +5,12 @@ const { materializeMagentoV1 } = require('../src/services/export-templates/magen
 const { validateSourceReferences } = require('../src/services/export-templates/source-references');
 const { compileDefinition } = require('../src/services/export-templates/definition');
 const { evaluateProduct, evaluateBatch } = require('../src/services/export-templates/evaluate');
-const { upgradeSourceSupport, projectSupportProducts } = require('../src/services/export-templates/source-support');
+const { upgradeSourceSupport, projectSupportProducts, LEGACY_VERSION, VERSION } = require('../src/services/export-templates/source-support');
 const { schema, stored, homeDefinition } = require('./fixtures/export-source-support');
 const { product } = require('./fixtures/magento-v1/contract');
 const corrected = () => upgradeSourceSupport(homeDefinition(), officeEvidence());
+// Existing publications keep the frozen v1 reconstruction proof.
+const frozenV1 = () => { const d = corrected(); d.sourceSupport.version = LEGACY_VERSION; return d; };
 const run = (d, p, schemas) => evaluateProduct(compileDefinition(d), projectSupportProducts([p], schemas)[0]);
 const invalid = (result) => assert.ok(result.errors.some((e) => e.code === 'SOURCE_SUPPORT_INVALID'), JSON.stringify(result.errors));
 
@@ -39,7 +41,7 @@ test('SUPPORT numeric NM placeholders reconstruct under each own historical vers
 });
 
 test('SUPPORT NM rejects foreign/missing/mismatched schemas, reconstruction, required and encoded-zero conflicts', () => {
-  const d = corrected(); const s = schema('NM'); const p = stored(s, 0);
+  const d = frozenV1(); const s = schema('NM'); const p = stored(s, 0);
   for (const schemas of [[], [{ ...s, id: s.id + 1 }], [{ ...s, category_code: 'AR' }], [{ ...s, version: 2 }]]) invalid(run(d, p, schemas));
   invalid(run(d, { ...p, sku_schema_version_id: null }, [s]));
   invalid(run(d, { ...p, full_sku: 'NM999999' }, [s]));
@@ -53,6 +55,38 @@ test('SUPPORT NM rejects foreign/missing/mismatched schemas, reconstruction, req
   const another = stored(s, 1);
   projectSupportProducts([another], [s]);
   invalid(evaluateProduct(compileDefinition(d), p));
+});
+
+test('SUPPORT v2 treats the legacy SKU as opaque: pinned options decide, foreign schemas and zero conflicts still fail', () => {
+  const d = corrected(); const s = schema('NM'); const p = stored(s, 0);
+  assert.equal(d.sourceSupport.version, VERSION);
+  for (const schemas of [[], [{ ...s, id: s.id + 1 }], [{ ...s, category_code: 'AR' }]]) invalid(run(d, p, schemas));
+  invalid(run(d, { ...p, sku_schema_version_id: null }, [s]));
+  // The stored SKU is not parsed: a non-reconstructing SKU or schema marker no longer matters.
+  assert.deepEqual(run(d, { ...p, full_sku: 'NM999999' }, [s]).errors, []);
+  assert.deepEqual(run(d, p, [{ ...s, version: 2 }]).errors, []);
+  for (const value of [1, 2]) assert.deepEqual(run(d, { ...stored(s, value), full_sku: 'NM999999' }, [s]).errors, []);
+  invalid(run(d, { ...stored(s, 1), details: { answers: { extra: 99 } } }, [s]));
+  const required = structuredClone(s); required.questions[0].required = 1;
+  invalid(run(d, p, [required]));
+  for (const code of ['0', '00']) {
+    const conflicting = structuredClone(s); conflicting.questions[0].options.push({ value_id: 7, sku_code: code });
+    invalid(run(d, p, [conflicting]));
+  }
+  invalid(evaluateProduct(compileDefinition(d), { ...p, sourceSupport: { proven: true }, schema: s }));
+});
+
+test('SUPPORT update moves only the proof version from v1 to v2 and is then current', () => {
+  const { sourceSupportUpdate } = require('../src/services/export-templates/source-support');
+  const old = frozenV1(), before = structuredClone(old);
+  assert.equal(sourceSupportUpdate(old).status, 'available');
+  const next = upgradeSourceSupport(old, { schemas: [] });
+  assert.deepEqual(old, before);
+  assert.equal(next.sourceSupport.version, VERSION);
+  assert.deepEqual(next.sourceSupport.sources, old.sourceSupport.sources);
+  assert.deepEqual({ ...next, sourceSupport: null }, { ...old, sourceSupport: null });
+  assert.equal(sourceSupportUpdate(next).status, 'current');
+  assert.deepEqual(upgradeSourceSupport(next, officeEvidence()), next);
 });
 
 test('SUPPORT exact string zero is rejected as placeholder; absent/null/blank remain absent and genuine zero is semantic', () => {
@@ -169,5 +203,6 @@ test('SUPPORT fixed v1 opts in independently; other unresolved claims block; hid
   const projection = projectSupportProducts([stored(s, 1)], [s])[0];
   assert.deepEqual(evaluateProduct(compileDefinition(d), projection).errors, []);
   projection.details.answers.extra = 2;
-  invalid(evaluateProduct(compileDefinition(d), projection));
+  assert.deepEqual(evaluateProduct(compileDefinition(d), projection).errors, [], 'v2 does not rebuild the stored SKU');
+  invalid(evaluateProduct(compileDefinition(frozenV1()), projectSupportProducts([projection], [s])[0]), 'v1 stays frozen');
 });

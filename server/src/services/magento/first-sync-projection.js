@@ -360,7 +360,7 @@ function projectFirstSyncFields(input) {
       && INFORMATION[category]?.includes(descriptor.key) && !descriptor.aliases.length && scope === 'all'
       && direct.wrappers.every(wrapper => wrapper === 'text'))) descriptor = null;
     let persistence = 'derived', local = { known: true, present: false }, kind = 'derived', type = 'text';
-    let unit, scale, constraints, prospective, reverseCandidates, comparison, importBlocker = null, semanticRequired = false, remoteRetention = null, localAuthority = null;
+    let unit, scale, constraints, prospective, reverseCandidates, comparison, importBlocker = null, semanticRequired = false, localAuthority = null;
     if (target === 'name') {
       persistence = 'name'; kind = 'name'; local = effectiveLocalName(product, evaluated, scope);
       descriptor = { kind: 'name', field: scope === 'all' ? 'magento_name_override.values.all' : 'magento_name_override.values.en' };
@@ -391,10 +391,6 @@ function projectFirstSyncFields(input) {
       const output = forward(target, scope);
       if (candidate && output.verified && output.value === candidate.evaluatedOutput) local.forwardOptionId = candidate.optionId;
       else if (local.present) reason ||= 'LOCAL_FORWARD_OPTION_NOT_PROVEN';
-      // Temporary legacy SV retention: Amber lacks the answer and the published
-      // output is verified empty, so ordinary delivery never sends this field.
-      if (isLegacySv(product) && local.known && !local.present && output.verified
-        && (output.value === '' || output.value == null)) remoteRetention = 'legacy-sv-empty-output-v1';
       importBlocker = descriptor?.key === 'is_calibrated' ? 'FIRST_SYNC_CANONICAL_CALIBRATION_REVIEW_REQUIRED'
         : isLegacySv(product) ? local.present ? 'FIRST_SYNC_LEGACY_MISSING_ONLY_REVIEW_REQUIRED' : null
         : product.characteristic_version_id != null && !product.full_sku ? null
@@ -556,7 +552,7 @@ function projectFirstSyncFields(input) {
       requiresRuntimeValidation: ['information', 'weight', 'price', 'characteristic', 'name'].includes(persistence),
       ...(persistence === 'weight' ? { mirrorAnswerKey: 'weight', setterContract: 'canonical-g-scale3-and-answer-coherence' } : {}),
       ...(persistence === 'price' ? { setterContract: 'manual-UAH-scale2-preserve-server-pricing-baseline' } : {}),
-      ...(importBlocker ? { importBlocker } : {}), ...(remoteRetention ? { remoteRetention } : {}),
+      ...(importBlocker ? { importBlocker } : {}),
       ...(localAuthority && !reason ? { localAuthority } : {}), ...(enReason && scope === 'en' ? { readReason: enReason } : {}),
       ...(reason ? { reason } : {}) });
     coverage.push({ target, scope, state: 'projected', persistence });

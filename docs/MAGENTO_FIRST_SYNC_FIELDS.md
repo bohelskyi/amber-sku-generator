@@ -527,7 +527,7 @@ writing inputs, baseline, names, audit and receipts in the caller's transaction.
 Observation timestamp changes alone do not stale the economic proof; captured
 rate freshness is still validated. No HTTP occurs under these locks.
 
-Legacy encoded SKU-driving characteristic changes, calibration (`is_calibrated`) mirror
+Populated legacy SKU-question answers, calibration (`is_calibrated`) mirror
 imports, new version pointers/overlays and direct English canonical imports other
 than names remain unsupported. Native Magento transport `weight` does not prove
 grams. Photo URLs do not represent original local media and are not imported.
@@ -538,48 +538,46 @@ Actual recount custom USD basis may omit `source`; that format requires matching
 
 ## Missing legacy SV inputs
 
-An active/current legacy SV may receive a strictly missing non-SKU semantic
-answer. The pinned SKU publication must omit the key; the current catalog must
-still classify it as non-SKU. Neither frozen nor current rules may connect the
-changed key, directly or transitively, to SKU question/option visibility. Every
-supported stored, ordinary and hidden-omission decode path must agree on one
-interpretation, before and after the patch. A separate proof enumerates all full
-and visible configured/compact paths with a 10,000-state budget; exhaustion
-fails closed. Conditional rules must be well-formed integer comparisons against
-earlier frozen keys. Unique digit-only codes may have different widths; ambiguous
-parses, unknown/forward/self dependencies and populated-answer contradictions
-require review. Real option zero remains distinct from an absent placeholder.
-No decoded answer is inferred or stored. The exact reservation owner, pinned
-schema hash and unchanged public identity remain part of validation.
+Historical internal SKUs are opaque identifiers (catalog owner, 2026-10-14; see
+[SKU and catalog](SKU_CATALOG.md#opaque-legacy-internal-skus)). An active/current
+legacy SV may receive strictly missing answers; the stored SKU is not decoded,
+rebuilt or changed, and the proof (version 3, `skuPolicy: opaque-legacy-sku-v1`)
+records only the SKU, pinned schema ID/hash, current SKU flags and imported SKU
+answers.
 
-The stored base SKU and safe nonnegative integer sequence must reconstruct the
-complete stored SKU exactly, including marker and verified variation. They prove
-the suffix boundary, not historical weight mode, and are bound into proof v2.
+- A non-SKU answer keeps the current non-SKU catalog validation.
+- A legacy SKU-question answer (a key of the pinned schema or a current
+  `include_in_sku=1` question, for example SV `material` or `color`) must be a
+  decimal `value_id` of exactly one active option of the single pinned schema
+  question and of the single current catalog question, with the question and
+  option visible for the stored answers. Otherwise
+  `FIRST_SYNC_LEGACY_SKU_ANSWER_INVALID`.
+- A NULL current `include_in_sku` never proves authority
+  (`FIRST_SYNC_LEGACY_SKU_CORRECTION_REQUIRED`). Neither frozen nor current rules
+  may make any other historical or current SKU question depend, directly or
+  transitively, on a changed key (`FIRST_SYNC_LEGACY_SKU_CORRECTION_REQUIRED`).
+- Missing gram weight requires both physical and answer values to be strictly
+  absent. Zero, malformed or populated values require correction. Exact positive
+  scale-three weight must fit NUMERIC(14,3) and round-trip through Number; it does
+  not need to agree with the SKU suffix (`weightPolicy:
+  missing-only-without-sku-agreement`).
 
-Missing gram weight additionally requires both physical and answer values to be
-strictly absent. Zero, malformed or populated values require correction. Exact
-positive scale-three weight must fit NUMERIC(14,3), round-trip through Number and
-reproduce the entire stored SKU using rounded weight, including marker,
-separators, padding and variation suffix. This proves compatibility under both
-sequence and rounded-weight suffix interpretations; it does not recover the
-historical requires_weight flag or claim the original weight. Today's category
-flags alone never authorize this lane.
+Unique approved reverse mappings, exact forward result, proven price mode and
+unchanged final UAH are still required, as are the exact reservation owner, the
+pinned schema hash and the unchanged public identity. The automatic baseline,
+physical/mirror inputs, retained names, audit and receipt commit atomically; frozen
+schemas and historical snapshots are never changed. Preview binds the legacy proof
+and revalidates it under short NOWAIT locks.
 
-Current non-SKU validation, unique approved reverse mappings, exact forward
-result, proven price mode and unchanged final UAH are still required. The
-automatic baseline, physical/mirror inputs, retained names, audit and receipt
-commit atomically; frozen schemas and historical snapshots are never changed.
-Preview binds the legacy proof and revalidates it under short NOWAIT locks.
+Populated answers, calibration and dependency changes remain explicit Administrator
+correction/recount work. The UI links to the ordinary reviewed workflow; it neither
+creates a successor nor chooses answers or changes a receipt automatically. These
+repository tests do not establish production acceptance.
 
-SKU-driving answers, calibration and unproven/mismatching suffixes remain explicit
-Administrator correction/recount work. The UI links to the ordinary reviewed
-workflow; it neither creates a successor nor chooses answers or changes a receipt
-automatically. These repository tests do not establish production acceptance.
-
-Temporary exception (2026-10-14): when such a legacy SV characteristic is empty in
-Amber, Magento has a value and the published output is verified empty, an
-Administrator may record `retain_remote` (terminal state `remote_retained`, no Amber
-or Magento write). See [temporary legacy SV remote retention](FIRST_SYNC_RETAIN_REMOTE.md).
+The temporary `retain_remote` decision (2026-10-14, state `remote_retained`) is
+removed; migration 081 refuses new retained rows and existing receipts stay
+terminal. Their values are imported with the reviewed command in
+[legacy SV remote retention](FIRST_SYNC_RETAIN_REMOTE.md#importing-retained-values).
 
 CH decisions (2026-10-16): Amber is authoritative for CH bead dimensions, and CH SEO
 may be left to Magento. See [CH first-sync decisions](FIRST_SYNC_CH_DECISIONS.md).

@@ -467,6 +467,12 @@ it('legacy SKU-driving fields offer an explicit administrator correction route w
   expect(link.getAttribute('href')).toBe('/products/open?article=SV1&action=recount&returnTo=%2Fattention');
   expect(api.post).toHaveBeenCalledTimes(1);expect(screen.getByRole('button',{name:/Отримати значення Magento:/}).disabled).toBe(true);
 });
+it('legacy SKU answers outside the pinned schema options explain the refusal and offer the correction route', async () => {
+  api.post.mockResolvedValue({data:plan([field({reason:'FIRST_SYNC_LEGACY_SKU_ANSWER_INVALID',status:'review_required',canAcceptRemote:false})])});
+  render(shell({}, {...auth,permissions:[...permissions,'products.decode','products.recount']}));read();
+  expect(await screen.findByRole('link',{name:'Переглянути виправлення адміністратором'})).toBeTruthy();
+  expect(screen.getByText(/не є активним видимим варіантом закріпленої історичної схеми/)).toBeTruthy();
+});
 it('does not offer legacy correction handoff after permissions are revoked or field is already received', async () => {
   api.post.mockResolvedValue({data:plan([field({reason:'FIRST_SYNC_LEGACY_MISSING_ONLY_REVIEW_REQUIRED',status:'review_required',canAcceptRemote:false})])});
   const mounted=render(shell());read();await screen.findByRole('region',{name:'Вага · UA / основний магазин'});

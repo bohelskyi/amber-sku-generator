@@ -83,8 +83,8 @@ async function inspect(config, observation, options, {jobId=null,decision=null}=
   return {first,observation,projection,prepared,reviewedRecovery,currencyEvidence,rateObservation,previewToken,
     mode:'first',blockers:prepared.blockers,readyForOutbound:prepared.readyForOutbound,
     complete:prepared.complete,coverage:projection.coverage,
-    fields:prepared.rows.map(({target,scope,status,reason,local,remote,canAcceptRemote,canKeepLocal,canRetainRemote,received})=>
-      ({target,scope,status,reason,local,remote,canAcceptRemote,canKeepLocal,canRetainRemote:canRetainRemote===true,received}))};
+    fields:prepared.rows.map(({target,scope,status,reason,local,remote,canAcceptRemote,canKeepLocal,received})=>
+      ({target,scope,status,reason,local,remote,canAcceptRemote,canKeepLocal,received}))};
 }
 
 async function commit(config, inspection, state, options, {jobId=null}={}) {
@@ -155,7 +155,7 @@ function decisions(input) {
     || Array.from({length:list.length},(_,i)=>i).some(i=>!Object.hasOwn(list,i)))c.invalid();
   for(const d of list) {
     c.command(d,['target','scope','choice']);
-    if(!['keep_local','accept_remote','retain_remote'].includes(d.choice) || !['target','scope'].every(k=>typeof d[k]==='string'
+    if(!['keep_local','accept_remote'].includes(d.choice) || !['target','scope'].every(k=>typeof d[k]==='string'
       && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(d[k])))c.invalid();
   }
   if(new Set(list.map(fieldKey)).size!==list.length)c.invalid();
@@ -211,7 +211,7 @@ async function apply(config,input,options={}) {
       await options.validatePreparedFirstSyncDecision(structuredClone(prepared));
     }
     const selected=choices.map(d=>prepared.rows.find(row=>fieldKey(row)===fieldKey(d)));
-    if(selected.some(row=>!row||row.received||!['pending_outward_confirmation','imported','name_received','seo_pending_initial_readback','remote_retained'].includes(row.record.state))) fail('DECISION_NOT_AVAILABLE');
+    if(selected.some(row=>!row||row.received||!['pending_outward_confirmation','imported','name_received','seo_pending_initial_readback'].includes(row.record.state))) fail('DECISION_NOT_AVAILABLE');
     const inspection={...base,prepared,previewToken:receiptHash};
     const result=await commit(config,inspection,state,{...options,firstSyncDecision:decision});
     return {sku:state.publicSku,...(Array.isArray(decision)?{choices}:decision),receipt:{sessionId:result.sessionId,revision:result.revision,

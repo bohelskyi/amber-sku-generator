@@ -67,7 +67,8 @@ const reasons = {
   FIRST_SYNC_CANONICAL_PRICE_REVIEW_REQUIRED: 'Нова вага або характеристика змінює кінцеву ціну. Спочатку потрібне окреме цінове рішення.',
   FIRST_SYNC_CANONICAL_PRICE_FIRST_REOBSERVE_REQUIRED: 'Спочатку узгодьте ціну й повторіть перевірку перед отриманням ваги або характеристик.',
   FIRST_SYNC_CANONICAL_PRICE_MODE_UNPROVEN: 'Чинний режим ціни не підтверджено. Потрібне окреме цінове рішення.',
-  FIRST_SYNC_LEGACY_SKU_CORRECTION_REQUIRED: 'Ця характеристика керує історичним SKU. Потрібне явне виправлення адміністратором зі збереженням попередньої версії.',
+  FIRST_SYNC_LEGACY_SKU_CORRECTION_REQUIRED: 'Від цієї характеристики залежать інші характеристики історичного SKU. Потрібне явне виправлення адміністратором зі збереженням попередньої версії.',
+  FIRST_SYNC_LEGACY_SKU_ANSWER_INVALID: 'Значення Magento не є активним видимим варіантом закріпленої історичної схеми та чинного каталогу. Потрібне окреме виправлення.',
   FIRST_SYNC_LEGACY_MISSING_ONLY_REVIEW_REQUIRED: 'Legacy SV можна доповнити лише доведено відсутніми полями. Нуль або вже заповнене значення потребує окремого виправлення.',
   FIRST_SYNC_LEGACY_WEIGHT_IDENTITY_REVIEW_REQUIRED: 'Нова вага не відтворює повний історичний SKU. Потрібен окремий підтверджений перерахунок.',
   FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN: 'Історичну SKU-схему або єдине значення артикула не підтверджено. Потрібне окреме виправлення адміністратором.',
@@ -160,7 +161,7 @@ function checkedReceipt(data, request) {
   return data;
 }
 
-const correctionReasons = new Set(['FIRST_SYNC_CANONICAL_CALIBRATION_REVIEW_REQUIRED', 'FIRST_SYNC_LEGACY_SKU_CORRECTION_REQUIRED', 'FIRST_SYNC_LEGACY_MISSING_ONLY_REVIEW_REQUIRED', 'FIRST_SYNC_LEGACY_WEIGHT_IDENTITY_REVIEW_REQUIRED', 'FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN']);
+const correctionReasons = new Set(['FIRST_SYNC_CANONICAL_CALIBRATION_REVIEW_REQUIRED', 'FIRST_SYNC_LEGACY_SKU_CORRECTION_REQUIRED', 'FIRST_SYNC_LEGACY_SKU_ANSWER_INVALID', 'FIRST_SYNC_LEGACY_MISSING_ONLY_REVIEW_REQUIRED', 'FIRST_SYNC_LEGACY_WEIGHT_IDENTITY_REVIEW_REQUIRED', 'FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN']);
 function FieldPanel({ sku, onChange, principalLifetime, canRecount }) {
   const [preview, setPreview] = useState(null);
   const [receipt, setReceipt] = useState(null);

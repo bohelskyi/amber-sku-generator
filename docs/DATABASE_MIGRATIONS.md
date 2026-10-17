@@ -10,7 +10,7 @@ Checksums canonicalize CRLF and lone CR to LF before hashing, so Windows and Lin
 
 ## Forward-only rule
 
-Checked-in migrations now span `000`–`080`. Migrations `000`–`079` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
+Checked-in migrations now span `000`–`081`. Migrations `000`–`080` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
 
 - never edit, reorder, rename, or replace an applied migration;
 - add the next lexically ordered forward migration;
@@ -461,4 +461,16 @@ trigger check that the product is a current legacy SV product, and includes the
 state in the terminal and completion sets by replacing `guard_first_sync_evidence`
 and `require_first_sync_progress`. It writes no product, receipt or delivery data;
 073/075/076 checksums are unchanged. See
-[temporary legacy SV remote retention](FIRST_SYNC_RETAIN_REMOTE.md).
+[legacy SV remote retention](FIRST_SYNC_RETAIN_REMOTE.md).
+
+## 081 — close legacy SV remote retention
+
+[081_first_sync_remote_retention_closed.sql](../server/migrations/081_first_sync_remote_retention_closed.sql)
+adds the `BEFORE INSERT` trigger `first_sync_field_closed_retention` on
+`magento_first_sync_fields`, which refuses every new `remote_retained` row with
+`FIRST_SYNC_REMOTE_RETENTION_CLOSED`. Its name sorts before
+`first_sync_field_guard`, so the refusal is reported first. Existing receipts,
+the 080 state/shape constraint and the terminal/completion sets are unchanged, so
+completed sessions stay complete. It writes no product, receipt or delivery data;
+080 and earlier checksums are unchanged. Retained values are imported into Amber
+by the reviewed command in [legacy SV remote retention](FIRST_SYNC_RETAIN_REMOTE.md#importing-retained-values).

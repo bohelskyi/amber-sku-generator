@@ -140,7 +140,11 @@ async function prepareCanonicalInputs(client, { amber, entries, answers, rateObs
     if (ownership.length !== 1 || Number(ownership[0].first_product_id) !== Number(product.id)) fail('FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN');
     // Existing encoded answers remain interpreted by their pinned publication.
     // Today's SKU draft must not reinterpret historical placeholder semantics.
-    validateConfiguration({ ...current, questions: legacyCurrent.questions.filter(q => q.include_in_sku === 0) }, product, candidateAnswers, changedKeys);
+    // Imported SKU-question answers were validated against the pinned and current
+    // options above (opaque legacy SKU rule); only non-SKU targets are rechecked.
+    const skuKeys = new Set(legacyProof.skuAnswers.map(answer => answer.key));
+    validateConfiguration({ ...current, questions: legacyCurrent.questions.filter(q => q.include_in_sku === 0) }, product, candidateAnswers,
+      new Set([...changedKeys].filter(key => !skuKeys.has(key))));
   } else {
     validateConfiguration(frozen, product, candidateAnswers, changedKeys);
     validateConfiguration(current, product, candidateAnswers, changedKeys);

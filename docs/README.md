@@ -36,7 +36,7 @@ contracts; real-store and authenticated browser acceptance remain separate.
 
 Local technical references: [client development](../client/README.md), [serialized PostgreSQL tests](../server/integration-test/README.md), [synthetic Magento fixture maintenance](../server/test/fixtures/magento-v1/README.md).
 
-Scoped first-sync operations: [initial names with legacy history](FIRST_SYNC_INITIAL_NAMES.md).
+Scoped first-sync operations: [initial names with legacy history](FIRST_SYNC_INITIAL_NAMES.md), [legacy SV retained-value import](FIRST_SYNC_RETAIN_REMOTE.md).
 
 Cross-application presentation: [Amber operations interface](APPLICATION_UX.md)
 describes the local full-application redesign, navigation, shared primitives,

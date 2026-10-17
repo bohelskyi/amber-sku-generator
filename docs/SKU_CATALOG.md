@@ -143,6 +143,32 @@ can still run against supported pre-054 upgrade checkpoints by observing whether
 the mode column exists; it adds no runtime DDL. Once migration 054 is present, only
 `legacy_bootstrap` categories are captured automatically.
 
+## Opaque legacy internal SKUs
+
+Catalog owner decision (2026-10-14): historical internal SKUs are kept only as
+identifiers for database lookup. Amber does not decode or regenerate them to prove
+a stored product's characteristics.
+
+- `products.full_sku`, its `sku_registry` reservation, public identity and pinned
+  `sku_schema_version_id` never change. SKUs are never reused; published schemas
+  and the meaning of used `value_id`s are never changed.
+- A stored legacy answer is valid when it is an option `value_id` of the single
+  pinned schema question with that key. It does not have to agree with the codes
+  encoded in `full_sku`.
+- A legacy answer that Amber lacks may be filled **missing-only** (first sync or
+  the reviewed [retained-value import](FIRST_SYNC_RETAIN_REMOTE.md#importing-retained-values)):
+  it must be an active option of both the pinned schema question and the current
+  catalog question, visible for the stored answers, and no other historical or
+  current SKU question may depend on it. Missing weight is filled without SKU
+  agreement. Populated values (including zero) still require the reviewed
+  recount/correction workflow.
+- Export templates apply the rule through source support
+  `historical-source-support-v2`; publications pinned to v1 keep rebuilding the
+  stored SKU until a reviewed successor publication.
+
+Decode of an unknown identifier, new-product preview/save and recount target
+validation are unchanged by this rule.
+
 Legacy products with `total_price_uah=0` retain that stored value and `legacy_uah_price_unset=true`; see [`PRICING.md`](PRICING.md). They remain decodable and recountable, while new products still require a positive final price.
 
 ## Integration category contract

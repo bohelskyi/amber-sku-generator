@@ -392,6 +392,21 @@ other unresolved claims and unverified aliases remain blocking. Lookup outputs
 are never source authority. All declaration fields participate in canonical JSONB
 and definition/compilation identity.
 
+`historical-source-support-v2` has the same shape, values and placeholders and
+treats historical internal SKUs as opaque identifiers (catalog owner, 2026-10-14;
+see [SKU and catalog](SKU_CATALOG.md#opaque-legacy-internal-skus)). For a legacy
+product (`full_sku` + `sku_schema_version_id`) the stored semantic value must be an
+option `value_id` of the single pinned schema question, owned by the product's
+category and schema ID, and listed in `semanticValues`; the stored SKU is not
+parsed and need not encode that value. NM numeric zero is a placeholder only for
+an optional pinned question without a zero-like SKU code. Native characteristic
+products are unchanged. v1 publications keep their SKU-reconstruction proof
+below; only the explicit source-support update (which changes nothing but the
+version), a new template publication and a binding successor
+(`magento-successor-prepare.js`, `magento-carry-unchanged-reviews.js`,
+`magento-publication.js`) move an integration to v2. New candidates and the system
+profile use v2.
+
 Actual consumed reads, including custom columns, duplicated descriptors, refs,
 lookups, catalog conditions and readiness, use one lazy support check. The server
 batches the associated immutable schemas on the existing transaction; the pure
@@ -439,7 +454,7 @@ incomplete drafts); they do not reinterpret imported/legacy definitions.
 
 Draft responses add `sourceSupportUpdate: {status, currentPolicy, code?}`.
 `available` means a policy-free definition can accept the closed support contract
-and has a support/evaluator delta; `current` means its valid current policy is already attached; `unsupported`
+and has a support/evaluator delta, or a v1 policy can move to v2; `current` means the v2 policy is already attached; `unsupported`
 means compilation cannot establish an upgrade path, including unknown/newer
 policies and incompatible legacy aliases. This read model checks only the frozen
 contract/upgrade shape, not source proof or catalog drift.
@@ -456,8 +471,9 @@ API commands are POST `/:id/draft/source-support/prepare` with saved
 `/:id/draft/source-support/apply` with those fields plus `preparationHash`, below
 `/api/admin/export-templates`. Both require `export_templates.manage` and the
 existing active-user/CSRF boundary. GET `/candidate` defaults to current support;
-the existing explicit `?supportPolicy=historical-source-support-v1` remains
-compatible. Both prepare a detached new candidate without writing. Preparation is not validation
+the explicit `?supportPolicy=historical-source-support-v2` is equivalent, and the
+existing explicit `?supportPolicy=historical-source-support-v1` remains compatible
+and returns a v1 candidate. Both prepare a detached new candidate without writing. Preparation is not validation
 or publication. Unknown policy versions fail closed.
 
 Draft samples retain selected-group source scope. Published preview, direct capture

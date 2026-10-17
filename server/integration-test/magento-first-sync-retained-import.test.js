@@ -1,12 +1,13 @@
 // Real frozen/catalog/publication shapes in the canonical disposable PG only.
+// Opaque legacy SKU rule: retained values are imported missing-only after first sync.
 require('../test/setup-env');
 const test=require('node:test'),assert=require('node:assert/strict');
 const {Client,Pool}=require('pg'),{execFile}=require('node:child_process'),{promisify}=require('node:util');
 const path=require('node:path'),{randomUUID}=require('node:crypto');
 const fixture=require('../test/fixtures/legacy-sv-schema6');
-test('080 legacy SV remote retention records terminal first-sync receipts without Amber or Magento writes',async t=>{
+test('081 closes legacy SV remote retention; retained values and legacy material/colour import missing-only',async t=>{
   const source=new URL(process.env.TEST_DATABASE_URL||'');assert.equal(source.hostname,'127.0.0.1');assert.equal(source.port,'55432');assert.ok(source.pathname.endsWith('_test'));
-  const name='amber_retain_'+process.pid+'_test',control=new Client({connectionString:source.toString()});await control.connect();let created=false,db;
+  const name='amber_retained_'+process.pid+'_test',control=new Client({connectionString:source.toString()});await control.connect();let created=false,db;
   try{
     await control.query('CREATE DATABASE '+name);created=true;const target=new URL(source);target.pathname='/'+name;
     await promisify(execFile)(process.execPath,['-e',"require('./src/db/run-migrations').runMigrations().then(()=>require('./src/db/pool').end()).catch(e=>{console.error(e);process.exitCode=1;});"],{cwd:path.resolve(__dirname,'..'),env:{...process.env,DATABASE_URL:target.toString()}});
@@ -88,81 +89,117 @@ test('080 legacy SV remote retention records terminal first-sync receipts withou
       preview:async(_config,input)=>{input.onObservation(await observation());return {};}};
     const selection={sku:x.full_sku,bindingRevisionId:binding.id};
 
-    await t.test('080 installs the remote_retained state and shape guard; repeated startup keeps checksums',async()=>{
+    const ledgerCounts=async()=>(await db.query(`SELECT (SELECT count(*)::int FROM magento_first_sync_fields) fields,
+      (SELECT count(*)::int FROM magento_first_sync_progress) progress`)).rows[0];
+    const answers=async()=>(await actual(x.id)).details.answers;
+
+    await t.test('081 closes the state for new rows; 080 history and repeated startup keep checksums',async()=>{
       const runner=require('../src/db/run-migrations'),fs=require('node:fs/promises');
-      const sql=await fs.readFile(path.resolve(__dirname,'../migrations/080_first_sync_remote_retained.sql'),'utf8');
-      assert.equal((await db.query("SELECT checksum FROM schema_migrations WHERE name='080_first_sync_remote_retained.sql'")).rows[0].checksum,runner.getMigrationChecksum(sql));
+      for(const file of ['080_first_sync_remote_retained.sql','081_first_sync_remote_retention_closed.sql']){
+        const sql=await fs.readFile(path.resolve(__dirname,'../migrations',file),'utf8');
+        assert.equal((await db.query('SELECT checksum FROM schema_migrations WHERE name=$1',[file])).rows[0].checksum,runner.getMigrationChecksum(sql));
+      }
       const before=(await db.query('SELECT name,checksum FROM schema_migrations ORDER BY name')).rows;
       await promisify(execFile)(process.execPath,['-e',"require('./src/db/run-migrations').runMigrations().then(()=>require('./src/db/pool').end()).catch(e=>{console.error(e);process.exitCode=1;});"],{cwd:path.resolve(__dirname,'..'),env:{...process.env,DATABASE_URL:target.toString()}});
       assert.deepEqual((await db.query('SELECT name,checksum FROM schema_migrations ORDER BY name')).rows,before);
-      const constraint=(await db.query("SELECT pg_get_constraintdef(oid) def FROM pg_constraint WHERE conname='magento_first_sync_fields_state_check'")).rows[0].def;
-      assert.match(constraint,/remote_retained/);
-      assert.equal((await db.query("SELECT count(*)::int n FROM pg_constraint WHERE conname='first_sync_remote_retained_shape'")).rows[0].n,1);
+      assert.match((await db.query("SELECT pg_get_constraintdef(oid) def FROM pg_constraint WHERE conname='magento_first_sync_fields_state_check'")).rows[0].def,/remote_retained/);
+      assert.equal((await db.query("SELECT count(*)::int n FROM pg_trigger WHERE tgname='first_sync_field_closed_retention' AND tgenabled='O'")).rows[0].n,1);
     });
-    await t.test('legacy SV empty-answer characteristics are retainable only by explicit choice; review writes nothing',async()=>{
+    await t.test('first sync now offers legacy colour as a missing-only import; retain_remote is refused',async()=>{
       const before=await canonical(),review=await firstSync.review(config,selection,options);
       assert.equal(review.mode,'first');
+      // kolir = color, typy_obrobky_burshtynu = material: both pinned legacy SKU questions.
       for(const target of ['kolir','typy_obrobky_burshtynu']){
         const row=review.fields.find(f=>f.target===target&&f.scope==='all');
-        assert.equal(row.status,'review_required',JSON.stringify(row));assert.equal(row.reason,'FIRST_SYNC_LEGACY_SKU_CORRECTION_REQUIRED');
-        assert.equal(row.canRetainRemote,true);assert.equal(row.canAcceptRemote,false);assert.equal(row.local.present,false);
+        assert.equal(row.status,'imported',JSON.stringify(row));assert.equal(Object.hasOwn(row,'canRetainRemote'),false);
       }
-      assert.equal(review.fields.find(f=>f.target==='price').canRetainRemote,false);
-      assert.equal(review.complete,false);assert.deepEqual(await canonical(),before);
-      await assert.rejects(firstSync.apply(config,{...selection,previewToken:review.previewToken,target:'price',scope:'all',choice:'retain_remote'},options),
-        {code:'MAGENTO_FIRST_SYNC_DECISION_NOT_AVAILABLE'});
-      assert.equal((await db.query('SELECT count(*)::int n FROM magento_first_sync_fields')).rows[0].n,0);
+      assert.deepEqual(await canonical(),before);
+      await assert.rejects(firstSync.apply(config,{...selection,previewToken:review.previewToken,target:'kolir',scope:'all',choice:'retain_remote'},options),
+        e=>e.statusCode===422||/INVALID/.test(e.code));
+      assert.equal((await ledgerCounts()).fields,0);
     });
-    await t.test('operator preview runs the canonical review on the ordinary pool and records nothing',async()=>{
-      const script=require('../scripts/first-sync-retain-remote'),fs=require('node:fs/promises'),os=require('node:os');
-      const directory=await fs.mkdtemp(path.join(os.tmpdir(),'retain-preview-')),input=path.join(directory,'input.json');
+    let retained;
+    await t.test('historical retained receipts (recorded before 081) remain terminal and complete the session',async()=>{
+      // Reproduce the pre-081 ledger exactly as the removed decision recorded it.
+      const obs=await observation(),inspection=await firstSync.inspect(config,obs,options);
+      assert.equal(inspection.mode,'first');
+      // The removed decision recorded the planner rows before canonical validation.
+      const plan=require('../src/services/magento/first-sync-progress-plan').prepareProgress(inspection.projection,null);
+      const fields=plan.rows.map(row=>{
+        const record=Object.fromEntries(['target','scope','state','before','remote','after','source','mappingHash'].map(k=>[k,row.record[k]]));
+        if(!['kolir','typy_obrobky_burshtynu'].includes(row.target)||row.scope!=='all')return record;
+        return {...record,state:'remote_retained',after:null,source:{...record.source,decision:'retain_remote'}};
+      });
+      assert.ok(fields.every(f=>['equal','optional_empty','name_received','remote_retained'].includes(f.state)),JSON.stringify(fields.map(f=>[f.target,f.state])));
+      const ledger=require('../src/services/magento/first-sync-ledger'),client=await db.connect();
+      try{
+        await client.query('BEGIN');await client.query('ALTER TABLE magento_first_sync_fields DISABLE TRIGGER first_sync_field_closed_retention');
+        await ledger.recordProgressOnClient(client,{key:inspection.first.key,identity:{installationKey:binding.installationKey,publicSku:x.public_sku||x.full_sku,
+          remoteProductId:String(10000+x.id),contractVersion:'first-sync-v1',initialProductId:x.id,initialBindingRevisionId:binding.id},
+          expectedRevision:'0',previewHash:'c'.repeat(64),fields:fields.map(f=>({...f,source:{...f.source,productId:x.id}})),actorUserId:actor,
+          requiredScopes:plan.manifest,complete:true,readyForOutbound:true});
+        await client.query('ALTER TABLE magento_first_sync_fields ENABLE TRIGGER first_sync_field_closed_retention');await client.query('COMMIT');
+      }catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
+      retained=(await db.query("SELECT target,evidence FROM magento_first_sync_fields WHERE state='remote_retained' ORDER BY target")).rows;
+      assert.deepEqual(retained.map(r=>r.target),['kolir','typy_obrobky_burshtynu']);
+      assert.equal((await firstSync.review(config,selection,options)).mode,'ordinary');
+      assert.equal((await answers()).color,undefined);
+    });
+    const importer=require('../src/services/magento/retained-remote-import');
+    await t.test('retained import preview classifies fields and writes nothing',async()=>{
+      const before=await canonical(),counts=await ledgerCounts(),review=await importer.review(config,selection,options);
+      assert.equal(review.status,'importable',JSON.stringify(review));
+      for(const target of ['kolir','typy_obrobky_burshtynu']){
+        const row=review.fields.find(f=>f.target===target);
+        assert.equal(row.status,'importable');assert.equal(row.retainedRemote,remoteValues[target]);assert.match(String(row.after),/^[0-9]+$/);
+      }
+      assert.deepEqual(await canonical(),before);assert.deepEqual(await ledgerCounts(),counts);
+    });
+    await t.test('operator script preview runs on the ordinary pool and records nothing',async()=>{
+      const script=require('../scripts/first-sync-retained-import'),fs=require('node:fs/promises'),os=require('node:os');
+      const directory=await fs.mkdtemp(path.join(os.tmpdir(),'retained-import-')),input=path.join(directory,'input.json');
       await fs.writeFile(input,JSON.stringify({bindingRevisionId:binding.id,items:[{sku:x.full_sku}]}));
-      const runtime=require('../scripts/sv-campaign-stages').createRuntime(path.resolve(__dirname,'..'));
-      // Reuse the controlled observation; the real service, locks and pool stay in use.
-      runtime.first={...runtime.first,review:(cfg,selected,run)=>firstSync.review(cfg,selected,{...run,preview:options.preview,observeRate:options.observeRate})};
-      const before=await canonical(),fieldsBefore=(await db.query('SELECT count(*)::int n FROM magento_first_sync_fields')).rows[0].n,lines=[];
+      const service={review:(cfg,selected,run)=>importer.review(cfg,selected,{...run,preview:options.preview,observeRate:options.observeRate}),
+        apply:()=>assert.fail('Preview never applies')};
+      const before=await canonical(),lines=[];
       const code=await script.main(['--mode','preview','--server-root',path.resolve(__dirname,'..'),'--input',input,'--output',path.join(directory,'out.jsonl'),
         '--expected-database',name,'--actor-id',String(actor),'--installation-key','schema6-fixture'],
-      {runtime,pool:db,config,fetchImpl:storeConfigs,print:line=>lines.push(JSON.parse(line)),printError:line=>lines.push({error:line})});
+      {service,pool:db,config,fetchImpl:storeConfigs,print:line=>lines.push(JSON.parse(line)),printError:line=>lines.push({error:line})});
       assert.equal(code,0,JSON.stringify(lines));
-      assert.deepEqual(lines[0],{sku:x.full_sku,status:'retainable',fields:['all/kolir','all/typy_obrobky_burshtynu'],imports:[]});
+      assert.deepEqual(lines[0],{sku:x.full_sku,status:'importable',fields:['all/kolir','all/typy_obrobky_burshtynu']});
       assert.deepEqual(await canonical(),before);
-      assert.equal((await db.query('SELECT count(*)::int n FROM magento_first_sync_fields')).rows[0].n,fieldsBefore);
     });
-    await t.test('retain_remote records a terminal receipt without changing Amber, completes the session and replays once',async()=>{
-      const before=await canonical(),review=await firstSync.review(config,selection,options);
-      const choices=[{target:'kolir',scope:'all',choice:'retain_remote'},{target:'typy_obrobky_burshtynu',scope:'all',choice:'retain_remote'}];
-      const command={...selection,previewToken:review.previewToken,choices};
-      const saved=await firstSync.apply(config,command,options);
-      assert.deepEqual(saved.receipt.fields.map(f=>f.state),['remote_retained','remote_retained']);
-      assert.equal(saved.complete,true,JSON.stringify(saved));assert.equal(saved.readyForOutbound,true);
-      assert.deepEqual(await canonical(),before,'Amber product, requests and jobs are unchanged');
-      const rows=(await db.query("SELECT target,evidence FROM magento_first_sync_fields WHERE state='remote_retained' ORDER BY target")).rows;
-      assert.deepEqual(rows.map(r=>r.target),['kolir','typy_obrobky_burshtynu']);
-      for(const row of rows){assert.equal(row.evidence.after,null);assert.equal(row.evidence.source.decision,'retain_remote');
-        assert.equal(row.evidence.remote.value,remoteValues[row.target]);}
-      const retry=await firstSync.apply(config,command,{...options,preview:()=>assert.fail('Retry cannot reread Magento')});
-      assert.equal(retry.receipt.alreadyApplied,true);
-      assert.equal((await firstSync.review(config,selection,options)).mode,'ordinary');
+    await t.test('apply imports the retained colour missing-only; SKU, ledger and Magento stay unchanged; replay is idempotent',async()=>{
+      const counts=await ledgerCounts(),review=await importer.review(config,selection,options);
+      const saved=await importer.apply(config,{...selection,previewToken:review.previewToken},options);
+      assert.deepEqual(saved.imported.map(f=>f.target),['kolir','typy_obrobky_burshtynu']);assert.equal(saved.remoteWrites,0);assert.equal(saved.alreadyApplied,false);
       const product=await actual(x.id);
-      assert.equal(product.details.answers.color,undefined);assert.equal(product.details.answers.material,undefined);
+      assert.equal(String(product.details.answers.color),String(review.fields.find(f=>f.target==='kolir').after));
+      assert.equal(String(product.details.answers.material),String(review.fields.find(f=>f.target==='typy_obrobky_burshtynu').after));
       assert.equal(product.full_sku,fixtureProduct.full_sku);
+      assert.equal((await db.query('SELECT count(*)::int n FROM sku_registry WHERE full_sku=$1',[fixtureProduct.full_sku])).rows[0].n,1);
+      assert.deepEqual(await ledgerCounts(),counts,'the completed first-sync ledger is immutable history');
+      assert.equal((await db.query('SELECT count(*)::int n FROM magento_sync_jobs')).rows[0].n,0);
+      const audit=(await db.query("SELECT details FROM audit_events WHERE event_key='product.magento_retained_values_imported'")).rows;
+      assert.equal(audit.length,1);assert.equal(audit[0].details.evidence.proofKind,'opaque_legacy_sku_retained_import');
+      const retry=await importer.apply(config,{...selection,previewToken:review.previewToken},{...options,preview:()=>assert.fail('Retry cannot reread Magento')});
+      assert.equal(retry.alreadyApplied,true);
+      const again=await importer.review(config,selection,options);
+      assert.deepEqual(again.fields.map(f=>f.status),['already_imported','already_imported']);assert.equal(again.status,'already_imported');
+      await assert.rejects(importer.apply(config,{...selection,previewToken:again.previewToken},options),{code:'MAGENTO_RETAINED_IMPORT_NOTHING_TO_IMPORT'});
+      // The ordinary product now evaluates the imported values to Magento's options.
+      const evaluated=require('../src/services/export-templates/evaluate').evaluateProduct(compiled,(await previews.readPreviewProduct(db,{productId:x.id,bindingRevisionId:binding.id})).product);
+      assert.deepEqual(evaluated.errors,[]);
+      for(const target of ['kolir','typy_obrobky_burshtynu']){
+        const attribute=binding.bindings.attributes.find(a=>a.target===target&&a.rowId==='base'&&a.routeKey==='SV.souvenir!=value_id:5');
+        assert.equal(binding.bindings.options.find(o=>o.bindingKey===attribute.bindingKey&&o.evaluatedOutput===evaluated.base[target]&&o.reviewState==='approved').optionId,remoteValues[target]);
+      }
     });
-    await t.test('Magento summary coverage counts the completed current product for this origin only',async()=>{
-      const problems=require('../src/services/magento/sync-problems');
-      const summary=await problems.summary(db,config);
-      assert.deepEqual(summary.coverage,{total:1,synced:1,categories:[{code:'SV',name:summary.coverage.categories[0].name,total:1,synced:1}]});
-      assert.equal((await problems.summary(db,{...config,baseUrl:'https://other-origin.invalid'})).coverage.synced,0);
-      assert.equal((await problems.summary(db,{configured:false})).coverage,null);
-      await db.query('UPDATE products SET exclude_from_export=1 WHERE id=$1',[x.id]);
-      assert.equal((await problems.summary(db,config)).coverage.total,0,'excluded products are not counted');
-      await db.query('UPDATE products SET exclude_from_export=0 WHERE id=$1',[x.id]);
-    });
-    await t.test('the database refuses a malformed retained receipt even inside the ledger transaction',async()=>{
+    await t.test('the database refuses any new retained receipt even inside the ledger transaction',async()=>{
       const session=(await db.query('SELECT * FROM magento_first_sync_sessions LIMIT 1')).rows[0];
       await assert.rejects(db.query(`INSERT INTO magento_first_sync_fields(session_id,revision,target,scope,state,evidence)
-        VALUES($1,$2,'kolir','all','remote_retained','{"target":"kolir","scope":"all","state":"remote_retained","after":"1"}'::jsonb)`,
-        [session.id,Number(session.revision)+1]),/first_sync_remote_retained_shape|FIRST_SYNC/);
+        VALUES($1,$2,'kolir','all','remote_retained',$3::jsonb)`,[session.id,Number(session.revision)+1,JSON.stringify(retained[0].evidence)]),
+      /FIRST_SYNC_REMOTE_RETENTION_CLOSED/);
     });
   }finally{if(db)await db.end();if(created)await control.query('DROP DATABASE '+name);await control.end();}
 });
