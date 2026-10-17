@@ -9,7 +9,7 @@ const MAX_ITEMS = 50;
 const SCOPE = 'first_sync_review_only';
 const HELP = 'node first-sync-history-batch.js --server-root /app --mode preview|apply '
   + '--input SCOPE.json --scope-sha256 SHA256 --output NEW_JOURNAL.jsonl '
-  + '--expected-database NAME --actor-id ID\n'
+  + '--expected-database NAME --actor-id ID [--schema-cache-seconds 0-600] [--preview-all]\n'
   + 'Exact 1..50 SKU history admissions using fresh canonical review and admission. '
   + 'Only scoped audit records may be written; no field choices, enqueue or Magento writes. '
   + 'Stops on the first uncertainty. No automatic retry or resume.';
@@ -17,21 +17,26 @@ const hashBytes = value => createHash('sha256').update(value).digest('hex');
 const fail = code => { throw Object.assign(Error(code), { code, statusCode: 409 }); };
 const safeCode = e => e?.code === 'EEXIST' ? 'HISTORY_BATCH_OUTPUT_EXISTS'
   : typeof e?.code === 'string' && /^[A-Z0-9_]{1,160}$/.test(e.code) ? e.code : 'HISTORY_BATCH_FAILED';
+const { schemaReadCache, parseSeconds } = require('./magento-schema-read-cache');
+const GLOBAL = /PUBLICATION|BINDING_CHANGED|INSTALLATION|PERMISSION|ADMINISTRATOR|AUTHORI|ACTOR|DATABASE|INTERRUPTED|NOT_CONFIGURED|JOURNAL|OUTPUT|LIMIT/;
 const positiveId = n => Number.isSafeInteger(n) && n > 0;
 const hex = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 function argumentsFor(args) {
   if (args.length === 1 && args[0] === '--help') return { help: true };
   const names = { '--server-root': 'serverRoot', '--mode': 'mode', '--input': 'input',
-    '--scope-sha256': 'scopeHash', '--output': 'output', '--expected-database': 'database', '--actor-id': 'actor' }, out = {};
+    '--scope-sha256': 'scopeHash', '--output': 'output', '--expected-database': 'database', '--actor-id': 'actor',
+    '--schema-cache-seconds': 'schemaCacheSeconds' }, out = {};
   for (let i = 0; i < args.length; i += 2) {
+    if (args[i] === '--preview-all' && !Object.hasOwn(out, 'previewAll')) { out.previewAll = true; i--; continue; }
     const key = names[args[i]], value = args[i + 1];
     if (!key || Object.hasOwn(out, key) || typeof value !== 'string' || !value.trim()
       || value.startsWith('--') || /[\u0000-\u001f\u007f]/.test(value)) fail('HISTORY_BATCH_ARGUMENTS');
     out[key] = value;
   }
   if (!['preview', 'apply'].includes(out.mode) || !out.input || !out.output || !out.database
-    || !hex(out.scopeHash) || !/^[1-9][0-9]*$/.test(out.actor || '') || !positiveId(Number(out.actor))) fail('HISTORY_BATCH_ARGUMENTS');
-  out.actor = Number(out.actor); out.serverRoot = path.resolve(out.serverRoot || path.join(__dirname, '..'));
+    || !hex(out.scopeHash) || !/^[1-9][0-9]*$/.test(out.actor || '') || !positiveId(Number(out.actor))
+    || out.previewAll && out.mode !== 'preview' || parseSeconds(out.schemaCacheSeconds) === null) fail('HISTORY_BATCH_ARGUMENTS');
+  out.actor = Number(out.actor); out.schemaCacheSeconds = parseSeconds(out.schemaCacheSeconds); out.previewAll = out.previewAll === true; out.serverRoot = path.resolve(out.serverRoot || path.join(__dirname, '..'));
   return out;
 }
 function validateInput(input, runtime) {
@@ -193,7 +198,8 @@ async function main(args = process.argv.slice(2), dependencies = {}) {
     const directory = await fs.open(path.dirname(path.resolve(options.output)), 'r');
     try { await directory.sync(); } finally { await directory.close(); }
     const run = { databasePool: pool, actorUserId: options.actor,
-      fetchImpl: getOnly(dependencies.fetchImpl || globalThis.fetch), sensitiveValues: runtime.databaseSecrets(env) };
+      fetchImpl: getOnly(schemaReadCache(dependencies.fetchImpl || globalThis.fetch, options.schemaCacheSeconds)),
+      sensitiveValues: runtime.databaseSecrets(env) };
     const append = async value => {
       const artifact = { contract: 'first-sync-history-batch-journal-v1', at: new Date().toISOString(), ...value };
       runtime.audit.assertEvidenceSafe(artifact, config, run.sensitiveValues);
@@ -215,7 +221,9 @@ async function main(args = process.argv.slice(2), dependencies = {}) {
       await append({ type: 'receipt', ...result });
       unconfirmed = result.status === 'unconfirmed'; results.push(result);
       print(JSON.stringify({ sku: result.sku, status: result.status, checked: results.length, total: scope.items.length }));
-      if (!['recorded', 'already_admitted', 'available'].includes(result.status) || interrupted) break;
+      // Preview writes nothing: --preview-all reports every item-level blocker in one run.
+      const continuable = options.previewAll && result.status === 'blocked' && !GLOBAL.test(result.code || '');
+      if (!['recorded', 'already_admitted', 'available'].includes(result.status) && !continuable || interrupted) break;
     }
     const summary = { type: 'complete', mode: options.mode, scopeHash: options.scopeHash, total: scope.items.length,
       checked: results.length, notChecked: scope.items.length - results.length,

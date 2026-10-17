@@ -543,3 +543,22 @@ test('directory sync failure closes its handle and aborts before any domain call
   assert.equal(f.calls.length, 0);
   assert.equal((await fs.stat(f.output)).size, 0);
 });
+
+test('--preview-all reports later items after an item-level blocker; apply never continues', async t => {
+  for (const all of [false, true]) {
+    const f = await fixture(t, 3);
+    f.scenarios[1].review.blockers = [{ code: 'FIRST_SYNC_IDENTITY_CHANGED' }];
+    const code = await runner.main([...args(f, 'preview'), ...(all ? ['--preview-all'] : [])], f.dependencies);
+    assert.equal(code, 2, JSON.stringify(f.errors));
+    const lines = await parseLines(f.output), rows = receipts(lines);
+    assert.deepEqual(rows.map(row => row.status), all ? ['available', 'blocked', 'available'] : ['available', 'blocked']);
+    assert.equal(lines.at(-1).notChecked, all ? 0 : 1);
+    assert.equal(f.calls.filter(call => call.stage === 'apply').length, 0);
+  }
+  assert.throws(() => runner.argumentsFor(['--mode', 'apply', '--input', 'x', '--scope-sha256', 'a'.repeat(64), '--output', 'y',
+    '--expected-database', 'd', '--actor-id', '7', '--preview-all']), /HISTORY_BATCH_ARGUMENTS/);
+  for (const seconds of ['-1', '601', '1.5', 'x']) assert.throws(() => runner.argumentsFor(['--mode', 'preview', '--input', 'x',
+    '--scope-sha256', 'a'.repeat(64), '--output', 'y', '--expected-database', 'd', '--actor-id', '7', '--schema-cache-seconds', seconds]), /HISTORY_BATCH_ARGUMENTS/);
+  assert.equal(runner.argumentsFor(['--mode', 'preview', '--input', 'x', '--scope-sha256', 'a'.repeat(64), '--output', 'y',
+    '--expected-database', 'd', '--actor-id', '7', '--schema-cache-seconds', '120']).schemaCacheSeconds, 120);
+});

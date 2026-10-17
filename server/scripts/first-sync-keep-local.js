@@ -12,8 +12,9 @@ const { createRequire } = require('node:module');
 const TARGETS = new Set(['price', 'vaha_vyrobu', 'decor_weight', 'dovzhyna_namystyny', 'diametr_namystyny',
   'dovzhyna_vyrobu', 'rozmir_kameniu']);
 const WEIGHTS = new Set(['vaha_vyrobu', 'decor_weight']);
+const { schemaReadCache, parseSeconds } = require('./magento-schema-read-cache');
 const HELP = 'node first-sync-keep-local.js --mode preview|apply --server-root /app --input input.json '
-  + '--output NEW_FILE.jsonl --expected-database NAME --actor-id ID --installation-key KEY --targets a,b [--allow-imports]\n'
+  + '--output NEW_FILE.jsonl --expected-database NAME --actor-id ID --installation-key KEY --targets a,b [--allow-imports] [--schema-cache-seconds 0-600]\n'
   + 'Targets: ' + [...TARGETS].join(', ') + '. Weights only when Magento holds the historical whole-gram rounding. '
   + 'Sequential. Preview never writes. Products whose fresh plan also contains Magento imports are skipped unless --allow-imports.';
 const fail = code => { throw Object.assign(Error(code), { code }); };
@@ -24,7 +25,7 @@ const GLOBAL = /PUBLICATION|BINDING_CHANGED|INSTALLATION|PERMISSION|ADMINISTRATO
 function argumentsFor(args) {
   if (args.length === 1 && args[0] === '--help') return { help: true };
   const names = { '--mode': 'mode', '--server-root': 'serverRoot', '--input': 'input', '--output': 'output',
-    '--expected-database': 'database', '--actor-id': 'actor', '--installation-key': 'installation', '--targets': 'targets' };
+    '--expected-database': 'database', '--actor-id': 'actor', '--installation-key': 'installation', '--schema-cache-seconds': 'schemaCacheSeconds', '--targets': 'targets' };
   const out = { allowImports: false };
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--allow-imports' && !out.allowImportsSeen) { out.allowImports = true; out.allowImportsSeen = true; continue; }
@@ -39,7 +40,8 @@ function argumentsFor(args) {
     || !out.installation || !/^[1-9][0-9]*$/.test(out.actor || '') || out.allowImports && out.mode !== 'apply'
     || !targets.length || targets.some(target => !TARGETS.has(target)) || new Set(targets).size !== targets.length)
     fail('KEEP_LOCAL_ARGUMENTS');
-  return { ...out, actor: Number(out.actor), targets: new Set(targets) };
+  if (parseSeconds(out.schemaCacheSeconds) === null) fail('KEEP_LOCAL_ARGUMENTS');
+  return { ...out, schemaCacheSeconds: parseSeconds(out.schemaCacheSeconds), actor: Number(out.actor), targets: new Set(targets) };
 }
 function parseInput(bytes) {
   let input;
@@ -111,7 +113,7 @@ async function main(args = process.argv.slice(2), dependencies = {}) {
     pool = dependencies.pool || runtime.createPool(env);
     if ((await pool.query('SELECT current_database() AS name')).rows[0]?.name !== cli.database) fail('KEEP_LOCAL_DATABASE_MISMATCH');
     const run = { databasePool: pool, actorUserId: cli.actor, installation: cli.installation,
-      sensitiveValues: runtime.pool.databaseSecrets(env), fetchImpl: getOnly(dependencies.fetchImpl || globalThis.fetch) };
+      sensitiveValues: runtime.pool.databaseSecrets(env), fetchImpl: getOnly(schemaReadCache(dependencies.fetchImpl || globalThis.fetch, cli.schemaCacheSeconds)) };
     handle = await fs.open(cli.output, 'wx', 0o600);
     const counts = {};
     for (const sku of input.skus) {
