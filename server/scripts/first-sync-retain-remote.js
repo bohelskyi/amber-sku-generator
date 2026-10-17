@@ -9,8 +9,9 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { createRequire } = require('node:module');
 
+const { schemaReadCache, parseSeconds } = require('./magento-schema-read-cache');
 const HELP = 'node first-sync-retain-remote.js --mode preview|apply --server-root /app --input input.json '
-  + '--output NEW_FILE.jsonl --expected-database NAME --actor-id ID --installation-key KEY [--allow-imports]\n'
+  + '--output NEW_FILE.jsonl --expected-database NAME --actor-id ID --installation-key KEY [--allow-imports] [--schema-cache-seconds 0-600]\n'
   + 'Sequential. Preview never writes. Apply records only retain_remote choices through the canonical first-sync '
   + 'service; products whose fresh plan also contains other Magento imports are skipped unless --allow-imports.';
 const fail = code => { throw Object.assign(Error(code), { code }); };
@@ -21,7 +22,7 @@ const GLOBAL = /PUBLICATION|BINDING_CHANGED|INSTALLATION|PERMISSION|ADMINISTRATO
 function argumentsFor(args) {
   if (args.length === 1 && args[0] === '--help') return { help: true };
   const names = { '--mode': 'mode', '--server-root': 'serverRoot', '--input': 'input', '--output': 'output',
-    '--expected-database': 'database', '--actor-id': 'actor', '--installation-key': 'installation' };
+    '--expected-database': 'database', '--actor-id': 'actor', '--installation-key': 'installation', '--schema-cache-seconds': 'schemaCacheSeconds' };
   const out = { allowImports: false };
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--allow-imports' && !out.allowImportsSeen) { out.allowImports = true; out.allowImportsSeen = true; continue; }
@@ -34,7 +35,8 @@ function argumentsFor(args) {
   if (!['preview', 'apply'].includes(out.mode) || !out.serverRoot || !out.input || !out.output || !out.database
     || !out.installation || !/^[1-9][0-9]*$/.test(out.actor || '') || out.allowImports && out.mode !== 'apply')
     fail('RETAIN_REMOTE_ARGUMENTS');
-  return { ...out, actor: Number(out.actor) };
+  if (parseSeconds(out.schemaCacheSeconds) === null) fail('RETAIN_REMOTE_ARGUMENTS');
+  return { ...out, schemaCacheSeconds: parseSeconds(out.schemaCacheSeconds), actor: Number(out.actor) };
 }
 function parseInput(bytes) {
   let input;
@@ -105,7 +107,7 @@ async function main(args = process.argv.slice(2), dependencies = {}) {
     pool = dependencies.pool || runtime.createPool(env);
     if ((await pool.query('SELECT current_database() AS name')).rows[0]?.name !== cli.database) fail('RETAIN_REMOTE_DATABASE_MISMATCH');
     const run = { databasePool: pool, actorUserId: cli.actor, installation: cli.installation,
-      sensitiveValues: runtime.pool.databaseSecrets(env), fetchImpl: getOnly(dependencies.fetchImpl || globalThis.fetch) };
+      sensitiveValues: runtime.pool.databaseSecrets(env), fetchImpl: getOnly(schemaReadCache(dependencies.fetchImpl || globalThis.fetch, cli.schemaCacheSeconds)) };
     handle = await fs.open(cli.output, 'wx', 0o600);
     const counts = {};
     for (const sku of input.skus) {

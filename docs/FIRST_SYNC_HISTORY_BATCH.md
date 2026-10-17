@@ -69,6 +69,19 @@ The runner does not implement a second admission policy or direct SQL mutations.
 Category blockers remain visible diagnostics; this separate admission does not
 resolve them or approve category ownership/publication.
 
+`--preview-all` (preview only) continues after an item-level `blocked` result so
+one run reports every SKU; global authority/publication/database failures still
+stop. Apply always stops at the first non-admitted item.
+
+`--schema-cache-seconds N` (0–600, default 0) lets one run reuse identical GET
+responses of Magento schema/topology endpoints (store topology and configs,
+attribute sets and memberships, attributes and their options, category tree) for at
+most N seconds. Product, inventory and every other read stay fresh; failures are
+never reused. `first-sync-keep-local.js` and `first-sync-retain-remote.js` accept the
+same option. A Magento schema change inside the window is observed only after the
+window expires or by the next run, so keep the window short and do not edit Magento
+attributes while a cached run is in progress.
+
 Each confirmed receipt is fsynced before the next SKU. On a blocker, exception,
 invalid receipt, interruption or journal failure, processing stops. Earlier
 confirmed admissions remain committed: the batch is sequential, not atomic.
