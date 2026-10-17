@@ -164,5 +164,46 @@ test('080 legacy SV remote retention records terminal first-sync receipts withou
         VALUES($1,$2,'kolir','all','remote_retained','{"target":"kolir","scope":"all","state":"remote_retained","after":"1"}'::jsonb)`,
         [session.id,Number(session.revision)+1]),/first_sync_remote_retained_shape|FIRST_SYNC/);
     });
+    await t.test('081 admits the magento_managed SEO retained shape and keeps the 080 shape strict',async()=>{
+      const runner=require('../src/db/run-migrations'),fs=require('node:fs/promises');
+      const sql=await fs.readFile(path.resolve(__dirname,'../migrations/081_first_sync_magento_managed_seo.sql'),'utf8');
+      assert.equal((await db.query("SELECT checksum FROM schema_migrations WHERE name='081_first_sync_magento_managed_seo.sql'")).rows[0].checksum,runner.getMigrationChecksum(sql));
+      const client=await db.connect();
+      try{
+        await client.query('BEGIN');
+        // The CHECK constraint alone, without the ledger triggers and foreign keys.
+        await client.query('CREATE TEMP TABLE shape_probe (LIKE magento_first_sync_fields INCLUDING CONSTRAINTS INCLUDING DEFAULTS) ON COMMIT DROP');
+        const seo={target:'meta_title',scope:'all',state:'remote_retained',before:{known:true,present:true,value:'Amber title'},
+          remote:{known:true,present:true,value:'Magento title'},after:null,
+          source:{kind:'derived',field:'meta_title',routeKey:'CH:all',decision:'retain_remote',retention:'magento_managed_seo'}};
+        let probe=0;
+        const insert=async evidence=>{
+          await client.query(`SAVEPOINT p${++probe}`);
+          try{
+            await client.query(`INSERT INTO shape_probe(session_id,revision,target,scope,state,evidence) SELECT session_id,revision+1000+$4,$1,$2,$3,$5::jsonb FROM magento_first_sync_fields LIMIT 1`,
+              [evidence.target,evidence.scope,evidence.state,probe,JSON.stringify(evidence)]);
+            await client.query(`RELEASE SAVEPOINT p${probe}`);return true;
+          }catch(error){await client.query(`ROLLBACK TO SAVEPOINT p${probe}`);assert.equal(error.constraint,'first_sync_remote_retained_shape',error.message);return false;}
+        };
+        assert.equal(await insert(seo),true);
+        assert.equal(await insert({...seo,target:'meta_description',scope:'en',source:{...seo.source,field:'meta_description'}}),true);
+        assert.equal(await insert({...seo,remote:{known:true,present:false,value:''}}),true,'an empty Magento SEO value is retained as read');
+        for(const malformed of [
+          {...seo,after:'Amber title'},
+          {...seo,remote:{known:false}},
+          {...seo,source:{...seo.source,field:'meta_description'}},
+          {...seo,target:'name',source:{...seo.source,field:'name'}},
+          {...seo,scope:'uk'},
+          {...seo,source:{...seo.source,kind:'semantic'}},
+          {...seo,source:{...seo.source,retention:undefined}},
+          {...seo,state:'equal'},
+          {target:'kolir',scope:'all',state:'remote_retained',before:{known:true,present:false},remote:{known:true,present:true,value:'1'},after:null,
+            source:{kind:'semantic',decision:'retain_remote',retention:'magento_managed_seo'}},
+        ])assert.equal(await insert(malformed),false,JSON.stringify(malformed));
+        await client.query('ROLLBACK');
+      }finally{client.release();}
+      const guard=(await db.query("SELECT prosrc FROM pg_proc WHERE proname='guard_first_sync_evidence'")).rows[0].prosrc;
+      assert.match(guard,/magento_managed_seo/);assert.match(guard,/FIRST_SYNC_REMOTE_RETENTION_UNPROVEN/);
+    });
   }finally{if(db)await db.end();if(created)await control.query('DROP DATABASE '+name);await control.end();}
 });
