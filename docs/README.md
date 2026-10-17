@@ -22,7 +22,7 @@ contracts and procedures. Archived records are dated history, not current behavi
 | [Export templates](EXPORT_TEMPLATES.md) | Template API, editor, immutable publications, template-level catalog fixes. |
 | [Shared export sessions](SHARED_EXPORT_SESSIONS.md) | Private/shared workflows, invitations, attempts and recovery. |
 | [Authentication and RBAC](AUTH_RBAC.md) | OIDC, sessions, active-user/CSRF boundary, permissions. |
-| [Database and migrations](DATABASE_MIGRATIONS.md) | Runner, forward-only rule, lock order, migration inventory 000–081. |
+| [Database and migrations](DATABASE_MIGRATIONS.md) | Runner, forward-only rule, lock order, migration inventory 000–083. |
 | [Operations](OPERATIONS.md) | Topology, deployments, health, shutdown, backup/restore, audit. |
 | [Application UX](APPLICATION_UX.md) | Navigation, shared UI primitives, terminology, acceptance boundaries. |
 
@@ -46,7 +46,7 @@ Product lifecycle details: [photos](PRODUCT_PHOTOS.md), [archive/restore visibil
 Start with the **[first-sync runbook](FIRST_SYNC_RUNBOOK.md)**: order of work, CLI
 index, publication side effects and traps. Per-tool details:
 
-- [History admission batch](FIRST_SYNC_HISTORY_BATCH.md)
+- [History admission batch](FIRST_SYNC_HISTORY_BATCH.md), [retained export disposition](RETAINED_EXPORT_DISPOSITION.md)
 - [CH decisions and keep-local batch](FIRST_SYNC_CH_DECISIONS.md)
 - [Temporary legacy SV retain_remote](FIRST_SYNC_RETAIN_REMOTE.md)
 - [Name completion batch](NAME_COMPLETION_BATCH.md), [initial names](FIRST_SYNC_INITIAL_NAMES.md), [campaign names adapter](FIRST_SYNC_CAMPAIGN_NAMES.md)

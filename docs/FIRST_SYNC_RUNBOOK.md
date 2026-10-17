@@ -26,6 +26,11 @@ enqueues or writes Magento directly.
      Run `--mode preview --preview-all` to see every blocker in one run, then
      `--mode apply` per scope file. Apply stops at the first non-admitted item; rerun it
      after transient `MAGENTO_TIMEOUT` (already admitted rows report `already_admitted`).
+   - Ordinary legacy products listed in a retained legacy export file report
+     `FIRST_SYNC_RETAINED_FILE_REVIEW_REQUIRED` in the review assessment. Record the
+     file's disposition from Magento readback with
+     [`retained-export-disposition.js`](RETAINED_EXPORT_DISPOSITION.md), then run the
+     history batch for them.
    - Products created by a correction/recount (lifecycle `hold/historical_ambiguity`
      with a correction ID): the batch reports `HISTORY_BATCH_ADMISSION_NOT_AVAILABLE`.
      Use the product problem page action «Дозволити оновлення після переобліку»
@@ -36,6 +41,10 @@ enqueues or writes Magento directly.
      with `--targets`.
    - Missing names/values come from Magento: [name completion](NAME_COMPLETION_BATCH.md),
      [initial names](FIRST_SYNC_INITIAL_NAMES.md).
+   - Legacy SV zero canonical weight with no recorded answer (`decor_weight`
+     `FIRST_SYNC_LEGACY_MISSING_ONLY_REVIEW_REQUIRED`): take Magento `decor_weight` with
+     [`canonical-weight-repair.js --source magento-readback`](CANONICAL_WEIGHT_REPAIR.md#magento-readback-source),
+     then the step 4 handoff.
    - Legacy SV characteristic empty in Amber and not emitted by the template:
      [`first-sync-retain-remote.js`](FIRST_SYNC_RETAIN_REMOTE.md) (temporary).
    - SV cohorts: [SV campaign](SV_CAMPAIGN.md) wraps history, names, fields and handoff.
@@ -97,6 +106,7 @@ Every publication has side effects on products that are **not yet synced**:
 | Script | Purpose | Doc |
 | --- | --- | --- |
 | `first-sync-history-batch.js` | Legacy history admission, ≤50 per scope | [history batch](FIRST_SYNC_HISTORY_BATCH.md) |
+| `retained-export-disposition.js` | Record a retained export file as imported, from Magento readback | [retained export disposition](RETAINED_EXPORT_DISPOSITION.md) |
 | `first-sync-keep-local.js` | Amber-wins decisions (price, rounding weight, CH dimensions) | [CH decisions](FIRST_SYNC_CH_DECISIONS.md) |
 | `first-sync-retain-remote.js` | Temporary legacy SV retain_remote | [retain remote](FIRST_SYNC_RETAIN_REMOTE.md) |
 | `name-completion-batch.js` | Fill missing names from Magento | [name completion](NAME_COMPLETION_BATCH.md) |
@@ -108,7 +118,7 @@ Every publication has side effects on products that are **not yet synced**:
 | `magento-carry-unchanged-reviews.js` | Re-approve identical successor decisions | this page |
 | `magento-publication.js` | H3b publication preview/apply with handoff | [integration](MAGENTO_INTEGRATION.md#reviewed-publication-and-controlled-handoff-h3b) |
 | `sv-optional-characteristics.js` | One-off SV template change (2026-10-14) | script header |
-| `canonical-weight-repair.js` | Reviewed zero-weight repair | [weight repair](CANONICAL_WEIGHT_REPAIR.md) |
+| `canonical-weight-repair.js` | Reviewed zero-weight repair from the recorded answer or (`--source magento-readback`) Magento `decor_weight` | [weight repair](CANONICAL_WEIGHT_REPAIR.md), [Magento source](CANONICAL_WEIGHT_REPAIR.md#magento-readback-source) |
 
 ## Open follow-ups
 

@@ -157,7 +157,7 @@ test('explicit cutover-only first-sync admission preserves history and field dec
       (SELECT jsonb_agg(a ORDER BY id) FROM audit_events a) audits`)).rows[0]);
 
     const products=[];
-    for(let n=0;n<19;n++) products.push(await product());
+    for(let n=0;n<20;n++) products.push(await product());
     const svAcceptance=(await insertProductFixture(db,`INSERT INTO products(id,full_sku,category,weight,total_price_uah,details,
       magento_name_subject_ua,magento_name_subject_en)
       VALUES(1488,'SV11500004','SV',132.300,2950,'{"answers":{"weight":"132,3"},"manualPriceUah":2950}',
@@ -531,6 +531,52 @@ test('explicit cutover-only first-sync admission preserves history and field dec
       await assert.rejects(write(tx=>admission.assertOnClient(tx,config,captured.observation,captured.first.historyAdmission)),
         {code:'MAGENTO_FIRST_SYNC_HISTORY_ADMISSION_CHANGED'});
       assert.equal(await snapshot(),before);
+    });
+    await t.test('a recorded 082 disposition of the exact retained file resolves only its membership',async()=>{
+      const p=products[19],id=randomUUID(),disposition=require('../src/services/magento/retained-export-disposition');
+      await write(tx=>tx.query(`INSERT INTO export_snapshots(id,idempotency_key,from_sku,to_sku,resolved_to_sku,exported_to_product_id,
+        row_count,file_name,csv_content,status) VALUES($1,$1,$2,$2,$2,$3,1,'consumed.csv',$4,'generated')`,
+      [id,p.full_sku,p.id,`sku,price_uah\r\n${p.full_sku},42\r\n`]));
+      assert.equal((await review(p)).historyReviewAssessment.code,'FIRST_SYNC_RETAINED_FILE_REVIEW_REQUIRED');
+      const generated=(await db.query('SELECT generated_at FROM export_snapshots WHERE id=$1',[id])).rows[0].generated_at;
+      const at=ms=>new Date(generated.getTime()+ms).toISOString().slice(0,19).replace('T',' ');
+      const magento=createdAt=>async(url,init)=>{
+        assert.equal(init?.method || 'GET','GET');
+        assert.equal(new URL(url).searchParams.get('searchCriteria[filter_groups][0][filters][0][value]'),p.full_sku);
+        return new Response(JSON.stringify({items:[{id:9100+p.id,sku:p.full_sku,created_at:createdAt}],total_count:1}),
+          {status:200,headers:{'content-type':'application/json'}});
+      };
+      const run=createdAt=>({databasePool:db,actorUserId:actor,fetchImpl:magento(createdAt)});
+      const late=await disposition.preview(config,{snapshotId:id},run(at(9*24*3600e3)));
+      assert.deepEqual(late.blockers.map(b=>b.code),['MAGENTO_CREATED_OUTSIDE_IMPORT_WINDOW']);assert.equal(late.previewToken,undefined);
+      const before=await snapshot(),plan=await disposition.preview(config,{snapshotId:id},run(at(3600e3)));
+      assert.equal(plan.members,1);assert.deepEqual(plan.blockers,[]);assert.equal(plan.alreadyRecorded,false);assert.match(plan.previewToken,/^[a-f0-9]{64}$/);
+      assert.equal(await snapshot(),before,'preview records nothing');
+      const command={snapshotId:id,previewToken:plan.previewToken,reason:'Magento readback shows the file was imported'};
+      await assert.rejects(disposition.apply(config,{...command,previewToken:'0'.repeat(64)},run(at(3600e3))),{code:'RETAINED_DISPOSITION_CHANGED'});
+      await assert.rejects(disposition.apply(config,command,run(at(2*3600e3))),{code:'RETAINED_DISPOSITION_CHANGED'});
+      await assert.rejects(disposition.apply(config,command,{...run(at(3600e3)),actorUserId:9999999}),{code:'RETAINED_DISPOSITION_ADMINISTRATOR_REQUIRED'});
+      const recorded=await disposition.apply(config,command,run(at(3600e3)));
+      assert.equal(recorded.alreadyApplied,false);
+      assert.equal((await disposition.apply(config,command,run(at(3600e3)))).alreadyApplied,true);
+      const row=(await db.query('SELECT * FROM retained_export_dispositions WHERE snapshot_id=$1',[id])).rows[0];
+      assert.equal(row.evidence_hash,plan.previewToken);assert.equal(String(row.audit_event_id),recorded.auditEventId);
+      assert.equal(row.origin_hash,c.originHash(config.baseUrl));
+      const next=await review(p);assert.equal(next.mode,'review');
+      assert.equal(next.historyReviewAssessment.status,'available',JSON.stringify(next.historyReviewAssessment));assert.ok(next.historyReview);
+      // Another product of a file without a disposition stays blocked.
+      assert.equal((await review(products[10])).historyReviewAssessment.code,'FIRST_SYNC_RETAINED_FILE_REVIEW_REQUIRED');
+      await assert.rejects(db.query("UPDATE retained_export_dispositions SET reason='Changed afterwards reason' WHERE snapshot_id=$1",[id]),/permanent/);
+      await assert.rejects(db.query('DELETE FROM retained_export_dispositions WHERE snapshot_id=$1',[id]),/permanent/);
+      await assert.rejects(db.query('TRUNCATE retained_export_dispositions'),/permanent/);
+      const other=randomUUID();
+      await write(tx=>tx.query(`INSERT INTO export_snapshots(id,idempotency_key,from_sku,to_sku,resolved_to_sku,exported_to_product_id,
+        row_count,file_name,csv_content,status) VALUES($1,$1,$2,$2,$2,$3,1,'other.csv',$4,'generated')`,
+      [other,p.full_sku,p.id,`sku,price_uah\r\n${p.full_sku},43\r\n`]));
+      await assert.rejects(db.query(`INSERT INTO retained_export_dispositions(snapshot_id,disposition,basis,csv_sha256,origin_hash,evidence,
+        evidence_hash,reason,actor_user_id,audit_event_id) SELECT $1,disposition,basis,csv_sha256,origin_hash,evidence,evidence_hash,reason,
+        actor_user_id,audit_event_id FROM retained_export_dispositions WHERE snapshot_id=$2`,[other,id]),/evidence is invalid/);
+      assert.equal((await review(p)).historyReviewAssessment.code,'FIRST_SYNC_RETAINED_FILE_REVIEW_REQUIRED','a second undisposed file blocks again');
     });
     await t.test('malformed unindexed retained bytes block flag-only admission even with no target membership',async()=>{
       const p=products[12],id=randomUUID();

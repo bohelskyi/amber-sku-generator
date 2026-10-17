@@ -2190,7 +2190,10 @@ historical exposure indicator. Migration 032 can establish it from a cursor or
 range; it is not a Magento delivery receipt. It can be explicitly reviewed for
 field admission. Indexed membership, parsed retained CSV membership, proposed
 membership or any unresolved retained-index diagnostics block this lane. Empty
-indexed membership alone never establishes absence from historical files.
+indexed membership alone never establishes absence from historical files. The only
+exception is a file with a recorded migration-082 disposition for this origin whose
+stored bytes are unchanged ([retained export disposition](RETAINED_EXPORT_DISPOSITION.md));
+every other member file still blocks, and the disposition is sealed into the proof.
 
 Preview explains whether admission is available or the specific reason it was
 refused. **Переглянути допуск до полів → Дозволити перегляд полів** records one
