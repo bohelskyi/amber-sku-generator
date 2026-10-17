@@ -61,6 +61,8 @@ const V = Object.freeze({
   svSymbolic: { 1: 'Українська', 2: 'Військова', 3: 'Спортивна',
     4: 'Професійна', 5: 'Релігійна', 6: 'Корпоративна' },
   svGames: { 1: 'Шахи', 2: 'Нарди', 3: 'Доміно', 4: 'Шашки/дама' },
+  // Category path segments cannot contain '/', so checkers use their own store section.
+  svGameCategory: { 1: 'Шахи', 2: 'Нарди', 3: 'Доміно', 4: 'Шашки' },
   svStoneProcessing: { 0: 'Необроблений', 1: 'Полірований' },
   svAdditionalStone: { 1: 'З інклюзом', 2: 'На підставці' },
 });

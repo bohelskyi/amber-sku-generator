@@ -202,7 +202,8 @@ function materializeMagentoV1(catalog, { publicSku = false } = {}) {
     } else if (group === 'SV') {
       const regular = join([literal(root), path('{type}', { type: attr('suveniry') }),
         when(present(attr('vyd_statuetky')), path('{type}/{subtype}', { type: attr('suveniry'), subtype: attr('vyd_statuetky') })),
-        when(present(attr('nastlni_ihry')), path('{type}/{game}', { type: attr('suveniry'), game: attr('nastlni_ihry') }))]);
+        when(present(attr('nastlni_ihry')), path('{type}/{game}', { type: attr('suveniry'),
+          game: lookup(key('table_games'), 'svGameCategory', attr('nastlni_ihry')) }))]);
       const stone = join([literal('Default/Камінь'), interpolate('Default/Камінь/{type}', { type: attr('suveniry') }),
         when(present(attr('kamin_obrobka')), interpolate('Default/Камінь/{processing}', { processing: attr('kamin_obrobka') }))]);
       cell('categories', when(eq(key('souvenir'), '5'), stone, regular));
