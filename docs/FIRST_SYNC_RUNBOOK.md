@@ -114,7 +114,5 @@ Every publication has side effects on products that are **not yet synced**:
 
 - Remove legacy SKU dependencies after the mass sync (see [retain remote](FIRST_SYNC_RETAIN_REMOTE.md)).
 - Ignore volatile country labels in the Magento schema fingerprint.
-- `first-sync-keep-local.js` / `first-sync-retain-remote.js` count an equal-name
-  `name_received` receipt as an import; use `--allow-imports` when the preview lists no imports.
 - Successor preparation could carry unchanged reviewed category paths instead of
   relying on the sample.
