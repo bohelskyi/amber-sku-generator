@@ -57,6 +57,9 @@ function planFor(inspection) {
     && !choices.some(choice => key(choice) === key(row))).map(key);
   return { choices, imports };
 }
+// A name equal to Magento is receipted as name_received without changing Amber;
+// only a row whose fresh status is an import (or an accepted remote value) imports.
+const isImport = row => row.status === 'imported' || row.record?.state === 'imported';
 function validatePrepared(prepared, choices, allowImports) {
   const selected = new Set(choices.map(key));
   for (const row of prepared?.rows || []) {
@@ -64,7 +67,7 @@ function validatePrepared(prepared, choices, allowImports) {
     if (selected.has(key(row))) {
       if (row.record.state !== 'remote_retained' || row.record.source?.decision !== 'retain_remote' || row.record.after !== null)
         fail('RETAIN_REMOTE_TRANSITION_CHANGED');
-    } else if (['imported', 'name_received'].includes(row.record.state) && !allowImports) fail('RETAIN_REMOTE_OTHER_IMPORTS_PRESENT');
+    } else if (isImport(row) && !allowImports) fail('RETAIN_REMOTE_OTHER_IMPORTS_PRESENT');
   }
   if (choices.some(choice => !(prepared?.rows || []).some(row => key(row) === key(choice)))) fail('RETAIN_REMOTE_TRANSITION_CHANGED');
 }
