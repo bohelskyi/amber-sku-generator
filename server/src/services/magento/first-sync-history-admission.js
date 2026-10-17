@@ -94,13 +94,25 @@ function exactReceipt(row, identity, history) {
   return envelope;
 }
 
+// Reviewed delivery history does not depend on the binding publication. A receipt
+// recorded under an earlier published revision of the same installation/origin
+// stays valid for a later publication; every other receipt/history check is exact.
+function admittedIdentity(binding, identity) {
+  if (binding?.id === identity.bindingRevisionId) return identity;
+  if (!binding || binding.state !== 'published' || binding.installation_key !== identity.installationKey
+    || binding.origin_hash !== identity.originHash || !counter(binding.version_number)
+    || !counter(binding.current_version_number)
+    || BigInt(binding.version_number) >= BigInt(binding.current_version_number)) return null;
+  return { ...identity, bindingRevisionId: binding.id };
+}
 async function readOnClient(client, config, observation, { history = null } = {}) {
   const identity = identityFromObservation(observation);
   if (!validIdentity(identity) || identity.originHash !== c.originHash(config.baseUrl) || observation.raw.sku !== identity.sku)
     return denied('FIRST_SYNC_HISTORY_ADMISSION_IDENTITY_CHANGED');
   const rows = (await client.query(`SELECT to_jsonb(a) receipt,to_jsonb(h) handoff,
     to_jsonb(i)||jsonb_build_object('generation',i.generation::text,'public_product_identity_id',i.public_product_identity_id::text) item,
-    to_jsonb(b) binding,to_jsonb(f) lifecycle,
+    to_jsonb(b)||jsonb_build_object('version_number',b.version_number::text,
+      'current_version_number',(SELECT v.version_number::text FROM magento_binding_revisions v WHERE v.id=$3)) binding,to_jsonb(f) lifecycle,
     to_jsonb(r)||jsonb_build_object('desired_generation',r.desired_generation::text,'public_product_identity_id',r.public_product_identity_id::text) request
     FROM product_full_export_state f
     JOIN audit_events a ON a.subject_id=f.evidence->'magentoPriorExposure'->>'planHash'
@@ -109,15 +121,17 @@ async function readOnClient(client, config, observation, { history = null } = {}
     JOIN magento_binding_handoff_items i ON i.handoff_id=h.id AND i.product_id=f.product_id
     JOIN magento_binding_revisions b ON b.id=h.binding_revision_id
     LEFT JOIN magento_product_sync_requests r ON r.public_product_identity_id=i.public_product_identity_id
-    WHERE f.product_id=$1 ORDER BY a.id LIMIT 2`, [identity.productId, Object.keys(recipes)])).rows;
+    WHERE f.product_id=$1 ORDER BY a.id LIMIT 2`, [identity.productId, Object.keys(recipes), identity.bindingRevisionId])).rows;
   if (rows.length !== 1) return denied('FIRST_SYNC_HISTORY_ADMISSION_RECEIPT_REQUIRED');
   history = history || await histories.read(client, identity.productId);
   if (!historyProjection(history, identity)) return denied('FIRST_SYNC_HISTORY_ADMISSION_CHANGED');
+  const admitted = admittedIdentity(rows[0].binding, identity);
+  if (!admitted) return denied('FIRST_SYNC_HISTORY_ADMISSION_RECEIPT_REQUIRED');
   let envelope;
-  try { envelope = exactReceipt(rows[0], identity, history); }
+  try { envelope = exactReceipt(rows[0], admitted, history); }
   catch { return denied('FIRST_SYNC_HISTORY_ADMISSION_RECEIPT_REQUIRED'); }
   if (!envelope) return denied('FIRST_SYNC_HISTORY_ADMISSION_RECEIPT_REQUIRED');
-  const current = await captureOnClient(client, identity, { history });
+  const current = await captureOnClient(client, admitted, { history });
   if (c.hash(current) !== c.hash(envelope)) return denied('FIRST_SYNC_HISTORY_ADMISSION_CHANGED');
   const admission = Object.freeze({}), evidenceHash = c.hash({ envelope, auditId: rows[0].receipt.id, handoffId: rows[0].handoff.id });
   proofs.set(admission, { identity, product: observation.amber.product, evidenceHash,
