@@ -1,14 +1,16 @@
 // Reviewed disposition of one retained legacy export file (migration 082).
-// Evidence is a fresh GET-only Magento readback: every product of the stored
-// CSV exists in this origin and was created there inside the file's import
-// window. Recording it permits first-sync history admission to treat that
-// file's membership as resolved; it changes no snapshot, product or delivery.
+// Evidence is a fresh GET-only Magento readback: every current product of the
+// stored CSV exists in this origin and was created there inside the file's
+// import window. A superseded (corrected/archived) member may be absent; it is
+// recorded unresolved. Recording it permits first-sync history admission to
+// treat only the resolved members' membership as resolved; it changes no
+// snapshot, product or delivery.
 const c = require('./binding-contract');
 const repair = require('../export-exposure/repair-loader');
 const { buildHistoricalIndex } = require('../export-exposure/historical-index');
 const { writeAuditEvent } = require('../../audit/audit-events');
 
-const FORMAT = 'retained-export-disposition-v1';
+const FORMAT = 'retained-export-disposition-v2';
 const DISPOSITION = 'consumed_and_reconciled';
 const BASIS = 'magento_readback_v1';
 const EVENT = 'export.retained_disposition_recorded';
@@ -37,7 +39,10 @@ async function inspectOnClient(client, snapshotId) {
   const entry = retained.snapshots.find(s => s.snapshotId === snapshotId);
   if (!entry || !entry.memberIds.length || entry.memberIds.length > MAX_MEMBERS) fail(409, 'RETAINED_DISPOSITION_MEMBERS_UNSUPPORTED');
   const products = new Map(input.products.map(p => [Number(p.id), p]));
-  const members = entry.memberIds.map(productId => ({ productId, sku: products.get(productId).full_sku }));
+  const members = entry.memberIds.map(productId => {
+    const p = products.get(productId);
+    return { productId, sku: p.full_sku, current: p.status === 'active' && p.corrected_to_product_id == null };
+  });
   const generatedAt = new Date(snapshot.generated_at);
   if (Number.isNaN(generatedAt.getTime())) fail(409, 'RETAINED_DISPOSITION_SNAPSHOT_INVALID');
   return { snapshotId, fileName: snapshot.file_name, generatedAt: generatedAt.toISOString(),
@@ -93,6 +98,8 @@ function assess(local, readings, originHash) {
   const from = generated - WINDOW_BEFORE_MS, to = generated + WINDOW_AFTER_MS;
   const blockers = [];
   for (const reading of readings) {
+    // A superseded version may have left Magento with its correction; it stays unresolved.
+    if (reading.code === 'MAGENTO_PRODUCT_MISSING' && !reading.current) continue;
     if (reading.code) { blockers.push({ sku: reading.sku, code: reading.code }); continue; }
     const time = remoteTime(reading.createdAt);
     if (!Number.isSafeInteger(reading.remoteId) || reading.remoteId <= 0 || time === null) blockers.push({ sku: reading.sku, code: 'MAGENTO_CREATED_AT_INVALID' });
@@ -102,10 +109,13 @@ function assess(local, readings, originHash) {
     generatedAt: local.generatedAt, csvSha256: local.csvSha256, originHash,
     window: { from: new Date(from).toISOString(), to: new Date(to).toISOString() },
     members: [...readings].sort((a, b) => a.productId - b.productId)
-      .map(r => ({ productId: r.productId, sku: r.sku, remoteId: r.remoteId ?? null, createdAt: r.createdAt ?? null })) };
+      .map(r => ({ productId: r.productId, sku: r.sku, current: r.current, resolved: !r.code,
+        remoteId: r.remoteId ?? null, createdAt: r.createdAt ?? null })) };
   const created = readings.map(r => r.createdAt).filter(Boolean).sort();
   return { evidence, evidenceHash: c.hash(evidence), blockers,
-    summary: { members: readings.length, createdFrom: created[0] || null, createdTo: created.at(-1) || null } };
+    summary: { members: readings.length, resolved: evidence.members.filter(m => m.resolved).length,
+      unresolvedSuperseded: evidence.members.filter(m => !m.resolved && !m.current).map(m => m.sku),
+      createdFrom: created[0] || null, createdTo: created.at(-1) || null } };
 }
 
 async function preview(config, { snapshotId }, { databasePool, fetchImpl = globalThis.fetch } = {}) {
@@ -160,12 +170,14 @@ async function apply(config, { snapshotId, previewToken, reason }, { databasePoo
   finally { client.release(); }
 }
 
-// Snapshots of this origin whose recorded disposition still matches the stored bytes.
-async function resolvedSnapshotsOnClient(client, retained, originHash) {
-  const rows = (await client.query(`SELECT snapshot_id,csv_sha256,evidence_hash,audit_event_id::text
+// Snapshots of this origin whose recorded disposition still matches the stored
+// bytes and resolves this exact product (Magento-verified at recording).
+async function resolvedSnapshotsOnClient(client, retained, originHash, productId) {
+  const rows = (await client.query(`SELECT snapshot_id,csv_sha256,evidence_hash,audit_event_id::text,evidence
     FROM retained_export_dispositions WHERE origin_hash=$1 ORDER BY snapshot_id`, [originHash])).rows;
   return rows.filter(row => retained.snapshots.some(s => s.snapshotId === row.snapshot_id
-    && s.evidence.snapshot.csvSha256 === row.csv_sha256))
+    && s.evidence.snapshot.csvSha256 === row.csv_sha256)
+    && Array.isArray(row.evidence?.members) && row.evidence.members.some(m => m.productId === productId && m.resolved === true))
     .map(row => ({ snapshotId: row.snapshot_id, csvSha256: row.csv_sha256, evidenceHash: row.evidence_hash, auditEventId: row.audit_event_id }));
 }
 

@@ -17,11 +17,18 @@ acknowledged.
 ## Evidence rule (`magento_readback_v1`)
 
 For a legacy file (no full-product lifecycle version) with no unresolved retained-index
-diagnostics, every product resolved from the file's CSV must:
+diagnostics, every **current** product (active, not corrected) resolved from the file's
+CSV must:
 
 - exist in Magento under the file's SKU exactly once (GET only);
 - have a Magento `created_at` (UTC) between 24 hours before and 7 days after the
   file's `generated_at`.
+
+A superseded member (a corrected or archived version) may be absent from Magento: its
+correction may have replaced or removed that SKU later. It is recorded with
+`resolved: false` and reported in the preview as `unresolvedSuperseded`; a found
+superseded member must pass the same checks. Evidence format
+`retained-export-disposition-v2` lists every member with `current` and `resolved`.
 
 Values that changed later (for example a price) are not compared: ordinary
 synchronization owns current values. Any missing, ambiguous or out-of-window product
@@ -30,8 +37,8 @@ blocks the whole file; there is no partial disposition.
 ## Effect on history admission
 
 `first-sync-cutover-admission` treats membership in a file as resolved only when a
-disposition exists for this origin and the file's current bytes hash to the recorded
-`csv_sha256`. A product listed in another file without a disposition stays blocked.
+disposition exists for this origin, the file's current bytes hash to the recorded
+`csv_sha256`, and the disposition lists this product as `resolved`. A product listed in another file without a disposition stays blocked.
 The disposition is sealed into the admission's `retainedHash`; proofs of products
 outside disposed files are unchanged. Then run the
 [history admission batch](FIRST_SYNC_HISTORY_BATCH.md) for the products.

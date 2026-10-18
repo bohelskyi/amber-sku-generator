@@ -130,7 +130,7 @@ async function captureCurrent(client,observation,history,progress,reject) {
   // Only a recorded migration-082 disposition of the exact stored bytes resolves
   // a file's membership. Products outside such files keep their exact proof hash.
   const dispositions=memberOf.size
-    ? (await require('./retained-export-disposition').resolvedSnapshotsOnClient(client,retained,i.originHash)).filter(d=>memberOf.has(d.snapshotId))
+    ? (await require('./retained-export-disposition').resolvedSnapshotsOnClient(client,retained,i.originHash,i.productId)).filter(d=>memberOf.has(d.snapshotId))
     : [];
   if([...memberOf].some(id=>!dispositions.some(d=>d.snapshotId===id))) return reject('FIRST_SYNC_RETAINED_FILE_REVIEW_REQUIRED',{legacySnapshotFlag});
   // Migration 032 can set this flag from cursor/ranges alone. Canonical cutover

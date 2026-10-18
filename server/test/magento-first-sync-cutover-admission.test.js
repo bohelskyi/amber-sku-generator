@@ -65,7 +65,8 @@ for(const [name,modify,code] of [
 test('a migration-082 disposition of the exact retained bytes resolves only that file and is sealed into the proof',async t=>{
   t.mock.method(globalThis,'fetch',()=>assert.fail('No HTTP permitted'));
   const {hash}=require('../src/services/export-exposure/evidence');
-  const csv='sku,price_uah\r\nSV7,42\r\n',row={snapshot_id:'retained',csv_sha256:hash(csv),evidence_hash:'e'.repeat(64),audit_event_id:'9'};
+  const csv='sku,price_uah\r\nSV7,42\r\n',row={snapshot_id:'retained',csv_sha256:hash(csv),evidence_hash:'e'.repeat(64),audit_event_id:'9',
+    evidence:{members:[{productId:7,resolved:true}]}};
   const assessed=async(dispositions,extra=[])=>{
     const input=retainedInput(),f=fixture({malformed:false,dispositions});
     input.revisions.push({product_id:7,has_product_snapshot:true});input.snapshots.push(retainedSnapshot(csv),...extra);
@@ -75,6 +76,10 @@ test('a migration-082 disposition of the exact retained bytes resolves only that
   assert.equal((await assessed([])).assessment.code,'FIRST_SYNC_RETAINED_FILE_REVIEW_REQUIRED');
   assert.equal((await assessed([{...row,csv_sha256:hash('other bytes')}])).assessment.code,'FIRST_SYNC_RETAINED_FILE_REVIEW_REQUIRED',
     'changed stored bytes void the disposition');
+  assert.equal((await assessed([{...row,evidence:{members:[{productId:7,resolved:false}]}}])).assessment.code,
+    'FIRST_SYNC_RETAINED_FILE_REVIEW_REQUIRED','an unresolved member of a disposed file stays blocked');
+  assert.equal((await assessed([{...row,evidence:{members:[{productId:8,resolved:true}]}}])).assessment.code,
+    'FIRST_SYNC_RETAINED_FILE_REVIEW_REQUIRED','a disposition resolves only its listed products');
   const resolved=await assessed([row]);
   assert.equal(resolved.assessment.status,'available');
   assert.equal(resolved.assessment.code,'FIRST_SYNC_LEGACY_SNAPSHOT_FLAG_REVIEW_AVAILABLE');
