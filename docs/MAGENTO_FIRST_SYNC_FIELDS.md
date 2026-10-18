@@ -365,6 +365,12 @@ Delivery jobs, retained-file membership (except files with a recorded [retained 
 
 An admitted session keeps its root audit ID in every immutable progress command. Its latest progress/audit receipt records revision and CSV-retirement counters after legitimate local imports, including when legacy product CSV is disabled. Unrelated counter changes cannot be sealed by another progress command. An incomplete session must keep a valid admission at commit, dispatch and acknowledgement; a new publication requires an explicit fresh review when protected work is clear, preserving terminal field receipts. Completed sessions return to ordinary rules. No field conflict is resolved by history admission.
 
+A recount born `hold/prior_exposure` (exact retained-file exposure) has no such
+receipt yet and stays at `FIRST_SYNC_HISTORY_REVIEW_REQUIRED`; cutover admission
+rejects recounted products (`FIRST_SYNC_HISTORY_COMPONENT_UNSUPPORTED`). The stable
+recipe confirms it once its retained files have dispositions, which records the
+receipt below.
+
 Recount admissions (`stable_recount_exposure` / `historical_recount_exposure`
 receipts) have no renewal action once the lifecycle is `prior_exposure`. Their
 receipt therefore stays valid for a later published binding revision of the same
