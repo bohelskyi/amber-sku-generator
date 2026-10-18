@@ -202,3 +202,27 @@ test('weightFromAnswer mode: exact answer weight, truncated physical weight, pri
   both.corrected.answers.stone_processing = 0;
   assert.equal(service.previewBlocker(both, product('37.000', '37,6'), combined), 'ANSWERS_WOULD_CHANGE');
 });
+
+test('recovery retries while the worker holds the product lane, then journals the receipt', async t => {
+  t.mock.method(products, 'buildProductRecountPreview', async payload => recountPreview(payload.sourceSku));
+  t.mock.method(products, 'applyProductRecount', async () => ({ success: true, correctedProductId: 901, source: { productId: 1 },
+    corrected: { publicSku: 'SV5111001', totalPriceUah: 5000, internalSku: null } }));
+  t.mock.method(recovery, 'productRecovery', async () => ({ article: 'SV5111001', lifecycle: { availableKinds: ['stable_recount_exposure'] } }));
+  t.mock.method(recovery, 'preview', async () => ({ eligible: true, review: {}, reviewHash: 'r'.repeat(64) }));
+  const busy = () => Object.assign(Error('busy'), { code: 'EXPOSURE_SYNC_BUSY' });
+  let calls = 0;
+  t.mock.method(recovery, 'apply', async () => {
+    if (++calls < 3) throw busy();
+    return { productId: 901, sku: 'SV5111001', handoffId: 'h1', holdReason: 'prior_exposure' };
+  });
+  const plan = await service.preview(input(), options(database()));
+  const journal = [], waits = [], append = async value => { journal.push(value); };
+  const result = await service.apply(input(), options(database(), { planHash: plan.planHash, append, busyWait: async ms => { waits.push(ms); } }));
+  assert.deepEqual(result.items, [{ sku: 'SV5111001', status: 'applied', productId: 901, handoffId: 'h1' }]);
+  assert.deepEqual(waits, [5000, 5000]);
+  assert.deepEqual(journal.filter(row => /^recovery_/.test(row.type)).map(row => row.type),
+    ['recovery_previewed', 'recovery_busy', 'recovery_previewed', 'recovery_busy', 'recovery_previewed', 'recovery_applied']);
+  calls = -100;
+  await assert.rejects(service.apply(input(), options(database(), { planHash: plan.planHash, append: async () => {}, busyWait: async () => {} })),
+    { code: 'EXPOSURE_SYNC_BUSY' }, 'a lane that stays busy still stops the run');
+});

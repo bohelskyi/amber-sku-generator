@@ -11,6 +11,7 @@ const FORMAT = 'legacy-answer-recount-batch-v1', MAX_ITEMS = 50;
 const PERMISSIONS = ['products.recount', 'exports.reconcile'];
 const RECOVERY_REASON = 'Оператор підтвердив узгодження поточної версії після переобліку за перевіреним сервером планом.';
 const STATUSES = ['ready', 'recovery_pending', 'already_applied', 'blocked'];
+const BUSY_ATTEMPTS = 24, BUSY_DELAY_MS = 5000;
 const fail = (code, details) => { throw Object.assign(new Error(code), { code, statusCode: 409, ...(details ? { details } : {}) }); };
 const plain = v => !!v && typeof v === 'object' && Object.getPrototypeOf(v) === Object.prototype;
 const text = v => typeof v === 'string' && !/[\u0000-\u001f\u007f]/.test(v);
@@ -160,7 +161,7 @@ async function preview(rawInput, options) {
   return { ...plan, summary, planHash: c.hash(plan) };
 }
 async function apply(rawInput, options) {
-  const { databasePool, config, planHash, append = async () => {} } = options;
+  const { databasePool, config, planHash, append = async () => {}, busyWait = ms => new Promise(done => setTimeout(done, ms)) } = options;
   if (typeof planHash !== 'string' || !/^[a-f0-9]{64}$/.test(planHash)) fail('LEGACY_ANSWER_PLAN_HASH_REQUIRED');
   const plan = await preview(rawInput, options);
   await append({ type: 'fresh_preview', planHash: plan.planHash, summary: plan.summary });
@@ -198,16 +199,28 @@ async function apply(rawInput, options) {
         results.push({ sku: item.sku, status: 'applied', productId, recovery: 'not_required' }); continue;
       }
       step = 'recovery';
-      await read(databasePool, client => authority(client, actorUserId));
-      // Same sequence as the product problem page: GET recovery state, lifecycle-preview, lifecycle-apply.
-      const state = await recovery.productRecovery(config, productId, { ...recoveryOptions, canRecoverJobs: true, canReconcileLifecycle: true });
-      if (state.article !== item.sku || state.lifecycle?.blocker || !state.lifecycle?.availableKinds?.includes('stable_recount_exposure'))
-        fail('LEGACY_ANSWER_RECOVERY_NOT_AVAILABLE', { blocker: state.lifecycle?.blocker ?? null, availableKinds: state.lifecycle?.availableKinds ?? [] });
-      const reviewed = await recovery.preview(config, productId, { kind: 'stable_recount_exposure' }, recoveryOptions);
-      if (!reviewed.eligible) fail('LEGACY_ANSWER_RECOVERY_BLOCKED', { blockers: reviewed.blockers });
-      await append({ type: 'recovery_previewed', sku: item.sku, productId, reviewHash: reviewed.reviewHash });
-      const receipt = await recovery.apply(config, productId, { review: reviewed.review, reviewHash: reviewed.reviewHash,
-        reason: `${RECOVERY_REASON} Коментар: ${plan.reason}` }, recoveryOptions);
+      // The fresh successor is usually picked up by the worker at once; the recovery refuses to wait behind
+      // dispatched work (EXPOSURE_SYNC_BUSY, before any write), so retry the whole UI sequence briefly.
+      let receipt;
+      for (let attempt = 1; ; attempt++) {
+        await read(databasePool, client => authority(client, actorUserId));
+        // Same sequence as the product problem page: GET recovery state, lifecycle-preview, lifecycle-apply.
+        const state = await recovery.productRecovery(config, productId, { ...recoveryOptions, canRecoverJobs: true, canReconcileLifecycle: true });
+        if (state.article !== item.sku || state.lifecycle?.blocker || !state.lifecycle?.availableKinds?.includes('stable_recount_exposure'))
+          fail('LEGACY_ANSWER_RECOVERY_NOT_AVAILABLE', { blocker: state.lifecycle?.blocker ?? null, availableKinds: state.lifecycle?.availableKinds ?? [] });
+        const reviewed = await recovery.preview(config, productId, { kind: 'stable_recount_exposure' }, recoveryOptions);
+        if (!reviewed.eligible) fail('LEGACY_ANSWER_RECOVERY_BLOCKED', { blockers: reviewed.blockers });
+        await append({ type: 'recovery_previewed', sku: item.sku, productId, reviewHash: reviewed.reviewHash, attempt });
+        try {
+          receipt = await recovery.apply(config, productId, { review: reviewed.review, reviewHash: reviewed.reviewHash,
+            reason: `${RECOVERY_REASON} Коментар: ${plan.reason}` }, recoveryOptions);
+          break;
+        } catch (cause) {
+          if (cause?.code !== 'EXPOSURE_SYNC_BUSY' || attempt >= BUSY_ATTEMPTS) throw cause;
+          await append({ type: 'recovery_busy', sku: item.sku, productId, attempt });
+          await busyWait(BUSY_DELAY_MS);
+        }
+      }
       await append({ type: 'recovery_applied', sku: item.sku, productId, handoffId: receipt.handoffId ?? null,
         holdReason: receipt.holdReason ?? null, deliveryVersion: receipt.deliveryVersion ?? null, alreadyApplied: receipt.alreadyApplied === true });
       if (receipt.productId !== productId || receipt.sku !== item.sku || !receipt.handoffId) fail('LEGACY_ANSWER_RECOVERY_RESULT_UNEXPECTED');

@@ -87,7 +87,10 @@ blocked item and an active Administrator with `products.recount` and `exports.re
 route's options, then the product problem page sequence `productRecovery()` →
 `lifecycle-recovery` preview (`stable_recount_exposure`) → apply, which records its own
 handoff. A `hold/prior_exposure` successor already has the ordinary UPDATE route and gets no
-recovery step; record its handoff with a reviewed `broader_resync` afterwards. Every step is appended and fsynced to the new JSONL journal. The first error stops the
+recovery step; record its handoff with a reviewed `broader_resync` afterwards. The worker usually
+picks up the fresh successor at once; the recovery refuses to wait behind dispatched work
+(`EXPOSURE_SYNC_BUSY`, before any write), so the batch repeats the recovery sequence up to 24
+times, 5 seconds apart, and journals each `recovery_busy` attempt. Every step is appended and fsynced to the new JSONL journal. The first error stops the
 run without retry; rerun with a new preview, which skips completed items and resumes the
 recovery step. The script issues no SQL writes and no Magento writes; Magento reads are GET only.
 
