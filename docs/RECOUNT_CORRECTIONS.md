@@ -72,6 +72,11 @@ public SKU and names are unchanged and the successor route is `hold/historical_a
 or, for an already exposed product (for example one in a retained export file),
 `hold/prior_exposure`. An unchanged `answers.weight` that the recount only rewrites in dot
 form (`"55.0"` becomes `55`) is not an answer change.
+An item to recount or recover also needs a durable Magento product ID in the shared
+name state (or the acknowledged-job fallback); otherwise it is blocked with
+`MAGENTO_REMOTE_ID_REQUIRED` before any recount. Record the shared name with the
+ordinary name choice first: once recounted, the held successor is refused by the name
+adapters and the recovery fails with `DURABLE_REMOTE_ID_REQUIRED`.
 Weight mode also refuses a newly encoded internal SKU (`SKU_CHANGED`). After stable public SKU
 activation the successor is native (`full_sku` `NULL`), the legacy SKU stays reserved by the
 retired source, and the SV recount stores the corrected weight in `answers.weight` as a
