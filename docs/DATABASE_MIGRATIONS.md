@@ -10,7 +10,7 @@ Checksums canonicalize CRLF and lone CR to LF before hashing, so Windows and Lin
 
 ## Forward-only rule
 
-Checked-in migrations now span `000`–`080`. Migrations `000`–`079` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
+Checked-in migrations now span `000`–`083`. Migrations `000`–`083` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
 
 - never edit, reorder, rename, or replace an applied migration;
 - add the next lexically ordered forward migration;
@@ -155,6 +155,7 @@ New paths touching these resources must follow existing lock order and final-sta
 | `080_first_sync_remote_retained.sql` | Temporary `remote_retained` first-sync state for legacy SV. See [FIRST_SYNC_RETAIN_REMOTE](FIRST_SYNC_RETAIN_REMOTE.md). |
 | `081_first_sync_magento_managed_seo.sql` | Automatic `remote_retained` receipt for derived SEO with an approved `magento_managed` policy. See [FIRST_SYNC_CH_DECISIONS](FIRST_SYNC_CH_DECISIONS.md). |
 | `082_retained_export_dispositions.sql` | Permanent reviewed disposition of a retained legacy export file for first-sync history admission. See [RETAINED_EXPORT_DISPOSITION](RETAINED_EXPORT_DISPOSITION.md). |
+| `083_canonical_weight_magento_readback.sql` | Reviewed Magento `decor_weight` readback source for zero canonical SV weight. See [CANONICAL_WEIGHT_REPAIR](CANONICAL_WEIGHT_REPAIR.md#magento-readback-source). |
 
 ## Test deletion migration
 
@@ -509,3 +510,21 @@ its `export.retained_disposition_recorded` audit event. Update, delete and trunc
 refused. It changes no snapshot, membership, product or delivery data. First-sync
 history admission treats membership in such a file as resolved. See
 [retained export disposition](RETAINED_EXPORT_DISPOSITION.md).
+
+## 083 — canonical weight from Magento readback
+
+[083_canonical_weight_magento_readback.sql](../server/migrations/083_canonical_weight_magento_readback.sql)
+adds `source_kind` (`recorded_answer` default, or `magento_readback`), `target_answer`
+and size-bounded `remote_evidence` to `product_weight_repair_receipts`; a check ties
+`magento_readback` to both non-null values. Existing receipts become
+`recorded_answer` and stay immutable. It adds `sv_weight_numeric_rules_ok` and
+`sv_weight_magento_candidate` (every 079 proof, but canonical weight exactly zero,
+an absent/JSON-null/zero answer, the single current non-SKU text weight question and
+`categories.requires_weight=0`). It replaces the plan guard (new format
+`sv-canonical-weight-magento-v1`), the receipt guard (recorded-answer path unchanged
+apart from a matching source-kind check), the completion check (audit `sourceKind`)
+and the product-delta assertion (Magento receipts may change only `weight` and
+`details.answers.weight`, byte-for-byte elsewhere). `request_magento_product_sync`
+is unchanged; its receipt exception covers both changed inputs. It writes no product,
+receipt or delivery data; 072/079 checksums are unchanged. See
+[Magento readback source](CANONICAL_WEIGHT_REPAIR.md#magento-readback-source).

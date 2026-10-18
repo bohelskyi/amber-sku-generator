@@ -127,6 +127,59 @@ Exit codes: `0` for a successful preview or complete selected application, `2` f
 reported conflicts/failures/unattempted rows, and `1` for an invocation/connection/
 artifact failure. Inspect the persisted per-row outcome before proceeding.
 
+## Magento readback source
+
+Forward migration [083](../server/migrations/083_canonical_weight_magento_readback.sql)
+adds a second, separately reviewed source approved by the catalog owner: for a current
+legacy SV product whose canonical `products.weight` is exactly zero and whose recorded
+answer `details.answers.weight` is absent, JSON `null` or a zero literal, the weight is
+taken from Magento `decor_weight` (never the Magento native `weight`). A positive
+recorded answer stays in the recorded-answer lane (`RECORDED_ANSWER_LANE`). Every other
+proof above is unchanged, plus the single current non-SKU text weight question and
+`categories.requires_weight=0` (else `WEIGHT_ENCODED_SKU`).
+
+Preview runs in three phases: a read-only candidate scan (≤1,000); then, outside any
+transaction, a GET-only first-sync inspection per DB-eligible row (≤100 per preview,
+later rows report `READBACK_DEFERRED`); then a read-only sealed plan
+`sv-canonical-weight-magento-v1`. A row is eligible only when the inspection is in
+`first` mode, `decor_weight/all` reports `FIRST_SYNC_LEGACY_MISSING_ONLY_REVIEW_REQUIRED`
+and Magento holds a known positive value fitting `NUMERIC(14,3)` that satisfies the
+weight question's numeric rules. `CANONICAL_WEIGHT_ANSWER_INCOHERENT` rows are listed
+`reportOnly`. The published result may change only `decor_weight` (and `fraction` for
+stones, souvenir `5`): the missing-weight issue disappears, every other output, issue
+and generated name is identical, and the pricing calculation is unchanged.
+
+The inspection needs the ordinary pool (it takes the normal first-sync review locks)
+and an actor that may also review first sync (`export_templates.publish`); it records
+nothing. Apply repeats the GET readback for each selected row before any lock and
+requires identical remote evidence (otherwise `SV_CANONICAL_WEIGHT_STALE`). Inside the
+existing repair transaction it sets `weight` to the target and
+`details.answers.weight` to its normalized text (`12.500` → `"12.5"`). Stored prices,
+SKU, identity, other answers and the full-product revision are unchanged, no sync
+request or job is created and Magento is never written. The receipt stores
+`source_kind='magento_readback'`, `target_answer` and `remote_evidence`
+(`sku`, `remoteProductId`, `target`, `scope`, `value`, `fieldStatus`, `fieldReason`,
+`bindingRevisionId`, `definitionHash`); the audit event repeats them with
+`sourceKind`. Rollback is the exact inverse with the same source kind: weight `0`,
+an absent answer removed again, `"0"` or `null` restored as it was.
+
+```text
+node scripts/canonical-weight-repair.js --source magento-readback --schema-cache-seconds 120 --expected-database EXACT_DATABASE --installation-key EXACT_INSTALLATION --binding-revision CURRENT_PUBLISHED_BINDING_UUID --actor-user-id ACTIVE_APPLICATION_USER_ID --output NEW_PLAN_FILE
+node scripts/canonical-weight-repair.js --mode apply --schema-cache-seconds 120 --expected-database EXACT_DATABASE --installation-key EXACT_INSTALLATION --binding-revision CURRENT_PUBLISHED_BINDING_UUID --actor-user-id ACTIVE_APPLICATION_USER_ID --plan REVIEWED_PLAN_FILE --confirm-plan-hash REVIEWED_SHA256 --product-ids ID1,ID2 --output NEW_RECEIPT_DIRECTORY
+```
+
+`--source` (`recorded-answer` default, or `magento-readback`) applies to preview only;
+apply and rollback take the source from the plan or receipt. `--schema-cache-seconds`
+(0–600) reuses Magento schema/topology GETs within one run, as in the first-sync
+batches. Rollback uses the same `--mode rollback-preview --receipt-ids …` command; one
+inverse plan holds receipts of one source kind only. After apply, the field decision
+is gone (`decor_weight` equals Magento); record the separate reviewed `broader_resync`
+handoff from the [first-sync runbook](FIRST_SYNC_RUNBOOK.md) step 4 for the repaired
+products. The disposable regression
+`server/integration-test/canonical-weight-magento-readback.test.js` covers the 082
+checkpoint, eligibility, exact post-state, stale remote value, forged receipts/deltas,
+audit failure, a concurrent apply and exact rollback with a GET-only fake Magento.
+
 ## Verification boundary
 
 The disposable PostgreSQL regression covers the 071 upgrade checkpoint, complete
