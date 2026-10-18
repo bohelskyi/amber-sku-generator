@@ -200,7 +200,8 @@ async function apply(rawInput, options) {
       }
       step = 'recovery';
       // The fresh successor is usually picked up by the worker at once; the recovery refuses to wait behind
-      // dispatched work (EXPOSURE_SYNC_BUSY, before any write), so retry the whole UI sequence briefly.
+      // dispatched work (EXPOSURE_SYNC_BUSY, before any write) and its preview reports LOCAL_EVIDENCE_CHANGED while the
+      // worker moves the product, so retry the whole UI sequence briefly.
       let receipt;
       for (let attempt = 1; ; attempt++) {
         await read(databasePool, client => authority(client, actorUserId));
@@ -209,7 +210,13 @@ async function apply(rawInput, options) {
         if (state.article !== item.sku || state.lifecycle?.blocker || !state.lifecycle?.availableKinds?.includes('stable_recount_exposure'))
           fail('LEGACY_ANSWER_RECOVERY_NOT_AVAILABLE', { blocker: state.lifecycle?.blocker ?? null, availableKinds: state.lifecycle?.availableKinds ?? [] });
         const reviewed = await recovery.preview(config, productId, { kind: 'stable_recount_exposure' }, recoveryOptions);
-        if (!reviewed.eligible) fail('LEGACY_ANSWER_RECOVERY_BLOCKED', { blockers: reviewed.blockers });
+        if (!reviewed.eligible) {
+          // The worker touching the successor during the preview is transient too; anything else stops the run.
+          const moving = Array.isArray(reviewed.blockers) && reviewed.blockers.length > 0 && reviewed.blockers.every(code => code === 'LOCAL_EVIDENCE_CHANGED');
+          if (!moving || attempt >= BUSY_ATTEMPTS) fail('LEGACY_ANSWER_RECOVERY_BLOCKED', { blockers: reviewed.blockers });
+          await append({ type: 'recovery_busy', sku: item.sku, productId, attempt, reason: 'LOCAL_EVIDENCE_CHANGED' });
+          await busyWait(BUSY_DELAY_MS); continue;
+        }
         await append({ type: 'recovery_previewed', sku: item.sku, productId, reviewHash: reviewed.reviewHash, attempt });
         try {
           receipt = await recovery.apply(config, productId, { review: reviewed.review, reviewHash: reviewed.reviewHash,
