@@ -68,7 +68,10 @@ decision (manual UAH, custom USD/gram or system automatic) and otherwise unchang
 weight mode the recount weight is the normalized answer. An item is `ready` only when the
 stored answers change by exactly the patch, the weight is unchanged (or becomes the answer),
 the final UAH price is unchanged (`PRICE_CHANGED` otherwise; SV weight is a pricing axis), the
-public SKU and names are unchanged and the successor route is `hold/historical_ambiguity`.
+public SKU and names are unchanged and the successor route is `hold/historical_ambiguity`
+or, for an already exposed product (for example one in a retained export file),
+`hold/prior_exposure`. An unchanged `answers.weight` that the recount only rewrites in dot
+form (`"55.0"` becomes `55`) is not an answer change.
 Weight mode also refuses a newly encoded internal SKU (`SKU_CHANGED`). After stable public SKU
 activation the successor is native (`full_sku` `NULL`), the legacy SKU stays reserved by the
 retired source, and the SV recount stores the corrected weight in `answers.weight` as a
@@ -83,7 +86,8 @@ blocked item and an active Administrator with `products.recount` and `exports.re
 (rechecked before each step). Items run sequentially: `applyProductRecount()` with the
 route's options, then the product problem page sequence `productRecovery()` →
 `lifecycle-recovery` preview (`stable_recount_exposure`) → apply, which records its own
-handoff. Every step is appended and fsynced to the new JSONL journal. The first error stops the
+handoff. A `hold/prior_exposure` successor already has the ordinary UPDATE route and gets no
+recovery step; record its handoff with a reviewed `broader_resync` afterwards. Every step is appended and fsynced to the new JSONL journal. The first error stops the
 run without retry; rerun with a new preview, which skips completed items and resumes the
 recovery step. The script issues no SQL writes and no Magento writes; Magento reads are GET only.
 

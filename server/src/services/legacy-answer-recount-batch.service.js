@@ -93,7 +93,9 @@ function previewBlocker(preview, product, input) {
   if (Number(source.productId) !== product.id || source.publicSku !== product.public_sku) return 'RECOUNT_SOURCE_CHANGED';
   if (keys.some(key => value(source.answers?.[key]) !== null)) return 'ANSWER_ALREADY_PRESENT';
   // Stored answers change only by the patch; the SV recount also writes the corrected weight into answers.weight (dot decimal).
-  const changed = answerChanges(product.details?.answers, next.answers).filter(change => !(weight && change.key === 'weight' && Number(change.after) === weight.exact));
+  // The recount also rewrites an unchanged answers.weight in canonical dot form ("55.0" -> 55).
+  const changed = answerChanges(product.details?.answers, next.answers).filter(change => !(change.key === 'weight'
+    && (weight ? Number(change.after) === weight.exact : change.before !== null && Number(change.after) === Number(change.before))));
   if (c.hash([...new Set(preview.changes.map(change => change.key))].sort()) !== c.hash([...keys, ...(weight ? ['weight'] : [])].sort())
     || c.hash(changed.map(change => [change.key, change.after])) !== c.hash([...keys].sort().map(key => [key, String(input.answers[key])]))) return 'ANSWERS_WOULD_CHANGE';
   if (Number(next.weight) !== (weight ? weight.exact : Number(source.weight))) return 'WEIGHT_WOULD_CHANGE';
@@ -101,7 +103,8 @@ function previewBlocker(preview, product, input) {
   if (!(Number(source.totalPriceUah) > 0) || Number(next.totalPriceUah) !== Number(source.totalPriceUah)) return 'PRICE_CHANGED';
   if (next.publicSku !== product.public_sku) return 'PUBLIC_SKU_WOULD_CHANGE';
   if (preview.nameChanges) return 'NAMES_WOULD_CHANGE';
-  if (next.delivery?.route !== 'hold' || next.delivery.holdReason !== 'historical_ambiguity') return 'RECOUNT_ROUTE_UNEXPECTED';
+  // historical_ambiguity needs the stable recount recovery; prior_exposure is already an ordinary UPDATE route.
+  if (next.delivery?.route !== 'hold' || !['historical_ambiguity', 'prior_exposure'].includes(next.delivery.holdReason)) return 'RECOUNT_ROUTE_UNEXPECTED';
   return null;
 }
 async function inspect(options, input, item) {
@@ -189,6 +192,10 @@ async function apply(rawInput, options) {
         if (result.success !== true || Number(result.source.productId) !== item.productId || !Number.isSafeInteger(productId)
           || result.corrected.publicSku !== item.publicSku || Number(result.corrected.totalPriceUah) !== item.priceBeforeUah
           || item.recountWeight && Number(result.corrected.weight) !== item.weightAfter) fail('LEGACY_ANSWER_RECOUNT_RESULT_UNEXPECTED');
+      }
+      if (item.status === 'ready' && item.delivery?.holdReason === 'prior_exposure') {
+        // An already exposed successor keeps its ordinary UPDATE route; no recovery is offered or needed.
+        results.push({ sku: item.sku, status: 'applied', productId, recovery: 'not_required' }); continue;
       }
       step = 'recovery';
       await read(databasePool, client => authority(client, actorUserId));

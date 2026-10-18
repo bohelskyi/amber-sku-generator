@@ -85,6 +85,15 @@ test('stored pricing decision is kept and the preview blocker rejects every non-
   assert.equal(variant(v => { v.nameChanges = { from: {}, to: {} }; }), 'NAMES_WOULD_CHANGE');
   assert.equal(variant(v => { v.corrected.delivery = { route: 'normal', holdReason: null }; }), 'RECOUNT_ROUTE_UNEXPECTED');
   assert.equal(variant(v => { v.source.productId = 2; }), 'RECOUNT_SOURCE_CHANGED');
+  assert.equal(variant(v => { v.corrected.delivery = { route: 'hold', holdReason: 'prior_exposure' }; }), null,
+    'an already exposed successor keeps the ordinary UPDATE route');
+  assert.equal(variant(v => { v.corrected.delivery = { route: 'hold', holdReason: 'source_correction' }; }), 'RECOUNT_ROUTE_UNEXPECTED');
+  // The recount rewrites an unchanged answers.weight in dot form; another value is still a change.
+  const weighed = { ...product, details: { answers: { souvenir: 5, weight: '55.0' } } };
+  const normalized = recountPreview('SV5111001'); normalized.corrected.answers.weight = 55;
+  assert.equal(service.previewBlocker(normalized, weighed, request), null);
+  normalized.corrected.answers.weight = 56;
+  assert.equal(service.previewBlocker(normalized, weighed, request), 'ANSWERS_WOULD_CHANGE');
 });
 
 test('plan hash is deterministic and binds actor, items, statuses and preview evidence', async t => {
