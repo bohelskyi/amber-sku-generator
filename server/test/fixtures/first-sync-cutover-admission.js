@@ -1,7 +1,7 @@
 // Synthetic immutable approval chain, no database or HTTP.
 const { digest } = require('../../src/services/export-exposure/repair-manifest');
 const c = require('../../src/services/magento/binding-contract');
-function fixture({ malformed = true } = {}) {
+function fixture({ malformed = true, dispositions = [] } = {}) {
   const config = { baseUrl: 'https://review.invalid' }, originHash = c.originHash(config.baseUrl);
   const evidence = { origin: 'cutover', decision: 'legacy_baseline' };
   const entry = {
@@ -44,6 +44,7 @@ function fixture({ malformed = true } = {}) {
     if (sql.includes("event_key='full_product_cutover.batch_applied'"))
       return { rows: [{ id: '3', details: { result: { manifestHash, batchNumber: 0, productIds: [7] },
         beforeAfterHash: digest([entry]) } }] };
+    if (sql.includes('FROM retained_export_dispositions')) return { rows: dispositions };
     throw new Error('Unexpected SQL: ' + sql);
   } };
   const options = { history, progress: null, facts: { protected_work: false, other_origin: false,

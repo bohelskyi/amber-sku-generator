@@ -62,3 +62,27 @@ for(const [name,modify,code] of [
   assert.equal(assessed.proposal,null);assert.equal(assessed.assessment.status,'blocked');assert.equal(assessed.assessment.code,code);
   assert.deepEqual(input,before);assert.ok(f.queries.every(sql=>sql.startsWith('SELECT ')));
 });
+test('a migration-082 disposition of the exact retained bytes resolves only that file and is sealed into the proof',async t=>{
+  t.mock.method(globalThis,'fetch',()=>assert.fail('No HTTP permitted'));
+  const {hash}=require('../src/services/export-exposure/evidence');
+  const csv='sku,price_uah\r\nSV7,42\r\n',row={snapshot_id:'retained',csv_sha256:hash(csv),evidence_hash:'e'.repeat(64),audit_event_id:'9'};
+  const assessed=async(dispositions,extra=[])=>{
+    const input=retainedInput(),f=fixture({malformed:false,dispositions});
+    input.revisions.push({product_id:7,has_product_snapshot:true});input.snapshots.push(retainedSnapshot(csv),...extra);
+    t.mock.method(repair,'readRepairInput',async()=>input);
+    return admission.assessProposal(f.client,f.config,f.observation,f.options);
+  };
+  assert.equal((await assessed([])).assessment.code,'FIRST_SYNC_RETAINED_FILE_REVIEW_REQUIRED');
+  assert.equal((await assessed([{...row,csv_sha256:hash('other bytes')}])).assessment.code,'FIRST_SYNC_RETAINED_FILE_REVIEW_REQUIRED',
+    'changed stored bytes void the disposition');
+  const resolved=await assessed([row]);
+  assert.equal(resolved.assessment.status,'available');
+  assert.equal(resolved.assessment.code,'FIRST_SYNC_LEGACY_SNAPSHOT_FLAG_REVIEW_AVAILABLE');
+  const flagOnly=retainedInput(),f=fixture({malformed:false});flagOnly.revisions.push({product_id:7,has_product_snapshot:true});
+  t.mock.method(repair,'readRepairInput',async()=>flagOnly);
+  const unaffected=await admission.assessProposal(f.client,f.config,f.observation,f.options);
+  assert.ok(!f.queries.some(sql=>sql.includes('retained_export_dispositions')),'non-members never read dispositions');
+  assert.notEqual(resolved.proposal.retainedHash,unaffected.proposal.retainedHash);
+  const second={...retainedSnapshot('sku,price_uah\r\nSV7,43\r\n'),id:'second'};
+  assert.equal((await assessed([row],[second])).assessment.code,'FIRST_SYNC_RETAINED_FILE_REVIEW_REQUIRED','every member file needs its own disposition');
+});

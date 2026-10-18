@@ -154,6 +154,7 @@ New paths touching these resources must follow existing lock order and final-sta
 | `079_canonical_weight_repair_all_sv.sql` | Weight repair candidates for every legacy SV product. See [CANONICAL_WEIGHT_REPAIR](CANONICAL_WEIGHT_REPAIR.md). |
 | `080_first_sync_remote_retained.sql` | Temporary `remote_retained` first-sync state for legacy SV. See [FIRST_SYNC_RETAIN_REMOTE](FIRST_SYNC_RETAIN_REMOTE.md). |
 | `081_first_sync_magento_managed_seo.sql` | Automatic `remote_retained` receipt for derived SEO with an approved `magento_managed` policy. See [FIRST_SYNC_CH_DECISIONS](FIRST_SYNC_CH_DECISIONS.md). |
+| `082_retained_export_dispositions.sql` | Permanent reviewed disposition of a retained legacy export file for first-sync history admission. See [RETAINED_EXPORT_DISPOSITION](RETAINED_EXPORT_DISPOSITION.md). |
 
 ## Test deletion migration
 
@@ -496,3 +497,15 @@ null); the 080 semantic shape now additionally requires no `retention`. It repla
 `guard_first_sync_evidence` only to skip the legacy-SV product check for that
 retention. It writes no data; 080's checksum is unchanged. See
 [CH first-sync decisions](FIRST_SYNC_CH_DECISIONS.md#seo-magento-may-keep-ch-meta-title-and-description).
+
+## 082 — retained export dispositions
+
+[082_retained_export_dispositions.sql](../server/migrations/082_retained_export_dispositions.sql)
+adds the permanent `retained_export_dispositions` table: one reviewed
+`consumed_and_reconciled` disposition (basis `magento_readback_v1`) per legacy
+retained export file, bound to the exact stored CSV bytes (`csv_sha256`, checked
+against `export_snapshots.csv_content` by the insert trigger), the Magento origin and
+its `export.retained_disposition_recorded` audit event. Update, delete and truncate are
+refused. It changes no snapshot, membership, product or delivery data. First-sync
+history admission treats membership in such a file as resolved. See
+[retained export disposition](RETAINED_EXPORT_DISPOSITION.md).
