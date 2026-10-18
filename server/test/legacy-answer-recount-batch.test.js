@@ -226,3 +226,22 @@ test('recovery retries while the worker holds the product lane, then journals th
   await assert.rejects(service.apply(input(), options(database(), { planHash: plan.planHash, append: async () => {}, busyWait: async () => {} })),
     { code: 'EXPOSURE_SYNC_BUSY' }, 'a lane that stays busy still stops the run');
 });
+
+test('recovery retries while the worker changes the successor during preview; other blockers still stop', async t => {
+  t.mock.method(products, 'buildProductRecountPreview', async payload => recountPreview(payload.sourceSku));
+  t.mock.method(products, 'applyProductRecount', async () => ({ success: true, correctedProductId: 901, source: { productId: 1 },
+    corrected: { publicSku: 'SV5111001', totalPriceUah: 5000, internalSku: null } }));
+  t.mock.method(recovery, 'productRecovery', async () => ({ article: 'SV5111001', lifecycle: { availableKinds: ['stable_recount_exposure'] } }));
+  let previews = 0, blockers = ['LOCAL_EVIDENCE_CHANGED'];
+  t.mock.method(recovery, 'preview', async () => (++previews < 3 ? { eligible: false, blockers } : { eligible: true, review: {}, reviewHash: 'r'.repeat(64) }));
+  t.mock.method(recovery, 'apply', async () => ({ productId: 901, sku: 'SV5111001', handoffId: 'h1' }));
+  const plan = await service.preview(input(), options(database()));
+  const journal = [], waits = [];
+  const result = await service.apply(input(), options(database(), { planHash: plan.planHash, append: async row => { journal.push(row); },
+    busyWait: async ms => { waits.push(ms); } }));
+  assert.equal(result.items[0].status, 'applied'); assert.deepEqual(waits, [5000, 5000]);
+  assert.equal(journal.filter(row => row.type === 'recovery_busy' && row.reason === 'LOCAL_EVIDENCE_CHANGED').length, 2);
+  previews = 0; blockers = ['LOCAL_EVIDENCE_CHANGED', 'SYNC_NOT_SENDABLE'];
+  await assert.rejects(service.apply(input(), options(database(), { planHash: plan.planHash, append: async () => {}, busyWait: async () => {} })),
+    { code: 'LEGACY_ANSWER_RECOVERY_BLOCKED' });
+});
