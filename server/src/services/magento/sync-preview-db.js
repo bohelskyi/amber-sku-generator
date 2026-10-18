@@ -14,6 +14,26 @@ function selection({ sku, productId }) {
   }
 }
 
+// The internal SKU is unique, or every other row is a retired archived copy:
+// the reservation belongs to the selected current product, and no other row is
+// current, part of correction lineage or carrying unfinished delivery work.
+async function uniqueInternalSku(client, selected) {
+  const { rows } = await client.query(`SELECT p.id, p.status, p.corrected_to_product_id, p.corrected_from_product_id,
+      EXISTS(SELECT 1 FROM products q WHERE q.corrected_from_product_id=p.id OR q.corrected_to_product_id=p.id) AS lineage,
+      EXISTS(SELECT 1 FROM magento_product_sync_requests r WHERE r.product_id=p.id
+        AND (r.state IN ('pending','syncing') OR r.active_job_id IS NOT NULL)) AS pending_request,
+      EXISTS(SELECT 1 FROM magento_sync_jobs j WHERE j.public_product_identity_id=p.public_product_identity_id
+        AND p.public_product_identity_id IS DISTINCT FROM $3 AND j.state NOT IN ('succeeded','superseded')) AS pending_job
+    FROM products p WHERE p.full_sku=$1 AND p.id<>$2 ORDER BY p.id LIMIT 1000`,
+  [selected.full_sku, selected.id, selected.public_product_identity_id]);
+  if (!rows.length) return true;
+  const owner = (await client.query('SELECT first_product_id FROM sku_registry WHERE full_sku=$1', [selected.full_sku])).rows;
+  return selected.status === 'active' && selected.corrected_to_product_id == null
+    && owner.length === 1 && Number(owner[0].first_product_id) === Number(selected.id) && rows.length < 1000
+    && rows.every(row => row.status === 'archived' && row.corrected_to_product_id == null
+      && row.corrected_from_product_id == null && !row.lineage && !row.pending_request && !row.pending_job);
+}
+
 async function readPreviewProductOnClient(client, options) {
   selection(options);
     const resolved = options.sku !== undefined ? await resolveProductLookup(client, options.sku) : null;
@@ -26,8 +46,7 @@ async function readPreviewProductOnClient(client, options) {
     // An ID or an internal-SKU lookup must not hide historical duplicates. A
     // public lookup is intentionally resolved through the one-current invariant.
     if (selected.full_sku != null && (options.productId !== undefined || resolved.lookupKind === 'internal')) {
-      const duplicates = (await client.query('SELECT id FROM products WHERE full_sku=$1 ORDER BY id LIMIT 2', [selected.full_sku])).rows;
-      if (duplicates.length !== 1) throw error(422, 'MAGENTO_PREVIEW_PRODUCT_NOT_UNIQUE', 'Amber SKU is not unique');
+      if (!await uniqueInternalSku(client, selected)) throw error(422, 'MAGENTO_PREVIEW_PRODUCT_NOT_UNIQUE', 'Amber SKU is not unique');
     }
     const revision = options.bindingRevisionId
       ? await require('./binding.service').readRevisionOnClient(client, options.bindingRevisionId) : null;
@@ -84,4 +103,4 @@ async function readPreviewProduct(databasePool, options) {
     throw cause;
   } finally { client.release(); }
 }
-module.exports = { selection, readPreviewProduct, readPreviewProductOnClient };
+module.exports = { selection, readPreviewProduct, readPreviewProductOnClient, uniqueInternalSku };

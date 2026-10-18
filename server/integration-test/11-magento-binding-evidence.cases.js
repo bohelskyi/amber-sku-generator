@@ -121,3 +121,32 @@ test('compatibility evidence uses bounded ascending candidates and real read-onl
   assert.equal(usage.current, expected.length);
   assert.equal(evidence.usage.length, 4);
 });
+
+test('sync preview by product ID admits only retired archived copies of the reserved current internal SKU', async () => {
+  const sku = 'AR/SYNC-PREVIEW-ARCHIVED-COPY';
+  const id = (await insertProductFixture(pool, `INSERT INTO products
+    (full_sku, base_sku, sequence_number, category, weight, total_price, total_price_uah, price_per_gram, uah_rate, details)
+    VALUES ($1,$1,0,'AR',10,50,2000,5,40,$2::jsonb) RETURNING id`, [sku, JSON.stringify({ answers: { size: 28, type: 1 } })])).rows[0].id;
+  assert.equal(Number((await pool.query('SELECT first_product_id FROM sku_registry WHERE full_sku=$1', [sku])).rows[0].first_product_id), id);
+  // Production keeps such copies only from history: current guards refuse a new duplicate SKU.
+  const legacy = async (sql, values) => {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN'); await client.query('SET LOCAL session_replication_role = replica');
+      const result = await client.query(sql, values); await client.query('COMMIT'); return result;
+    } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+  };
+  const copy = (await legacy(`INSERT INTO products(full_sku, base_sku, sequence_number, category, weight, total_price, total_price_uah,
+    price_per_gram, uah_rate, details, status, public_product_identity_id)
+    SELECT full_sku, base_sku, sequence_number, category, weight, total_price, total_price_uah, price_per_gram, uah_rate, details,
+      'archived', public_product_identity_id FROM products WHERE id=$1 RETURNING id`, [id])).rows[0].id;
+  assert.equal((await readPreviewProduct(pool, { productId: id })).product.id, id);
+  await assert.rejects(readPreviewProduct(pool, { productId: copy }), { code: 'MAGENTO_PREVIEW_PRODUCT_NOT_UNIQUE' },
+    'the archived copy itself is never selected');
+  await legacy("UPDATE products SET status='active' WHERE id=$1", [copy]);
+  await assert.rejects(readPreviewProduct(pool, { productId: id }), { code: 'MAGENTO_PREVIEW_PRODUCT_NOT_UNIQUE' },
+    'a second current row stays a conflict');
+  await legacy("UPDATE products SET status='archived', corrected_from_product_id=$2 WHERE id=$1", [copy, id]);
+  await assert.rejects(readPreviewProduct(pool, { productId: id }), { code: 'MAGENTO_PREVIEW_PRODUCT_NOT_UNIQUE' },
+    'a copy in correction lineage stays a conflict');
+});
