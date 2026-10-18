@@ -85,6 +85,15 @@ test('stored pricing decision is kept and the preview blocker rejects every non-
   assert.equal(variant(v => { v.nameChanges = { from: {}, to: {} }; }), 'NAMES_WOULD_CHANGE');
   assert.equal(variant(v => { v.corrected.delivery = { route: 'normal', holdReason: null }; }), 'RECOUNT_ROUTE_UNEXPECTED');
   assert.equal(variant(v => { v.source.productId = 2; }), 'RECOUNT_SOURCE_CHANGED');
+  assert.equal(variant(v => { v.corrected.delivery = { route: 'hold', holdReason: 'prior_exposure' }; }), null,
+    'an already exposed successor keeps the ordinary UPDATE route');
+  assert.equal(variant(v => { v.corrected.delivery = { route: 'hold', holdReason: 'source_correction' }; }), 'RECOUNT_ROUTE_UNEXPECTED');
+  // The recount rewrites an unchanged answers.weight in dot form; another value is still a change.
+  const weighed = { ...product, details: { answers: { souvenir: 5, weight: '55.0' } } };
+  const normalized = recountPreview('SV5111001'); normalized.corrected.answers.weight = 55;
+  assert.equal(service.previewBlocker(normalized, weighed, request), null);
+  normalized.corrected.answers.weight = 56;
+  assert.equal(service.previewBlocker(normalized, weighed, request), 'ANSWERS_WOULD_CHANGE');
 });
 
 test('plan hash is deterministic and binds actor, items, statuses and preview evidence', async t => {
@@ -192,4 +201,28 @@ test('weightFromAnswer mode: exact answer weight, truncated physical weight, pri
   assert.equal(service.previewBlocker(both, product('37.000', '37,6'), combined), null);
   both.corrected.answers.stone_processing = 0;
   assert.equal(service.previewBlocker(both, product('37.000', '37,6'), combined), 'ANSWERS_WOULD_CHANGE');
+});
+
+test('recovery retries while the worker holds the product lane, then journals the receipt', async t => {
+  t.mock.method(products, 'buildProductRecountPreview', async payload => recountPreview(payload.sourceSku));
+  t.mock.method(products, 'applyProductRecount', async () => ({ success: true, correctedProductId: 901, source: { productId: 1 },
+    corrected: { publicSku: 'SV5111001', totalPriceUah: 5000, internalSku: null } }));
+  t.mock.method(recovery, 'productRecovery', async () => ({ article: 'SV5111001', lifecycle: { availableKinds: ['stable_recount_exposure'] } }));
+  t.mock.method(recovery, 'preview', async () => ({ eligible: true, review: {}, reviewHash: 'r'.repeat(64) }));
+  const busy = () => Object.assign(Error('busy'), { code: 'EXPOSURE_SYNC_BUSY' });
+  let calls = 0;
+  t.mock.method(recovery, 'apply', async () => {
+    if (++calls < 3) throw busy();
+    return { productId: 901, sku: 'SV5111001', handoffId: 'h1', holdReason: 'prior_exposure' };
+  });
+  const plan = await service.preview(input(), options(database()));
+  const journal = [], waits = [], append = async value => { journal.push(value); };
+  const result = await service.apply(input(), options(database(), { planHash: plan.planHash, append, busyWait: async ms => { waits.push(ms); } }));
+  assert.deepEqual(result.items, [{ sku: 'SV5111001', status: 'applied', productId: 901, handoffId: 'h1' }]);
+  assert.deepEqual(waits, [5000, 5000]);
+  assert.deepEqual(journal.filter(row => /^recovery_/.test(row.type)).map(row => row.type),
+    ['recovery_previewed', 'recovery_busy', 'recovery_previewed', 'recovery_busy', 'recovery_previewed', 'recovery_applied']);
+  calls = -100;
+  await assert.rejects(service.apply(input(), options(database(), { planHash: plan.planHash, append: async () => {}, busyWait: async () => {} })),
+    { code: 'EXPOSURE_SYNC_BUSY' }, 'a lane that stays busy still stops the run');
 });

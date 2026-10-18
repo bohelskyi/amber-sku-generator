@@ -249,6 +249,31 @@ test('legacy answer recount batch: read-only preview, reviewed apply, resume and
       assert.deepEqual((await cli(['SV5111006'], 'preview', kind)).journal.filter(row => row.type === 'item').map(i => i.status), ['already_applied']);
       assert.equal(writes(), 0);
     });
+    await t.test('an already exposed product (prior_exposure) is recounted without a recovery step', async () => {
+      const [current] = await active('SV5111004');
+      // A later truncation on the already exposed successor: answer 37.6, physical 37.
+      const writer = await db.connect();
+      try {
+        await gate.begin(writer, 'BEGIN');
+        await writer.query("UPDATE products SET weight=37,details=jsonb_set(details,'{answers,weight}','\"37,6\"') WHERE id=$1", [current.id]);
+        // The legacy version was in a retained export file: exact exposure, as for the production 2026-09-11 file.
+        await writer.query(`INSERT INTO export_snapshots(id,idempotency_key,from_sku,to_sku,resolved_to_sku,exported_to_product_id,row_count,file_name,csv_content,status)
+          VALUES($1,$1,'SV5111004','SV5111004','SV5111004',$2,1,'exposed.csv',$3,'generated')`, [randomUUID(), original.SV5111004.id, 'sku,price_uah\r\nSV5111004,5000\r\n']);
+        await gate.commit(writer);
+      } catch (cause) { await gate.rollback(writer); throw cause; } finally { await gate.release(writer); writer.release(); }
+      const kind = { kind: { weightFromAnswer: true } };
+      const plan = await cli(['SV5111004'], 'preview', kind), item = plan.journal.find(row => row.type === 'item');
+      assert.equal(item.status, 'ready', JSON.stringify(item));
+      assert.deepEqual(item.delivery, { route: 'hold', holdReason: 'prior_exposure' });
+      const result = await cli(['SV5111004'], 'apply', { ...kind, planHash: plan.summary.planHash });
+      assert.equal(result.code, 0, JSON.stringify(result));
+      assert.deepEqual(result.journal.map(row => row.type), ['start', 'fresh_preview', 'recount_started', 'recount_applied', 'complete']);
+      const [next] = await active('SV5111004');
+      assert.notEqual(next.id, current.id); assert.equal(Number(next.weight), 37.6); assert.equal(Number(next.total_price_uah), 5000);
+      assert.equal(next.public_product_identity_id, current.public_product_identity_id); assert.equal(next.hold_reason, 'prior_exposure');
+      assert.deepEqual((await cli(['SV5111004'], 'preview', kind)).journal.filter(row => row.type === 'item').map(i => i.status), ['already_applied']);
+      assert.equal(writes(), 0);
+    });
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
     if (db) await db.end();
