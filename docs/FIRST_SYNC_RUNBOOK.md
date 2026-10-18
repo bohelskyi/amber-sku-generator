@@ -93,6 +93,11 @@ Every publication has side effects on products that are **not yet synced**:
 
 ## Operational traps
 
+- `MAGENTO_PREVIEW_PRODUCT_NOT_UNIQUE` / «Amber SKU is not unique» on a product-ID preview
+  (controlled resync, weight repair, product edit) means another row shares the internal
+  SKU. Retired archived copies are accepted when the SKU reservation belongs to the
+  selected current product and no copy is current, in correction lineage or carrying
+  unfinished sync work; anything else remains a real conflict.
 - `docker compose` deploys wipe the container's `/tmp`. Keep scripts and journals on
   the host (`docker compose cp`) and copy them in again after each deploy.
 - In an interactive shell use `set +H` before node one-liners containing `!`.
