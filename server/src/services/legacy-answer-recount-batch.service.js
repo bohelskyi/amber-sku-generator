@@ -6,6 +6,7 @@ const recovery = require('./magento/lifecycle-recovery');
 const characteristics = require('./product/characteristic-config');
 const { administrator } = require('./magento/binding-publication');
 const { assertActorStillAuthorized } = require('./access-admin-transaction');
+const { readNameState } = require('./magento/name-state');
 const FORMAT = 'legacy-answer-recount-batch-v1', MAX_ITEMS = 50;
 // products.recount: POST /recount/preview|apply; exports.reconcile: /admin/magento-recovery lifecycle routes.
 const PERMISSIONS = ['products.recount', 'exports.reconcile'];
@@ -60,11 +61,21 @@ async function catalog(client, input) {
   return configuration.config_hash;
 }
 async function current(client, sku) {
-  const rows = (await client.query(`SELECT p.id,p.full_sku,p.category,p.weight,p.details,p.corrected_from_product_id,i.public_sku,
+  const rows = (await client.query(`SELECT p.id,p.full_sku,p.category,p.weight,p.details,p.corrected_from_product_id,p.public_product_identity_id,i.public_sku,
     f.route,f.hold_reason,f.evidence->>'origin' AS lifecycle_origin,(f.evidence ? 'magentoPriorExposure') AS exposure_confirmed FROM products p JOIN public_product_identities i ON i.id=p.public_product_identity_id
     LEFT JOIN product_full_export_state f ON f.product_id=p.id
     WHERE i.public_sku=$1 AND p.status='active' AND p.corrected_to_product_id IS NULL ORDER BY p.id`, [sku])).rows;
   return rows.length === 1 ? rows[0] : { blocked: rows.length ? 'PRODUCT_NOT_UNIQUE' : 'PRODUCT_NOT_FOUND' };
+}
+// The recovery needs the durable Magento product ID of the shared name state (DURABLE_REMOTE_ID_REQUIRED).
+// Check it before the recount: afterwards the successor is held and the name tools no longer accept it.
+async function durableRemoteId(client, product) {
+  const binding = (await client.query(`SELECT b.origin_hash FROM magento_binding_revisions b
+    JOIN magento_auto_sync_activation a ON a.singleton AND a.installation_key=b.installation_key
+    WHERE b.state='published' ORDER BY b.version_number DESC LIMIT 1`)).rows[0];
+  if (!binding) return null;
+  const state = await readNameState(client, binding.origin_hash, product.public_product_identity_id);
+  return Number(state?.remote_product_id) > 0 ? Number(state.remote_product_id) : null;
 }
 // Keep the stored decision; the price-equality check below is the authority against repricing.
 function pricingDecision(details = {}) {
@@ -109,8 +120,14 @@ function previewBlocker(preview, product, input) {
   return null;
 }
 async function inspect(options, input, item) {
-  const product = await read(options.databasePool, client => current(client, item.sku));
+  const product = await read(options.databasePool, async client => {
+    const row = await current(client, item.sku);
+    return row.blocked ? row : { ...row, remoteProductId: await durableRemoteId(client, row) };
+  });
   if (product.blocked) return { sku: item.sku, status: 'blocked', code: product.blocked };
+  // Resolve it with the ordinary name choice (Magento → Amber names), then preview again.
+  const remoteBlocked = () => product.remoteProductId ? null : { sku: item.sku, productId: product.id, publicSku: product.public_sku,
+    status: 'blocked', code: 'MAGENTO_REMOTE_ID_REQUIRED' };
   const base = { sku: item.sku, productId: product.id, publicSku: product.public_sku };
   if (product.category !== input.category) return { ...base, status: 'blocked', code: 'CATEGORY_MISMATCH' };
   const keys = Object.keys(input.answers), stored = product.details?.answers || {};
@@ -125,10 +142,13 @@ async function inspect(options, input, item) {
     const weightDone = !weight || weight.consistent
       && changes.some(change => change.key === 'weight' && Number(change.to) === weight.exact && Number(change.from) !== weight.exact);
     if (!recounted || !answersDone || !weightDone) return { ...base, status: 'blocked', code: answered && !answersDone ? 'ANSWER_ALREADY_PRESENT' : 'WEIGHT_ALREADY_CONSISTENT' };
+    const pending = product.route === 'hold' && (product.hold_reason === 'historical_ambiguity' || product.hold_reason === 'prior_exposure'
+      && product.lifecycle_origin === 'recount' && product.exposure_confirmed !== true);
+    if (pending && remoteBlocked()) return remoteBlocked();
     return { ...base, internalSku: product.full_sku, lifecycle: { route: product.route, holdReason: product.hold_reason },
-      status: product.route === 'hold' && (product.hold_reason === 'historical_ambiguity' || product.hold_reason === 'prior_exposure'
-        && product.lifecycle_origin === 'recount' && product.exposure_confirmed !== true) ? 'recovery_pending' : 'already_applied' };
+      status: pending ? 'recovery_pending' : 'already_applied' };
   }
+  if (remoteBlocked()) return remoteBlocked();
   const decision = pricingDecision(product.details || {});
   let preview;
   try {

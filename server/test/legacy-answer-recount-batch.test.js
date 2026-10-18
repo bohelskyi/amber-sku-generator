@@ -15,7 +15,7 @@ const questions = [{ id: 78, key: 'stone_processing', label: 'Обробка', i
     { value_id: 2, label: 'Archived', archived: true }] }];
 function database({ admin = true, permitted = true, rows = sku => [{ id: Number(sku.slice(-3)), full_sku: sku, category: 'SV',
   details: { answers: { souvenir: 5 }, manualPriceUah: 5000 }, corrected_from_product_id: null, public_sku: sku,
-  route: 'hold', hold_reason: 'historical_ambiguity' }] } = {}) {
+  route: 'hold', hold_reason: 'historical_ambiguity' }], remoteIds = () => 9001 } = {}) {
   const statements = [];
   const query = async (sql, values = []) => {
     statements.push(sql);
@@ -24,7 +24,12 @@ function database({ admin = true, permitted = true, rows = sku => [{ id: Number(
     if (/has_permission/.test(sql)) return { rows: [{ status: 'active', has_permission: permitted }] };
     if (/FROM categories c/.test(sql)) return { rows: [{ category: { code: 'SV', requires_weight: 0 },
       questions: questions.map(q => ({ ...q, options: q.options })) }] };
-    if (/FROM products p JOIN public_product_identities/.test(sql)) return { rows: rows(values[0]) };
+    if (/FROM products p JOIN public_product_identities/.test(sql)) return { rows: rows(values[0]).map(r => ({ public_product_identity_id: r.id + 1000, ...r })) };
+    if (/FROM magento_binding_revisions b/.test(sql)) return { rows: [{ origin_hash: 'o'.repeat(64) }] };
+    if (/FROM magento_name_sync_states/.test(sql)) {
+      const remote = remoteIds(values[1]);
+      return { rows: remote ? [{ public_product_identity_id: values[1], remote_product_id: remote }] : [] };
+    }
     return { rows: [] };
   };
   return { statements, query, connect: async () => ({ query, release() {} }) };
@@ -246,4 +251,19 @@ test('recovery retries while the worker changes the successor during preview; ot
   previews = 0; blockers = ['LOCAL_EVIDENCE_CHANGED', 'SYNC_NOT_SENDABLE'];
   await assert.rejects(service.apply(input(), options(database(), { planHash: plan.planHash, append: async () => {}, busyWait: async () => {} })),
     { code: 'LEGACY_ANSWER_RECOVERY_BLOCKED' });
+});
+
+test('a missing durable Magento ID blocks before any recount and on a pending recovery', async t => {
+  const calls = t.mock.method(products, 'buildProductRecountPreview', async payload => recountPreview(payload.sourceSku));
+  const done = { answers: { stone_processing: '1' }, correction: { changes: [{ key: 'stone_processing', from: null, to: 1 }] } };
+  const rows = sku => [{ id: Number(sku.slice(-3)), full_sku: sku, category: 'SV', corrected_from_product_id: sku === 'SV5111001' ? null : 9,
+    public_sku: sku, route: 'hold', hold_reason: sku === 'SV5111003' ? 'prior_exposure' : 'historical_ambiguity',
+    lifecycle_origin: sku === 'SV5111003' ? 'reconciliation' : 'recount', exposure_confirmed: sku === 'SV5111003',
+    details: sku === 'SV5111001' ? { answers: { souvenir: 5 }, manualPriceUah: 5000 } : done }];
+  // No shared name state and no acknowledged job: no product has a durable Magento ID.
+  const plan = await service.preview(input(['SV5111001', 'SV5111002', 'SV5111003'].map(sku => ({ sku }))),
+    options(database({ rows, remoteIds: () => null })));
+  assert.deepEqual(plan.items.map(i => [i.sku, i.status, i.code ?? null]), [['SV5111001', 'blocked', 'MAGENTO_REMOTE_ID_REQUIRED'],
+    ['SV5111002', 'blocked', 'MAGENTO_REMOTE_ID_REQUIRED'], ['SV5111003', 'already_applied', null]]);
+  assert.equal(calls.mock.callCount(), 0, 'no recount preview without the durable ID');
 });
