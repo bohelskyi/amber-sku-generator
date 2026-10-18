@@ -52,6 +52,41 @@ An error never credits a different row. This active-only CLI has no startup or a
 
 A separate reviewed historical UI path handles an archived/current SV whose saved comma answer is exactly equal to its existing positive canonical weight. `/api/products/historical-reactivation/weight-normalization/preview` and `/apply` require the actual active Administrator, all historical-review capabilities, `products.recount`, `exports.create`, authentication and CSRF. Exact decimal digit comparison rejects absent, conflicting, malformed or rounded-equal values; zero canonical weight and five-stone canonical recovery are outside this path. Preview binds actor, expiry, identity, archived lifecycle/lineage/request, current binding/definition, weight-question and pricing evidence. Apply revalidates under existing access/product/lifecycle locks, replaces only the comma in `details.answers.weight`, verifies the persisted target, keeps the product retired and suppresses pending ordinary delivery, and writes an immutable atomic audit. It preserves physical weight, all prices, SKU, names and history, and makes no Magento call. The UI shows the exact original/target, requires unchecked explicit consent, invalidates old restore evidence on a save attempt, and offers a fresh whole-list historical check afterwards. A lost reply permits exact read recovery only. That fresh review may expose manual-name completion; names are never inferred.
 
+### Reviewed legacy answer recount batch
+
+`node scripts/legacy-answer-recount-batch.js --mode preview --input FILE.json --output NEW.jsonl --expected-database NAME --actor-id ID`
+reviews 1–50 distinct public SKUs of one category. Input:
+`{"category":"SV","answers":{"stone_processing":1},"reason":"10–500 chars","items":[{"sku":"SV5111001"}]}`;
+`"weightFromAnswer":true` replaces or accompanies `answers`. Each answer must name a current
+non-archived option question and option of the category and be absent on the current active
+product. In weight mode `details.answers.weight` must be a positive decimal (comma or dot,
+≤3 decimals) and `products.weight` its truncated or rounded integer.
+
+Preview is read-only (read-only pool and transactions). It builds the ordinary
+`buildProductRecountPreview()` with the stored answers plus the patch, the stored pricing
+decision (manual UAH, custom USD/gram or system automatic) and otherwise unchanged inputs; in
+weight mode the recount weight is the normalized answer. An item is `ready` only when the
+stored answers change by exactly the patch, the weight is unchanged (or becomes the answer),
+the final UAH price is unchanged (`PRICE_CHANGED` otherwise; SV weight is a pricing axis), the
+public SKU and names are unchanged and the successor route is `hold/historical_ambiguity`.
+Weight mode also refuses a newly encoded internal SKU (`SKU_CHANGED`). After stable public SKU
+activation the successor is native (`full_sku` `NULL`), the legacy SKU stays reserved by the
+retired source, and the SV recount stores the corrected weight in `answers.weight` as a
+decimal number (`"37,6"` becomes `37.6`). A required answer that is still absent blocks a
+weight-only recount; combine both options in one input instead. Prior runs report
+`already_applied`, or `recovery_pending` when the recount committed but the successor is still
+on `hold/historical_ambiguity`. The plan hash binds the actor, input and every item's status
+and preview evidence.
+
+Apply adds `--plan-hash` and requires an identical fresh preview (`PLAN_CHANGED`) with no
+blocked item and an active Administrator with `products.recount` and `exports.reconcile`
+(rechecked before each step). Items run sequentially: `applyProductRecount()` with the
+route's options, then the product problem page sequence `productRecovery()` →
+`lifecycle-recovery` preview (`stable_recount_exposure`) → apply, which records its own
+handoff. Every step is appended and fsynced to the new JSONL journal. The first error stops the
+run without retry; rerun with a new preview, which skips completed items and resumes the
+recovery step. The script issues no SQL writes and no Magento writes; Magento reads are GET only.
+
 ## Direct apply
 
 Recount apply is one authoritative transaction that:
