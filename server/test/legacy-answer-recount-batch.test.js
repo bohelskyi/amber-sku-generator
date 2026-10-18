@@ -118,15 +118,17 @@ test('preview reports absent, prior-run and conflicting answers without calling 
   const calls = t.mock.method(products, 'buildProductRecountPreview', async payload => recountPreview(payload.sourceSku));
   const rows = sku => sku === 'SV5111404' ? [] : [{ id: Number(sku.slice(-3)), full_sku: sku === 'SV5111003' ? null : sku, category: 'SV',
     corrected_from_product_id: sku === 'SV5111001' ? null : 9, public_sku: sku, route: 'hold',
-    hold_reason: sku === 'SV5111002' ? 'prior_exposure' : 'historical_ambiguity',
+    hold_reason: ['SV5111002', 'SV5111005'].includes(sku) ? 'prior_exposure' : 'historical_ambiguity',
+    // SV5111002 is already confirmed; SV5111005 is born prior_exposure by its recount and still needs the confirmation.
+    lifecycle_origin: sku === 'SV5111002' ? 'reconciliation' : 'recount', exposure_confirmed: sku === 'SV5111002',
     details: sku === 'SV5111001' ? { answers: { souvenir: 5 }, manualPriceUah: 5000 }
       : sku === 'SV5111004' ? { answers: { stone_processing: '0' } }
         : { answers: { stone_processing: '1' }, correction: { changes: [{ key: 'stone_processing', from: null, to: 1 }] } } }];
-  const plan = await service.preview(input(['SV5111001', 'SV5111002', 'SV5111003', 'SV5111004', 'SV5111404'].map(sku => ({ sku }))),
+  const plan = await service.preview(input(['SV5111001', 'SV5111002', 'SV5111003', 'SV5111004', 'SV5111005', 'SV5111404'].map(sku => ({ sku }))),
     options(database({ rows })));
   assert.deepEqual(plan.items.map(i => [i.sku, i.status, i.code ?? null]), [['SV5111001', 'ready', null],
     ['SV5111002', 'already_applied', null], ['SV5111003', 'recovery_pending', null], ['SV5111004', 'blocked', 'ANSWER_ALREADY_PRESENT'],
-    ['SV5111404', 'blocked', 'PRODUCT_NOT_FOUND']]);
+    ['SV5111005', 'recovery_pending', null], ['SV5111404', 'blocked', 'PRODUCT_NOT_FOUND']]);
   assert.equal(calls.mock.callCount(), 1);
 });
 

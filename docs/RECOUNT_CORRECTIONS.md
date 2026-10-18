@@ -78,7 +78,8 @@ retired source, and the SV recount stores the corrected weight in `answers.weigh
 decimal number (`"37,6"` becomes `37.6`). A required answer that is still absent blocks a
 weight-only recount; combine both options in one input instead. Prior runs report
 `already_applied`, or `recovery_pending` when the recount committed but the successor is still
-on `hold/historical_ambiguity`. The plan hash binds the actor, input and every item's status
+on `hold/historical_ambiguity` or is still the recount-born `hold/prior_exposure` without a
+Magento exposure confirmation. The plan hash binds the actor, input and every item's status
 and preview evidence.
 
 Apply adds `--plan-hash` and requires an identical fresh preview (`PLAN_CHANGED`) with no
@@ -86,8 +87,12 @@ blocked item and an active Administrator with `products.recount` and `exports.re
 (rechecked before each step). Items run sequentially: `applyProductRecount()` with the
 route's options, then the product problem page sequence `productRecovery()` →
 `lifecycle-recovery` preview (`stable_recount_exposure`) → apply, which records its own
-handoff. A `hold/prior_exposure` successor already has the ordinary UPDATE route and gets no
-recovery step; record its handoff with a reviewed `broader_resync` afterwards. The worker usually
+handoff. A `hold/prior_exposure` successor gets the same recovery: without its receipt first
+sync cannot admit field review (`FIRST_SYNC_HISTORY_REVIEW_REQUIRED`), and cutover history
+admission never applies to a recounted product. Its retained export files need a recorded
+[disposition](RETAINED_EXPORT_DISPOSITION.md) first (`FIRST_SYNC_RETAINED_FILE_REVIEW_REQUIRED`
+otherwise); the recount itself has already committed then, so the item resumes as
+`recovery_pending`. The worker usually
 picks up the fresh successor at once; the recovery refuses to wait behind dispatched work
 (`EXPOSURE_SYNC_BUSY`, before any write) and its preview reports `LOCAL_EVIDENCE_CHANGED`
 while the worker moves the product, so the batch repeats the recovery sequence up to 24

@@ -158,7 +158,8 @@ async function productRecovery(config, id, options = {}) {
       [p.public_product_identity_id])).rows[0];
     const protectedWork = request?.reason_code === 'reconciliation_required' || request?.active_job_id != null || request?.state === 'syncing'
       || (row && !['succeeded', 'superseded'].includes(row.state) && (row.state === 'uncertain' || steps.length > 0));
-    const history = p.lifecycle?.route === 'hold' && p.lifecycle.hold_reason === 'historical_ambiguity'
+    const recountBorn = stable.recountBorn(p.lifecycle);
+    const history = p.lifecycle?.route === 'hold' && p.lifecycle.hold_reason === 'historical_ambiguity' || recountBorn
       ? await require('./recovery-history').read(client, id) : null;
     const availableKinds = [];
     if (!protectedWork && p.lifecycle && p.lifecycle.route !== 'retired') {
@@ -169,6 +170,8 @@ async function productRecovery(config, id, options = {}) {
         else if (history?.complete && !history.hasRecount) availableKinds.push('prior_exposure');
         if (delivery?.legacy_product_csv_enabled === true) availableKinds.push('replacement', 'unexposed_first_delivery', 'generated_first_delivery');
       }
+      // A recount born prior_exposure still needs the stable confirmation before first-sync field review.
+      if (recountBorn && history?.stableRecount) availableKinds.push('stable_recount_exposure');
     }
     return { productId: id, article: p.public_sku, history,
       job: options.canRecoverJobs && row ? require('./sync-job-recovery').summary(row, steps) : null,

@@ -245,6 +245,18 @@ separately from contradictory product links. Stable confirmation is not recommen
 for changed identities, incomplete/inconsistent history, non-retired predecessors
 or unresolved exclusion policies. Its existing preview/apply checks remain authoritative.
 
+The stable recipe also confirms a recount born `hold/prior_exposure` (lifecycle
+`origin: recount`, no `magentoPriorExposure`): its ancestors were in an exact
+retained export file, so the recount skipped `historical_ambiguity`, but first sync
+still needs the reviewed Magento exposure receipt and its admission envelope. The
+plan records the `prior_exposure` → `prior_exposure` transition, and every retained
+file of every lineage member needs a recorded migration-082 disposition that
+resolves that member (`FIRST_SYNC_RETAINED_FILE_REVIEW_REQUIRED`, or
+`FIRST_SYNC_RETAINED_FILES_UNRESOLVED` for unparsed files). Apply only replaces the
+lifecycle evidence with the reconciliation receipt and records the same
+`broader_resync` handoff. A confirmed successor is not offered again, and the
+historical recipe keeps its `historical_ambiguity`-only transition.
+
 The separate `historical_recount_exposure` recipe handles a complete reciprocal
 chain containing old public articles and migration-039 retired baseline rows.
 Only those retired baseline rows may retain NULL source-correction pointers or

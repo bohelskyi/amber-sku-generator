@@ -37,7 +37,7 @@ test('legacy answer recount batch: read-only preview, reviewed apply, resume and
       [q.id, q.question_key, q.label, q.sku_index, q.display_order, q.required, q.sku_separator, JSON.stringify(q.visible_if_json)]);
     for (const o of f.options) await db.query('INSERT INTO sku_schema_options(id,schema_question_id,value_id,sku_code,label,visible_if_json,hidden_if_json,archived) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8)',
       [o.id, o.schema_question_id, o.value_id, o.sku_code, o.label, JSON.stringify(o.visible_if_json), JSON.stringify(o.hidden_if_json), o.archived]);
-    const { scenario, config, installationKey } = await require('./stable-recount-exposure-fixture')(db, actor, { group: 'SV' });
+    const { scenario, config, installationKey, published } = await require('./stable-recount-exposure-fixture')(db, actor, { group: 'SV' });
     const legacy = fixture.product(1359), skus = ['SV5111001', 'SV5111002', 'SV5111003', 'SV5111004', 'SV5111005', 'SV5111006'], scenarios = {};
     // 004-006: truncated physical weight 37 with exact answer "37,6"; 005 is USD/gram priced, so its price depends on weight.
     // 006 also lacks stone_processing and needs one combined recount.
@@ -249,8 +249,8 @@ test('legacy answer recount batch: read-only preview, reviewed apply, resume and
       assert.deepEqual((await cli(['SV5111006'], 'preview', kind)).journal.filter(row => row.type === 'item').map(i => i.status), ['already_applied']);
       assert.equal(writes(), 0);
     });
-    await t.test('an already exposed product (prior_exposure) is recounted without a recovery step', async () => {
-      const [current] = await active('SV5111004');
+    await t.test('a recount born prior_exposure needs a retained-file disposition, then the stable recovery admits it', async () => {
+      const [current] = await active('SV5111004'), snapshotId = randomUUID(), csv = 'sku,price_uah\r\nSV5111004,5000\r\n';
       // A later truncation on the already exposed successor: answer 37.6, physical 37.
       const writer = await db.connect();
       try {
@@ -258,19 +258,64 @@ test('legacy answer recount batch: read-only preview, reviewed apply, resume and
         await writer.query("UPDATE products SET weight=37,details=jsonb_set(details,'{answers,weight}','\"37,6\"') WHERE id=$1", [current.id]);
         // The legacy version was in a retained export file: exact exposure, as for the production 2026-09-11 file.
         await writer.query(`INSERT INTO export_snapshots(id,idempotency_key,from_sku,to_sku,resolved_to_sku,exported_to_product_id,row_count,file_name,csv_content,status)
-          VALUES($1,$1,'SV5111004','SV5111004','SV5111004',$2,1,'exposed.csv',$3,'generated')`, [randomUUID(), original.SV5111004.id, 'sku,price_uah\r\nSV5111004,5000\r\n']);
+          VALUES($1,$1,'SV5111004','SV5111004','SV5111004',$2,1,'exposed.csv',$3,'generated')`, [snapshotId, original.SV5111004.id, csv]);
         await gate.commit(writer);
       } catch (cause) { await gate.rollback(writer); throw cause; } finally { await gate.release(writer); writer.release(); }
       const kind = { kind: { weightFromAnswer: true } };
       const plan = await cli(['SV5111004'], 'preview', kind), item = plan.journal.find(row => row.type === 'item');
       assert.equal(item.status, 'ready', JSON.stringify(item));
       assert.deepEqual(item.delivery, { route: 'hold', holdReason: 'prior_exposure' });
-      const result = await cli(['SV5111004'], 'apply', { ...kind, planHash: plan.summary.planHash });
-      assert.equal(result.code, 0, JSON.stringify(result));
-      assert.deepEqual(result.journal.map(row => row.type), ['start', 'fresh_preview', 'recount_started', 'recount_applied', 'complete']);
+      const lifecycle = async id => (await db.query('SELECT * FROM product_full_export_state WHERE product_id=$1', [id])).rows[0];
+      const blocked = await cli(['SV5111004'], 'apply', { ...kind, planHash: plan.summary.planHash });
+      assert.notEqual(blocked.code, 0);
+      const error = blocked.journal.find(row => row.type === 'error');
+      assert.deepEqual([error.step, error.code, error.details.blockers], ['recovery', 'LEGACY_ANSWER_RECOVERY_BLOCKED', ['FIRST_SYNC_RETAINED_FILE_REVIEW_REQUIRED']]);
       const [next] = await active('SV5111004');
       assert.notEqual(next.id, current.id); assert.equal(Number(next.weight), 37.6); assert.equal(Number(next.total_price_uah), 5000);
-      assert.equal(next.public_product_identity_id, current.public_product_identity_id); assert.equal(next.hold_reason, 'prior_exposure');
+      assert.equal(next.public_product_identity_id, current.public_product_identity_id);
+      const born = await lifecycle(next.id);
+      assert.deepEqual([born.hold_reason, born.evidence.origin, born.evidence.magentoPriorExposure], ['prior_exposure', 'recount', undefined]);
+      assert.deepEqual((await cli(['SV5111004'], 'preview', kind)).journal.filter(row => row.type === 'item').map(i => i.status), ['recovery_pending']);
+      const recovery = require('../src/services/magento/lifecycle-recovery');
+      const lifecycleOptions = { ...recoveryOptions, databasePool: db, mutationContext: { actorUserId: actor } };
+      const offered = await recovery.productRecovery(config, next.id, { ...lifecycleOptions, canRecoverJobs: true, canReconcileLifecycle: true });
+      assert.deepEqual(offered.lifecycle.availableKinds, ['stable_recount_exposure']);
+      // The historical recipe keeps its historical_ambiguity-only transition.
+      assert.ok((await recovery.preview(config, next.id, { kind: 'historical_recount_exposure' }, lifecycleOptions)).blockers.includes('HOLD_NOT_HISTORICALLY_AMBIGUOUS'));
+      const firstSync = () => require('../src/services/magento/first-sync.service').review(config,
+        { sku: 'SV5111004', bindingRevisionId: published.id }, { ...scenarios.SV5111004.options, databasePool: db, actorUserId: actor, fetchImpl });
+      const unadmitted = await firstSync();
+      assert.deepEqual([unadmitted.mode, unadmitted.blockers.map(b => b.code)], ['review', ['FIRST_SYNC_HISTORY_REVIEW_REQUIRED']]);
+      // The reviewed migration-082 disposition of that exact file (its readback flow is covered by the cutover suite).
+      const originHash = c.originHash(config.baseUrl), csvSha256 = require('node:crypto').createHash('sha256').update(csv).digest('hex');
+      const evidence = { snapshotId, csvSha256, originHash, members: [{ productId: original.SV5111004.id, current: false, resolved: true }] };
+      const evidenceHash = c.hash(evidence);
+      const audit = (await db.query(`INSERT INTO audit_events(event_key,actor_user_id,actor_snapshot,subject_type,subject_id,request_id,details)
+        VALUES('export.retained_disposition_recorded',$1,'{"displayName":"Fixture","preferredUsername":null}','export_snapshot',$2,$3,$4::jsonb) RETURNING id`,
+      [actor, snapshotId, randomUUID(), JSON.stringify({ evidenceHash, csvSha256, originHash, disposition: 'consumed_and_reconciled' })])).rows[0].id;
+      await db.query(`INSERT INTO retained_export_dispositions(snapshot_id,disposition,basis,csv_sha256,origin_hash,evidence,evidence_hash,reason,actor_user_id,audit_event_id)
+        VALUES($1,'consumed_and_reconciled','magento_readback_v1',$2,$3,$4::jsonb,$5,'Fixture file was imported into Magento',$6,$7)`,
+      [snapshotId, csvSha256, originHash, JSON.stringify(evidence), evidenceHash, actor, audit]);
+      const resumed = await cli(['SV5111004'], 'preview', kind), pending = resumed.journal.find(row => row.type === 'item');
+      assert.equal(pending.status, 'recovery_pending');
+      const result = await cli(['SV5111004'], 'apply', { ...kind, planHash: resumed.summary.planHash });
+      assert.equal(result.code, 0, JSON.stringify(result.journal));
+      assert.deepEqual(result.journal.map(row => row.type), ['start', 'fresh_preview', 'recovery_previewed', 'recovery_applied', 'complete']);
+      const confirmed = await lifecycle(next.id);
+      assert.deepEqual([confirmed.hold_reason, confirmed.evidence.origin, confirmed.evidence.action, confirmed.evidence.priorEvidence.origin],
+        ['prior_exposure', 'reconciliation', 'magento_stable_recount_prior_exposure', 'recount']);
+      assert.equal(confirmed.evidence.magentoPriorExposure.sku, 'SV5111004');
+      const receipt = (await db.query(`SELECT details FROM audit_events WHERE event_key='product.magento_stable_recount_exposure_reconciled'
+        AND subject_id=$1`, [confirmed.evidence.magentoPriorExposure.planHash])).rows[0];
+      assert.deepEqual(receipt.details.transition.from, { route: 'hold', holdReason: 'prior_exposure' });
+      assert.equal(receipt.details.firstSyncAdmission.identity.productId, next.id);
+      // The existing worker enrolls the reviewed handoff; only then does the receipt admit field review.
+      await require('../src/services/magento/binding-handoff').processHandoffs(config, { databasePool: db });
+      const admitted = await firstSync();
+      assert.equal(admitted.mode, 'first', JSON.stringify(admitted.blockers));
+      // A confirmed successor is not offered or accepted a second confirmation.
+      assert.deepEqual((await recovery.productRecovery(config, next.id, { ...lifecycleOptions, canRecoverJobs: true, canReconcileLifecycle: true })).lifecycle.availableKinds, []);
+      assert.ok((await recovery.preview(config, next.id, { kind: 'stable_recount_exposure' }, lifecycleOptions)).blockers.includes('HOLD_NOT_HISTORICALLY_AMBIGUOUS'));
       assert.deepEqual((await cli(['SV5111004'], 'preview', kind)).journal.filter(row => row.type === 'item').map(i => i.status), ['already_applied']);
       assert.equal(writes(), 0);
     });

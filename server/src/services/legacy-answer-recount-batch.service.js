@@ -61,7 +61,7 @@ async function catalog(client, input) {
 }
 async function current(client, sku) {
   const rows = (await client.query(`SELECT p.id,p.full_sku,p.category,p.weight,p.details,p.corrected_from_product_id,i.public_sku,
-    f.route,f.hold_reason FROM products p JOIN public_product_identities i ON i.id=p.public_product_identity_id
+    f.route,f.hold_reason,f.evidence->>'origin' AS lifecycle_origin,(f.evidence ? 'magentoPriorExposure') AS exposure_confirmed FROM products p JOIN public_product_identities i ON i.id=p.public_product_identity_id
     LEFT JOIN product_full_export_state f ON f.product_id=p.id
     WHERE i.public_sku=$1 AND p.status='active' AND p.corrected_to_product_id IS NULL ORDER BY p.id`, [sku])).rows;
   return rows.length === 1 ? rows[0] : { blocked: rows.length ? 'PRODUCT_NOT_UNIQUE' : 'PRODUCT_NOT_FOUND' };
@@ -104,7 +104,7 @@ function previewBlocker(preview, product, input) {
   if (!(Number(source.totalPriceUah) > 0) || Number(next.totalPriceUah) !== Number(source.totalPriceUah)) return 'PRICE_CHANGED';
   if (next.publicSku !== product.public_sku) return 'PUBLIC_SKU_WOULD_CHANGE';
   if (preview.nameChanges) return 'NAMES_WOULD_CHANGE';
-  // historical_ambiguity needs the stable recount recovery; prior_exposure is already an ordinary UPDATE route.
+  // Both need the stable recount recovery: it confirms the Magento exposure and admits first-sync field review.
   if (next.delivery?.route !== 'hold' || !['historical_ambiguity', 'prior_exposure'].includes(next.delivery.holdReason)) return 'RECOUNT_ROUTE_UNEXPECTED';
   return null;
 }
@@ -126,7 +126,8 @@ async function inspect(options, input, item) {
       && changes.some(change => change.key === 'weight' && Number(change.to) === weight.exact && Number(change.from) !== weight.exact);
     if (!recounted || !answersDone || !weightDone) return { ...base, status: 'blocked', code: answered && !answersDone ? 'ANSWER_ALREADY_PRESENT' : 'WEIGHT_ALREADY_CONSISTENT' };
     return { ...base, internalSku: product.full_sku, lifecycle: { route: product.route, holdReason: product.hold_reason },
-      status: product.route === 'hold' && product.hold_reason === 'historical_ambiguity' ? 'recovery_pending' : 'already_applied' };
+      status: product.route === 'hold' && (product.hold_reason === 'historical_ambiguity' || product.hold_reason === 'prior_exposure'
+        && product.lifecycle_origin === 'recount' && product.exposure_confirmed !== true) ? 'recovery_pending' : 'already_applied' };
   }
   const decision = pricingDecision(product.details || {});
   let preview;
@@ -193,10 +194,6 @@ async function apply(rawInput, options) {
         if (result.success !== true || Number(result.source.productId) !== item.productId || !Number.isSafeInteger(productId)
           || result.corrected.publicSku !== item.publicSku || Number(result.corrected.totalPriceUah) !== item.priceBeforeUah
           || item.recountWeight && Number(result.corrected.weight) !== item.weightAfter) fail('LEGACY_ANSWER_RECOUNT_RESULT_UNEXPECTED');
-      }
-      if (item.status === 'ready' && item.delivery?.holdReason === 'prior_exposure') {
-        // An already exposed successor keeps its ordinary UPDATE route; no recovery is offered or needed.
-        results.push({ sku: item.sku, status: 'applied', productId, recovery: 'not_required' }); continue;
       }
       step = 'recovery';
       // The fresh successor is usually picked up by the worker at once; the recovery refuses to wait behind
