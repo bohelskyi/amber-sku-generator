@@ -86,7 +86,7 @@ git status --short
 
 There is no separate server build command. For deployment-image changes, also run `docker compose build`; validate Compose changes with `docker compose config`.
 
-CI uses Node 20 and PostgreSQL 16 and validates Compose, runs server lint/unit/integration checks, plus client test/lint/build.
+CI uses Node 20 and PostgreSQL 16 and validates Compose, runs server lint/unit (with coverage)/integration checks, plus client test (with coverage)/lint/build, in parallel jobs aggregated by the `test` check; it runs once per pull request and on `main`.
 
 ## Operational safety
 
