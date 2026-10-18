@@ -53,6 +53,13 @@ enqueues or writes Magento directly.
 3. **Correcting Amber data** creates a new product version for corrections. That
    version starts on `hold/historical_ambiguity`; confirm it with step 1's recount
    action. A plain weight/size edit may also produce a correction.
+   - Owner-verified corrections for many legacy products: `legacy-answer-recount-batch.js`
+     (≤50 SKUs). It fills an absent option answer (`"answers":{"stone_processing":1}`)
+     and/or restores the exact physical weight from `answers.weight` when `products.weight`
+     holds its truncated/rounded integer (`"weightFromAnswer":true`). Per item it runs the
+     same recount as the UI and then the same «Дозволити оновлення після переобліку»
+     (`stable_recount_exposure`), which records its own handoff. See
+     [recount batch](RECOUNT_CORRECTIONS.md#reviewed-legacy-answer-recount-batch).
 4. **Handoff.** Field decisions do not wake `needs_attention` requests. Record a
    reviewed `broader_resync` through `binding-controlled-actions` (`preview` → token →
    `apply`, ≤100 products, the reason text is part of the token). History admission
@@ -123,6 +130,7 @@ Every publication has side effects on products that are **not yet synced**:
 | `magento-carry-unchanged-reviews.js` | Re-approve identical successor decisions | this page |
 | `magento-publication.js` | H3b publication preview/apply with handoff | [integration](MAGENTO_INTEGRATION.md#reviewed-publication-and-controlled-handoff-h3b) |
 | `sv-optional-characteristics.js` | One-off SV template change (2026-10-14) | script header |
+| `legacy-answer-recount-batch.js` | Reviewed UI recount + stable recount exposure for an absent answer or truncated weight, ≤50 | [recount batch](RECOUNT_CORRECTIONS.md#reviewed-legacy-answer-recount-batch) |
 | `canonical-weight-repair.js` | Reviewed zero-weight repair from the recorded answer or (`--source magento-readback`) Magento `decor_weight` | [weight repair](CANONICAL_WEIGHT_REPAIR.md), [Magento source](CANONICAL_WEIGHT_REPAIR.md#magento-readback-source) |
 
 ## Open follow-ups
