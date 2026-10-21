@@ -111,9 +111,9 @@ it('paginates a legacy direct-product URL using bounded product pages without sw
   shell(<SyncProblemsPage />, '/attention?problem=7&offset=20');
   const queue = await screen.findByRole('complementary', { name: 'Черга проблем доставки' });
   await waitFor(() => expect(api.get).toHaveBeenCalledWith('/magento/problems/page', expect.objectContaining({ params: expect.objectContaining({ limit: 20, offset: 20 }) })));
-  fireEvent.click(within(queue).getByRole('button', { name: 'Далі' }));
+  fireEvent.click(await within(queue).findByRole('button', { name: 'Далі' }));
   await waitFor(() => expect(api.get).toHaveBeenCalledWith('/magento/problems/page', expect.objectContaining({ params: expect.objectContaining({ limit: 20, offset: 40 }) })));
-  fireEvent.click(within(queue).getByRole('button', { name: 'Назад' }));
+  fireEvent.click(await within(queue).findByRole('button', { name: 'Назад' }));
   await waitFor(() => expect(api.get.mock.calls.filter(([url]) => url === '/magento/problems/page').at(-1)[1].params.offset).toBe(20));
   expect(screen.getByRole('region', { name: 'З чого почати' })).toBeTruthy();
   expect(api.get.mock.calls.some(([url]) => url === '/magento/problem-groups/page')).toBe(false);
