@@ -14,6 +14,7 @@ export function ConditionBuilder({
   config,
   excludeQuestionId,
   label = 'Видимість',
+  emptyLabel = 'Завжди',
   onChange,
   questions,
   value,
@@ -83,10 +84,11 @@ export function ConditionBuilder({
         <div className="text-xs font-semibold text-slate-500">{label}</div>
         <select
           className="input-sm max-w-[180px]"
+          aria-label={label}
           value={rows.length > 0 ? 'conditional' : 'always'}
           onChange={(event) => setMode(event.target.value)}
         >
-          <option value="always">Завжди</option>
+          <option value="always">{emptyLabel}</option>
           <option value="conditional">За умовою</option>
         </select>
       </div>
@@ -154,6 +156,7 @@ export function ConditionBuilder({
                         <button
                           key={optionValue}
                           type="button"
+                          aria-pressed={isSelected}
                           className={`rounded-lg border px-2 py-1 text-xs transition ${isSelected ? 'is-selected-warm' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
                           onClick={() => {
                             const nextValues = isSelected

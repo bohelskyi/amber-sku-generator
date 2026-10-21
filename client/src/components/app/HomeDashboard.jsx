@@ -1,4 +1,4 @@
-import { ProductPhotos } from './ProductPhotos.jsx';
+import { ProductPhotoGallery } from './ProductPhotos.jsx';
 import { TestProductNotice } from './TestProductNotice.jsx';
 import { isTestProduct } from '../../lib/test-product.js';
 import { getRecountWeightState as getDecodedWeightState } from '../../lib/product-recount.js';
@@ -308,10 +308,6 @@ export function DecodeWorkspace({
     (condition) => !condition.isInSku
   ) || [];
   const pricing = decodeData.pricing;
-  const productStatus = getDecodedProductStatus(decodeData);
-  const summaryStateClass = productStatus === 'Активний'
-    ? 'is-success'
-    : 'is-neutral';
   const decodedWeight = pricing?.weight
     ?? decodeData.product?.weight
     ?? (decodeData.suffix.type === 'weight' ? decodeData.suffix.value : null);
@@ -373,10 +369,6 @@ export function DecodeWorkspace({
         <header className="builder-header">
           <div className="min-w-0">
             <h2 className="section-title-text">{decodeData.existsInDb ? 'Характеристики товару' : 'Розшифрований код'}</h2>
-            <p className="mt-0.5 text-xs text-slate-500">
-              {decodeData.category.name}
-              {!decodeData.existsInDb && ' · режим сумісності'}
-            </p>
           </div>
           <div className="flex shrink-0 items-center gap-3">
             {pricing?.dependentKeys?.length > 0 && (
@@ -385,9 +377,6 @@ export function DecodeWorkspace({
                 Впливає на ціну
               </span>
             )}
-            <span className="font-mono text-xs font-semibold text-slate-500">
-              {decodeData.category.code}
-            </span>
           </div>
         </header>
 
@@ -412,27 +401,12 @@ export function DecodeWorkspace({
             );
           })}
         </div>
-        {productPhotos && <ProductPhotos controller={productPhotos} canEdit={photoCanEdit} activationDisabledReason={isTestProduct(decodeData) ? 'TEST товар не вмикається для покупців після перевірки фото.' : null} existingProduct />}
+        {productPhotos && <ProductPhotoGallery controller={productPhotos} canEdit={photoCanEdit} activationDisabledReason={isTestProduct(decodeData) ? 'TEST товар не вмикається для покупців після перевірки фото.' : null} />}
       </div>
 
       <aside className="sticky-summary-container">
         <div className="sticky-summary builder-summary card overflow-hidden">
-          <div className="builder-summary-header">
-            <h3>Підсумок</h3>
-            <span className={`builder-state ${summaryStateClass}`}>
-              <span aria-hidden="true" />
-              {productStatus}
-            </span>
-          </div>
-
           <div className="builder-summary-body">
-            <div className="builder-summary-group first">
-              {decodeData.existsInDb
-                ? <DecodeSummaryRow label="Артикул" value={decodeData.publicSku || 'Недоступний'} mono strong />
-                : <DecodeSummaryRow label="Код" value={decodeData.sku} mono strong />}
-              <DecodeSummaryRow label="Стан у базі" value={productStatus} />
-            </div>
-
             {!decodeData.existsInDb && <div className="decode-warning">
               <p>Збережений товар не знайдено</p>
               <span>Код розшифровано за схемою SKU. Переоблік, зміна ціни, архівування та інші дії з товаром недоступні.</span>
@@ -448,6 +422,7 @@ export function DecodeWorkspace({
             <div className="builder-summary-group">
               <p className="builder-summary-section-title">Ціна товару</p>
               <p className="product-final-price">{formatOptionalValue(finalStoredPriceUah, formatUah)}</p>
+              {canChangeProductPrice && isCurrentProduct && <button onClick={onStartPriceChange} className="btn btn-outline">Змінити ціну</button>}
             </div>
 
             <div className="builder-summary-group">
@@ -565,7 +540,6 @@ export function DecodeWorkspace({
             {canStartRecount && isCurrentProduct && <button onClick={onStartRecount} className="btn btn-primary">
               {recountMode === 'request' ? 'Підготувати запит' : 'Змінити характеристики'}
             </button>}
-            {canChangeProductPrice && isCurrentProduct && <button onClick={onStartPriceChange} className="btn btn-outline">Змінити ціну</button>}
             {canViewHistory && <Link className="btn btn-outline" to={`/products/history?sku=${encodeURIComponent(decodeData.publicSku || decodeData.internalSku || decodeData.sku)}`}>Історія товару</Link>}
             {(canArchiveProducts || canDeleteTestProduct) && isCurrentProduct && <details className="product-exceptional-actions">
               <summary>Додаткові дії</summary>
@@ -590,13 +564,6 @@ function DecodeSummaryRow({ label, mono = false, strong = false, value }) {
       </span>
     </div>
   );
-}
-
-function getDecodedProductStatus(decodeData) {
-  if (!decodeData.existsInDb) return 'Не в базі';
-  if (decodeData.product?.status === 'archived') return 'Архівний';
-  if (decodeData.product?.status === 'corrected') return 'Переоблікований';
-  return 'Активний';
 }
 
 function RecountPanel({
@@ -915,18 +882,12 @@ function RecountPanel({
                 <span>Після</span>
               </div>
               <RecountComparisonRow
-                label="Артикул"
-                current={decodeData.publicSku || 'Недоступний'}
-                next={correctedPricing?.publicSku || decodeData.publicSku || 'Недоступний'}
-                mono
-              />
-              <RecountComparisonRow
                 label="Ціна виробу"
                 current={<RecountMoneyValue uah={currentPricing?.totalPriceUah} usd={currentPricing?.totalPrice} />}
                 next={<RecountMoneyValue uah={correctedPricing?.totalPriceUah} usd={correctedPricing?.totalPrice} />}
                 primaryPrice
               />
-              <RecountComparisonRow
+              <details className="decode-details"><summary>Розрахунок ціни</summary><RecountComparisonRow
                 label="Ціна за грам"
                 current={<RecountMoneyValue perGram uah={currentPricing?.pricePerGramUah} usd={currentPricing?.pricePerGram} />}
                 next={<RecountMoneyValue perGram uah={correctedPricing?.pricePerGramUah} usd={correctedPricing?.pricePerGram} />}
@@ -938,6 +899,7 @@ function RecountPanel({
                 next={correctedMatrix}
                 contextual
               />
+              </details>
               <div className="recount-comparison-difference">
                 <span>Різниця в ціні</span>
                 <span className="recount-price-delta">
@@ -954,7 +916,7 @@ function RecountPanel({
               stale={correctedPricing?.uahRateStale} />}
 
             <div className="builder-summary-group">
-              <p className="builder-summary-section-title">Змінені атрибути</p>
+              <p className="builder-summary-section-title">Змінені характеристики</p>
               {displayedChanges.length > 0 ? (
                 <div className="divide-y divide-slate-100">
                   {displayedChanges.map((change) => (
@@ -994,11 +956,7 @@ function RecountPanel({
             {recountBlockers.length > 0 && (
               <div className="builder-blockers" role="alert">
                 <p>{formatRecountBlockerSummary(recountBlockers.length)}</p>
-                <ul>
-                  {recountBlockers.map((blocker) => (
-                    <li key={blocker.questionId}>{blocker.message}</li>
-                  ))}
-                </ul>
+                <button type="button" className="btn btn-outline" onClick={() => focusFirstRecountBlocker(panelRef.current)}>Перейти до першого поля</button>
               </div>
             )}
 

@@ -361,6 +361,12 @@ function groupEvents(events) {
 export function ProductTimeline() {
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedSku = searchParams.get('sku') || '';
+  const showConfiguration = searchParams.get('view') === 'configuration';
+  const selectView = (configuration) => {
+    const next = new URLSearchParams(searchParams);
+    if (configuration) next.set('view', 'configuration'); else next.delete('view');
+    setSearchParams(next);
+  };
   const returnTo = safeRepairReturn(searchParams.get('returnTo'));
   const [input, setInput] = useState(requestedSku);
   const [data, setData] = useState(null);
@@ -421,9 +427,7 @@ export function ProductTimeline() {
     <div className="app-page">
       <main className="mx-auto w-full max-w-5xl space-y-5 px-4 py-4 pb-20 sm:px-6 sm:py-6">
         <PageHeader
-          eyebrow="Журнал"
           title="Історія товару"
-          description="Характеристики, ціни та події товару за артикулом."
           breadcrumbs={[{ label: 'Товари', to: '/products' }, { label: 'Історія товару' }]}
           actions={returnTo ? <Link to={returnTo} className="btn btn-outline">Повернутися до проблеми товару</Link>
             : <Link to="/products/history?mode=report" className="btn btn-outline">Звіт про виправлення</Link>}
@@ -464,12 +468,14 @@ export function ProductTimeline() {
               </div>
             </section>
 
-            <ConfigurationEvolution evolution={data.configurationEvolution} />
-
-            <section className="timeline-list" aria-label="Хронологія подій">
+            <div className="product-history-views" role="group" aria-label="Перегляд історії">
+              <button type="button" className="btn btn-outline" aria-pressed={!showConfiguration} onClick={() => selectView(false)}>Події</button>
+              <button type="button" className="btn btn-outline" aria-pressed={showConfiguration} onClick={() => selectView(true)}>Порівняти характеристики</button>
+            </div>
+            {showConfiguration ? <ConfigurationEvolution evolution={data.configurationEvolution} /> : <section className="timeline-list" aria-label="Хронологія подій">
               {groups.map((group) => <TimelineCard key={group.key} events={group.events} />)}
               {groups.length === 0 && <EmptyState compact>Історичні події не знайдено.</EmptyState>}
-            </section>
+            </section>}
 
             <TechnicalDisclosure summary="Версії та технічні деталі">
             <section>

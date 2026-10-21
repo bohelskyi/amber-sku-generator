@@ -104,7 +104,7 @@ it('OFFICE same source diagnostics disable empty name only; valid name submits e
   click('Створити й зберегти чернетку'); await screen.findByText(/Збережено · редакція/);
   expect(api.create).toHaveBeenCalledWith(expect.objectContaining({ displayName: 'Office template regression', definition: baseline() }));
   click('← До шаблонів'); click('Відкрити Шаблон family'); await screen.findByText(/Збережено · редакція/);
-  expect(screen.getByText(/Готовність до публікації не підтверджено/)).toBeTruthy();
+  expect(screen.getByRole('complementary', { name: 'Перевірка та тестові товари' }).textContent).toContain('ще не виконана');
   api.validate.mockRejectedValue({ response: { data: { code: 'TEMPLATE_SOURCE_INVALID', details: { diagnostics: officeDiagnostics } } } });
   click('Перевірити шаблон'); await screen.findAllByText(/Шаблон ще не готовий до публікації/);
   expect(screen.getByText('Непідтверджені value_id: 29, 30, 31')).toBeTruthy();
@@ -716,16 +716,22 @@ it('UX2 registry separates system, draft, latest publication and an older select
       { id: 'v2', versionNumber: '2', sourceDraftRevision: '6' }, { id: 'v1', versionNumber: '1', sourceDraftRevision: '5' },
     ] },
     { id: 'beta', display_name: 'Картини', draft_revision: '1', publication_count: 0, version_summaries: [] },
+    { id: 'done', display_name: 'Уже опубліковано', draft_revision: '9007199254740993', version_summaries: [{ id: 'done-v1', versionNumber: '1', sourceDraftRevision: '9007199254740993' }] },
+    { id: 'old-example', display_name: 'catalog-example-retained', draft_revision: '1', version_summaries: [] },
   ];
   api.list.mockResolvedValue(response({ templates: summaries })); page();
   await screen.findByRole('link', { name: 'Відкрити Каталог прикрас' });
-  expect(screen.getByText('Системний профіль · лише перегляд')).toBeTruthy(); expect(screen.getByText(/Профіль історичного CSV\. Створення файлів залежить від стану доставки\./)).toBeTruthy();
-  expect(screen.getByText('Остання публікація: v2')).toBeTruthy(); expect(screen.getByText('Вибрано для експорту за шаблоном · v1')).toBeTruthy();
-  click('Чернетки'); expect(screen.getByText('Чернетка · редакція 7 · збережена')).toBeTruthy(); expect(screen.queryByText('Остання публікація: v2')).toBeNull();
+  fireEvent.click(screen.getByText('Системний профіль CSV'));
+  expect(screen.getByText('Системний профіль · лише перегляд')).toBeTruthy(); expect(screen.getByText('Вибір шаблону CSV не змінює чинні правила магазину.')).toBeTruthy();
+  expect(screen.getByText('Редакція 7 · публікація v2')).toBeTruthy(); expect(screen.getByText('Вибрано для експорту · v1')).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'Відкрити Уже опубліковано' })).toBeTruthy();
+  click('Незавершені зміни'); expect(screen.getAllByText('Незавершені зміни').length).toBeGreaterThan(1);
+  expect(screen.queryByRole('link', { name: 'Відкрити Уже опубліковано' })).toBeNull();
+  expect(screen.getByRole('link', { name: 'Відкрити catalog-example-retained' })).toBeTruthy();
   choose('Пошук за назвою', 'прикрас'); expect(screen.queryByRole('link', { name: 'Відкрити Картини' })).toBeNull();
-  click('Опубліковані версії'); expect(screen.getByRole('link', { name: 'Переглянути v1' }).getAttribute('href')).toBe('/admin/export-templates/alpha/versions?version=v1');
-  expect(screen.getByText('Вибрано для експорту за шаблоном').closest('article').textContent).toContain('v1');
-  expect(screen.getAllByText('Опублікована версія · незмінна')).toHaveLength(2);
+  click('Історія версій'); expect(screen.getByRole('link', { name: 'Переглянути Каталог прикрас v1' }).getAttribute('href')).toBe('/admin/export-templates/alpha/versions?version=v1');
+  expect(screen.getByText('Вибрано для експорту').closest('tr').textContent).toContain('v1');
+  expect(screen.getAllByText('Історична версія')).toHaveLength(2);
   expect(api.get).not.toHaveBeenCalled(); expect(api.system).not.toHaveBeenCalled(); expect(api.save).not.toHaveBeenCalled();
 });
 

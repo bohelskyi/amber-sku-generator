@@ -34,6 +34,10 @@ export function SampleProducts({ search, selected, onChange, maxSelected = 100 }
     return () => { clearTimeout(timer); abort.abort(); };
   }, [query, offset, search]);
   const changeSearch = (q, page = 0) => { generation.current++; controller.current?.abort(); setQuery(q); setOffset(page); setResult(null); setError(null); setBusy(false); };
+  if (maxSelected === 1 && selected.length === 1) return <section aria-label="Обрати товари" className="et-sample-picker et-sample-single">
+    <div><h3>Товар для прикладу</h3><ProductIdentity product={selected[0]} /></div>
+    <button type="button" className="et-link" onClick={() => { changeSearch(''); onChange([]); }}>Змінити товар</button>
+  </section>;
   return <section aria-label="Обрати товари" className="et-sample-picker">
     <h3>{maxSelected === 1 ? 'Товар для прикладу' : 'Обрати товари'}</h3><label>Пошук за артикулом або внутрішнім SKU<input type="search" className="input" maxLength={160} value={query} onChange={(e) => changeSearch(e.target.value)} placeholder="Артикул, внутрішній SKU або щонайменше 2 символи" /></label>
     <p>{maxSelected === 1 ? 'Оберіть один товар цієї категорії.' : `Оберіть до ${maxSelected} товарів. Пошук не перевіряє готовність до експорту й показує також неповні та архівні товари.`}</p>
@@ -43,7 +47,7 @@ export function SampleProducts({ search, selected, onChange, maxSelected = 100 }
       {!result.products.length && <p>Товарів за цим запитом не знайдено.</p>}
       <div className="et-actions"><button type="button" disabled={!offset} onClick={() => changeSearch(query, Math.max(0, offset - 20))}>Попередні товари</button>
         <button type="button" disabled={result.nextOffset === null} onClick={() => changeSearch(query, result.nextOffset)}>Наступні товари</button></div></>}
-    <h4>Вибрано: {selected.length} / {maxSelected}</h4>
+    {maxSelected > 1 && <h4>Вибрано: {selected.length} / {maxSelected}</h4>}
     <ul>{selected.map((p) => { const article = publicArticle(p); return <li key={p.id}><div><ProductIdentity product={p} />{p.category && <span>{p.category}</span>}</div><button type="button" aria-label={`Прибрати ${article || `товар #${p.id}`}`} onClick={() => onChange(selected.filter((s) => s.id !== p.id))}>Прибрати</button></li>; })}</ul>
   </section>;
 }

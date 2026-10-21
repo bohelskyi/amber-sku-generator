@@ -54,7 +54,7 @@ it('clears an opened product after accepted navigation back to the Products land
   });
   render(<RouterProvider router={router} />);
 
-  expect(await screen.findByText('AG-000091')).toBeTruthy();
+  await screen.findByRole('heading', { level: 1, name: 'Товар AG-000091' });
   expect(screen.getByRole('heading', { level: 1, name: 'Товар AG-000091' })).toBeTruthy();
   expect(api.post).toHaveBeenCalledWith('/decode', { sku: 'AG-000091' });
   fireEvent.click(screen.getByRole('link', { name: 'Товари навігація' }));

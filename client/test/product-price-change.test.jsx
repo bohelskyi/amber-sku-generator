@@ -40,11 +40,11 @@ it('defaults to the Manual UAH presentation and shows SKU and authoritative pric
   expect(choices.map((choice) => choice.value)).toEqual([
     'system_auto', 'manual_uah', 'usd_per_gram',
   ]);
-  expect(screen.getByRole('radio', { name: 'Ручна UAH' }).checked).toBe(true);
+  expect(screen.getByRole('radio', { name: 'Вказати суму' }).checked).toBe(true);
   expect(screen.getByText('LN136021')).toBeTruthy();
   expect(screen.getByText('2400 ₴')).toBeTruthy();
   expect(screen.getByText('2500 ₴')).toBeTruthy();
-  expect(screen.getByText('+100 ₴')).toBeTruthy();
+  expect(screen.getByText('Різниця: +100 ₴')).toBeTruthy();
   const rounding = screen.getByLabelText('Маркетингове округлення');
   expect(rounding.checked).toBe(false);
   fireEvent.click(rounding);
@@ -66,7 +66,7 @@ it('shows authoritative automatic pricing without override controls', () => {
     },
   });
 
-  expect(screen.getByRole('radio', { name: 'Автоматична' }).checked).toBe(true);
+  expect(screen.getByRole('radio', { name: 'За правилами' }).checked).toBe(true);
   expect(screen.queryByLabelText('Нова ціна UAH')).toBeNull();
   expect(screen.queryByLabelText('USD за грам')).toBeNull();
   expect(screen.queryByLabelText('Маркетингове округлення')).toBeNull();
@@ -88,7 +88,7 @@ it('surfaces unavailable automatic pricing and keeps apply disabled', () => {
 
 it('switches to USD/g and exposes the rounding control', () => {
   const handlers = renderDialog();
-  fireEvent.click(screen.getByRole('radio', { name: 'USD/г' }));
+  fireEvent.click(screen.getByRole('radio', { name: 'За грам' }));
   expect(handlers.onModeChange).toHaveBeenCalledWith('usd_per_gram');
 
   cleanup();
@@ -124,6 +124,6 @@ it('keeps the single primary action disabled for invalid, loading, or unchanged 
     preview={{ resultingPriceUah: 2400, priceDifferenceUah: 0, unchanged: true }}
     sku="LN136021"
   />);
-  expect(screen.getByText('Результуюча ціна не відрізняється від поточної.')).toBeTruthy();
+  expect(screen.getByText('Ціна залишається без змін.')).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Змінити ціну' }).disabled).toBe(true);
 });

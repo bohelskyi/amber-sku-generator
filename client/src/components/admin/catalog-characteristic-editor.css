@@ -13,3 +13,12 @@
 .catalog-embedded-delivery p { color: var(--text-muted); font-size: 14px; }
 .catalog-embedded-delivery .btn, .catalog-characteristic-editor > .btn { justify-self: start; }
 @media (max-width: 640px) { .catalog-embedded-actions > .btn { flex: 1 1 auto; } }
+.catalog-option-search { display: grid; gap: .35rem; max-width: 28rem; margin-block: .8rem; }
+.catalog-options-scroll { overflow-x: auto; }
+.catalog-options-table { width: 100%; border-collapse: collapse; text-align: left; }
+.catalog-options-table th, .catalog-options-table td { padding: .6rem; border-bottom: 1px solid var(--border, #e2e8f0); vertical-align: top; overflow-wrap: anywhere; }
+.catalog-options-table thead th { font-size: .8rem; color: #64748b; font-weight: 500; }
+.catalog-options-table tbody th { font-weight: 500; }
+.catalog-option-actions summary { padding: .5rem; cursor: pointer; white-space: nowrap; }
+.catalog-option-actions[open] { display: grid; gap: .35rem; }
+@media (max-width: 640px) { .catalog-options-table th, .catalog-options-table td { padding: .45rem; } .catalog-options-table .catalog-embedded-actions { align-items: stretch; flex-direction: column; } }

@@ -2,7 +2,7 @@ import { Notice, ConfirmDialog as SharedConfirmDialog } from '../ui/index.js';
 
 export function ConfirmDialog({ changedCount, manualCount, onCancel, onConfirm, pending }) {
   return <SharedConfirmDialog open title="Застосувати переоцінку?"
-    description={`Amber змінить ціну для ${changedCount} товарів одним атомарним застосуванням.`}
+    description={`Ціни зміняться для всіх ${changedCount} товарів у підготовленому результаті.`}
     confirmLabel="Застосувати переоцінку" busy={pending} onClose={onCancel} onConfirm={onConfirm}>
     {manualCount > 0 && <Notice tone="warning">Ручних цін у підготовленому результаті: {manualCount}.</Notice>}
   </SharedConfirmDialog>;

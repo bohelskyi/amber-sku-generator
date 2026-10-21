@@ -22,6 +22,9 @@ test('attention grouping retains exact repair targets and all original evidence 
   assert.deepEqual(grouped.slice(2).map((item) => item.problem.value), [0, 1]);
   assert.equal(grouped.reduce((count, item) => count + item.evidence.length, 0), input.length);
   assert.equal(input[0], mapping);
+  const recorded = { ...mapping, causeContext: { kind: 'semantic_option', routeKey: 'KL.base', value: '0' } };
+  assert.equal(attentionProblemGroups([recorded, { ...recorded, causeContext: { ...recorded.causeContext, routeKey: 'KL.special' } }]).length, 2,
+    'A product keeps separate recorded causes for different routes');
 });
 
 test('repair navigation keeps exact source and return context without treating them as write instructions', () => {
@@ -49,4 +52,16 @@ test('repair context rejects external returns, fragments, control characters, in
   const task = new URL(withRepairContext('/admin/magento/prepare?tab=old&step=4', { productId: '7' },
     { intent: 'option', tab: 'attributes', version: 'version-1', templateVersion: 'template-2', draft: 'draft-3', step: '', ignored: 'no' }), 'http://local.test');
   assert.deepEqual(Object.fromEntries(task.searchParams), { tab: 'attributes', productId: '7', intent: 'option', version: 'version-1', templateVersion: 'template-2', draft: 'draft-3' });
+});
+
+test('captured route survives Catalog handoffs while invalid route hints are discarded', () => {
+  const returnTo = '/attention?group=abc&problem=42';
+  const field = problemRepairUrl({ code: 'OPTION_UNRESOLVED', target: 'color', question: 'color', value: 0,
+    causeContext: { routeKey: 'KL.special' } }, { productId: 42, category: 'KL' }, returnTo);
+  const context = repairContext(new URL(field, 'http://local.test').searchParams);
+  assert.equal(context.route, 'KL.special');
+  const handoff = new URL(withRepairContext('/admin/magento/prepare', context), 'http://local.test');
+  assert.equal(handoff.searchParams.get('route'), 'KL.special');
+  assert.equal(handoff.searchParams.get('returnTo'), returnTo);
+  for (const route of ['bad\nroute', 'x'.repeat(161)]) assert.equal(repairContext({ route }).route, undefined);
 });

@@ -135,7 +135,10 @@ export function QuestionForm({ config, currentCatQuestions, excludeQuestionId, f
           </div>
         </details>
       </FormSection>
-      {question.input_type === 'text' && <NumericRulesForm question={question} onChange={onChange} />}
+      {question.input_type === 'text' && <details className="catalog-technical-details" open={question.numeric_validation ? true : undefined}>
+        <summary>Перевірка введення{question.numeric_validation ? ' · числове значення' : ' · довільний текст'}</summary>
+        <NumericRulesForm question={question} onChange={onChange} />
+      </details>}
       {!isNew && <CatalogHistoricalSettings native={native}><FormSection title="SKU" variant="catalog">
         <div className="catalog-checkbox-row catalog-checkbox-row-compact">
           <label><input type="checkbox" checked={question.include_in_sku} disabled={question.input_type === 'text'} onChange={(event) => onChange({ ...question, include_in_sku: event.target.checked })} />Додавати значення в SKU</label>
@@ -154,6 +157,7 @@ export function QuestionForm({ config, currentCatQuestions, excludeQuestionId, f
           </div>
         ) : <p className="catalog-neutral-note">SKU-параметри не застосовуються до цієї характеристики.</p>}
       </FormSection></CatalogHistoricalSettings>}
+      <details className="catalog-technical-details"><summary>Коли показувати характеристику{question.visible_if_json ? ' · за умовою' : ' · завжди'}</summary>
       <FormSection title="Видимість та умови" variant="catalog">
         <ConditionBuilder
           config={config}
@@ -164,6 +168,7 @@ export function QuestionForm({ config, currentCatQuestions, excludeQuestionId, f
           onChange={(nextValue) => onChange({ ...question, visible_if_json: nextValue })}
         />
       </FormSection>
+      </details>
       <div className="catalog-form-actions">
         <button type="button" onClick={onSave} className={`btn ${isNew ? 'btn-amber' : 'btn-primary'}`}>{isNew ? 'Зберегти характеристику' : 'Зберегти зміни'}</button>
         <button type="button" onClick={onCancel} className="btn btn-outline">Скасувати</button>
@@ -205,10 +210,12 @@ export function OptionForm({ config, currentCatQuestions, excludeQuestionId, isN
           <input className="input-sm font-mono" inputMode="numeric" value={option.sku_code ?? ''} onChange={(event) => onChange({ ...option, sku_code: event.target.value.replace(/\D/g, '') })} />
         </FieldControl>
       </CatalogHistoricalSettings>}
+      <details className="catalog-technical-details"><summary>Умови показу значення{option.visible_if_json || option.hidden_if_json ? ' · налаштовано' : ''}</summary>
       <div className="catalog-condition-grid">
         <ConditionBuilder config={config} excludeQuestionId={excludeQuestionId} label="Показувати значення" questions={currentCatQuestions} value={option.visible_if_json} onChange={(nextValue) => onChange({ ...option, visible_if_json: nextValue })} />
-        <ConditionBuilder config={config} excludeQuestionId={excludeQuestionId} label="Приховувати значення" questions={currentCatQuestions} value={option.hidden_if_json} onChange={(nextValue) => onChange({ ...option, hidden_if_json: nextValue })} />
+        <ConditionBuilder config={config} excludeQuestionId={excludeQuestionId} label="Приховувати значення" emptyLabel="Не приховувати" questions={currentCatQuestions} value={option.hidden_if_json} onChange={(nextValue) => onChange({ ...option, hidden_if_json: nextValue })} />
       </div>
+      </details>
       <div className="catalog-form-actions">
         <button type="button" onClick={onSave} className={`btn ${isNew ? 'btn-amber' : 'btn-primary'}`}>{isNew ? 'Зберегти значення' : 'Зберегти зміни'}</button>
         <button type="button" onClick={onCancel} className="btn btn-outline">Скасувати</button>

@@ -335,6 +335,8 @@ const server = http.createServer(async (request, response) => {
       case 'GET /api/product-names/20': data = { names: { all: 'Синтетичний сувенір', en: 'Synthetic souvenir' }, nameConflict: false }; break;
       case 'GET /api/product-names/7': data = { names: { all: 'Тестовий сувенір', en: 'Test souvenir' }, nameConflict: false }; break;
       case 'GET /api/magento/summary': data = { enabled: true, problemCount: 2 }; break;
+      case 'GET /api/magento/problem-groups/page':
+      case 'GET /api/magento/problem-groups/fixture-cause/products':
       case 'GET /api/magento/problems/7':
       case 'GET /api/magento/problems/page': data = {
         items: [{ productId: product.id, article: magentoReadinessFixture || operationalFixture ? 'SV5111010' : product.publicSku, category: product.categoryCode,
@@ -347,7 +349,11 @@ const server = http.createServer(async (request, response) => {
             resolution: 'administrator', target: 'product' }]) }],
         pageInfo: { limit: 20, offset: 0, total: 1, hasPrevious: false, hasNext: false },
       };
-        if (url.pathname === '/api/magento/problems/7') {
+        if (url.pathname === '/api/magento/problem-groups/page') {
+          data = { ...data, summary: { productCount: 1 }, items: data.items.map(item => ({ id: 'fixture-cause', problem: item.problems[0], productCount: 1, sharedConfiguration: false, exampleProduct: item })) };
+        } else if (url.pathname === '/api/magento/problem-groups/fixture-cause/products') {
+          data = { ...data, items: data.items.map(item => ({ ...item, groupProblem: item.problems[0] })) };
+        } else if (url.pathname === '/api/magento/problems/7') {
           data = operationalFixture?.code === 'reconciliation_required' && recoveryStage === 2
             ? { ...data.items[0], state: 'synced', problems: [] } : data.items[0];
         } else if (operationalFixture?.code === 'reconciliation_required' && recoveryStage === 2) {
@@ -466,6 +472,8 @@ const server = http.createServer(async (request, response) => {
         data = exportTemplateFamily;
         break;
       case 'GET /api/admin/export-templates/fixture-template': data = exportTemplateFamily; break;
+      case 'GET /api/export/history': data = { items: [{ id: 'stored-a', stream: 'product', generatedAt: '2026-10-01T10:00:00.000Z',
+        status: 'generated', productCount: 1, csvRowCount: 1, createdByUserId: 101, createdByName: 'Марія Керівниця', artifacts: [] }], next: null }; break;
       case 'GET /api/export/status':
         data = { delivery: { legacyProductCsvEnabled: currentPersona === 'exportCreator', automaticSyncEnabled: true }, countSinceLastExport: 4 };
         break;
@@ -585,8 +593,20 @@ async function launchBrowser({ actualZoom = false } = {}) {
     const prototype=field.tagName==='SELECT'?HTMLSelectElement.prototype:field.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;
     Object.getOwnPropertyDescriptor(prototype,'value').set.call(field,${JSON.stringify(value)});
     field.dispatchEvent(new Event('input',{bubbles:true})); field.dispatchEvent(new Event('change',{bubbles:true})); })()`);
-  const noOverflow = async (label) => assert.equal(await evaluate(
-    'document.documentElement.scrollWidth <= document.documentElement.clientWidth'), true, `${label}: document overflow`);
+  const noOverflow = async (label) => {
+    const evidence = await evaluate(`(() => { const width=document.documentElement.clientWidth;
+      return { width, scrollWidth: document.documentElement.scrollWidth, elements: [...document.querySelectorAll('body *')]
+        .map((element) => { const box=element.getBoundingClientRect(); const style=getComputedStyle(element);
+          return { tag: element.tagName, className: element.className, left: box.left, right: box.right, width: box.width,
+            scrollWidth: element.scrollWidth, overflow: style.overflowX, display: style.display }; })
+        .filter((element) => element.width > 0 && (element.right > width + 1 || element.left < -1)).slice(0, 30) }; })()`);
+    if (evidence.scrollWidth > evidence.width) {
+      writeFileSync(path.join(artifacts, 'overflow.json'), JSON.stringify({ label, ...evidence }, null, 2));
+      await screenshot('overflow');
+      console.error(`Overflow evidence: ${artifacts}`, JSON.stringify(evidence));
+    }
+    assert.ok(evidence.scrollWidth <= evidence.width, `${label}: document overflow`);
+  };
   const screenshot = async (name) => {
     const shot = await command('Page.captureScreenshot', { format: 'png' });
     writeFileSync(path.join(artifacts, `${name}.png`), Buffer.from(shot.data, 'base64'));
@@ -695,7 +715,7 @@ try {
   await client.wait("window.fixtureCopies.includes('AG-000002')", 'public article copied');
   assert.equal(await client.evaluate("window.fixtureCopies.includes('SV227002')"), false, 'internal SKU must not be copied as the article');
   await client.evaluate("document.querySelector('[aria-label=\"Відкрити товар AG-000002\"]').click()");
-  await client.wait("location.pathname==='/products/open' && document.body.textContent.includes('Стан у базі')", 'opened product detail');
+  await client.wait("location.pathname==='/products/open' && !!document.querySelector('.product-final-price')", 'opened product detail');
   assert.equal(await client.evaluate("document.querySelector('h1')===document.activeElement"), true, 'pathname navigation focuses the page heading');
   assert.equal(await client.evaluate("Number(document.querySelector('.product-final-price').textContent.replace(/[^0-9,]/g,'').replace(',','.'))"), fixturePriceUah);
   assert.equal(await client.evaluate("[...document.querySelectorAll('.decode-details')].find((details)=>details.querySelector('summary').textContent==='Розрахунок ціни').open"), false, 'Final price is visible and calculation details start collapsed');
@@ -710,8 +730,9 @@ try {
   await client.click('Застосувати переоблік', "document.querySelector('[role=dialog]')");
   await client.wait("document.body.textContent.includes('Переоблік застосовано')", 'recount receipt');
   await client.click('Змінити ціну');
-  await client.wait("document.querySelector('[role=dialog]')?.textContent.includes('Змінити ціну чинного товару')", 'direct price dialog');
-  await client.setValue('[role=dialog] input[aria-label="Нова ціна UAH"], [role=dialog] label input[type=number]', '1450');
+  await client.wait("document.querySelector('[role=dialog] h2')?.textContent.trim()==='Змінити ціну'", 'direct price dialog');
+  await client.evaluate("document.querySelector('[role=dialog] input[value=manual_uah]').click()");
+  await client.setValue('[role=dialog] label input[type=number]', '1450');
   await client.wait("[...document.querySelectorAll('[role=dialog] button')].some((button)=>button.textContent.trim()==='Змінити ціну'&&!button.disabled)", 'direct price preview');
   await client.click('Змінити ціну', "document.querySelector('[role=dialog]')");
   await client.wait(`document.body.textContent.includes('Ціну товару ${product.publicSku} змінено')`, 'direct price receipt');
@@ -726,8 +747,10 @@ try {
   report.performance.push(await client.metrics());
 
   await client.navigate('/attention', 'Потребує уваги');
+  await client.click('Переглянути товари');
   await client.wait("document.querySelectorAll('.sync-problem-queue-item').length===1", 'storekeeper direct delivery queue');
-  await client.wait(`document.body.textContent.includes('кінцевий стан не підтверджено') && document.body.textContent.includes(${JSON.stringify(product.publicSku)})`, 'selected synchronization problem');
+  await client.evaluate("document.querySelector('.sync-problem-queue-item').click()");
+  await client.wait(`document.querySelector('.sync-start-task h3')?.textContent.includes('кінцевий стан не підтверджено') && document.querySelector('.sync-problem-detail')?.textContent.includes(${JSON.stringify(product.publicSku)})`, 'selected synchronization problem');
   assert.equal(await client.evaluate("document.querySelector('.sync-start-task h3').textContent.startsWith('product:')"), false,
     'A system product scope is not shown as a characteristic prefix');
   assert.equal(await client.evaluate("!!document.querySelector('.sync-start-task .sync-problem-subject')"), false,
@@ -736,7 +759,7 @@ try {
     'An uncertain synchronization problem must not expose a resend action');
   assert.equal(await client.evaluate(`document.querySelector('a[href="/products/open?article=${product.publicSku}"]')?.textContent.trim()`), 'Відкрити товар');
   assert.equal(requests.some((entry) => entry.persona === 'storekeeper'
-    && entry.method === 'GET' && entry.path === '/api/magento/problems/page'), true,
+    && entry.method === 'GET' && entry.path === '/api/magento/problem-groups/fixture-cause/products'), true,
   'Storekeeper synchronization navigation must read the existing safe problem projection');
   await client.noOverflow('Storekeeper synchronization problem desktop');
   await client.screenshot('storekeeper-synchronization-problem-1440');
@@ -747,7 +770,7 @@ try {
     await client.command('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: 1, mobile: false });
     currentPersona = 'correctionOperator';
     await client.navigate('/admin/corrections', 'Історичні запити');
-    await client.wait("document.querySelectorAll('.correction-queue-item').length===2 && document.querySelector('.correction-request-detail h2')?.textContent.includes('#71')", `correction queue ${width}px`);
+    await client.wait("document.querySelectorAll('.correction-queue-item').length===2 && document.querySelector('.correction-request-detail h2')?.textContent.includes('AG-000020')", `correction queue ${width}px`);
     await client.noOverflow(`Correction queue ${width}px`);
     assert.equal(await client.evaluate(`(() => { const filters=document.querySelector('.correction-filter-tabs');
       return filters.querySelectorAll('button').length===7 && filters.scrollWidth<=filters.clientWidth; })()`), true,
@@ -759,19 +782,27 @@ try {
       nativeVirtualKeyCode: 32, text: ' ', unmodifiedText: ' ' });
     await client.command('Input.dispatchKeyEvent', { type: 'keyUp', key: ' ', code: 'Space', windowsVirtualKeyCode: 32,
       nativeVirtualKeyCode: 32 });
-    await client.wait("document.querySelector('.correction-request-detail h2')?.textContent.includes('#72') && document.querySelectorAll('.correction-queue-item')[1]?.getAttribute('aria-pressed')==='true'", `keyboard-selected correction ${width}px`);
+    await client.wait("document.querySelector('.correction-request-detail h2')?.textContent.includes('AG-000021') && document.querySelectorAll('.correction-queue-item')[1]?.getAttribute('aria-pressed')==='true'", `keyboard-selected correction ${width}px`);
     assert.equal(await client.evaluate("new URLSearchParams(location.search).get('request')"), '72');
     await client.noOverflow(`Keyboard-selected correction detail ${width}px`);
     await client.screenshot(`correction-keyboard-detail-${width}`);
 
     currentPersona = 'manager';
-    await client.navigate('/admin/repricing', 'Масова переоцінка');
-    await client.wait("[...document.querySelectorAll('button')].some((button)=>button.textContent.trim()==='Попередній перегляд')", `repricing preparation ${width}px`);
-    await client.click('Попередній перегляд');
+    await client.navigate('/admin/repricing', 'Переоцінка');
+    await client.wait("[...document.querySelectorAll('button')].some((button)=>button.textContent.trim()==='Підготувати переоцінку')", `repricing preparation ${width}px`);
+    await client.setValue('.repricing-scope select', 'scenario');
+    await client.click('Підготувати переоцінку');
     await client.wait("location.search.includes('view=review') && document.body.textContent.includes('1–50 із 1000')", `repricing review ${width}px`);
     assert.equal(await client.evaluate("document.querySelectorAll('.repricing-workspace tbody > tr').length"), 50);
     await client.noOverflow(`Repricing 1000-row review ${width}px`);
     await client.screenshot(`repricing-review-${width}`);
+    assert.equal(await client.evaluate("document.querySelectorAll('.repricing-row-detail input').length"), 0, 'Ordinary rows do not mount editing forms');
+    await client.evaluate("document.querySelector('[aria-label=\"Переглянути рішення для AG-001001\"]').click()");
+    await client.wait("document.activeElement?.textContent==='Рішення для AG-001001'", `repricing detail keyboard focus ${width}px`);
+    await client.noOverflow(`Selected repricing detail ${width}px`);
+    await client.screenshot(`repricing-detail-${width}`);
+    await client.click('До списку цін');
+    await client.wait("document.activeElement?.getAttribute('aria-label')==='Переглянути рішення для AG-001001'", `repricing return focus ${width}px`);
     report.layouts.push({ persona: 'manager', route: 'corrections-and-repricing', width,
       noOverflow: true, keyboardSelectedCorrection: 72, repricingRows: 50 });
   }
@@ -799,7 +830,7 @@ try {
   fixtureProductStatus = 'active';
   currentPersona = 'manager';
   await client.navigate('/attention', 'Потребує уваги');
-  await client.wait("document.querySelectorAll('.sync-problem-queue-item').length===1 && document.body.textContent.includes('Товарів у черзі:')", 'manager direct problem queue');
+  await client.wait("document.querySelectorAll('.attention-groups tbody > tr').length===1 && document.body.textContent.includes('Товарів у черзі:')", 'manager problem causes');
   assert.equal(await client.evaluate("document.querySelector('.sync-problems-workspace').textContent.includes('активних запитів')"), false);
   await client.noOverflow('Manager attention desktop');
   await client.screenshot('manager-attention-1440');
@@ -824,8 +855,8 @@ try {
     await client.noOverflow(`Legacy account menu ${width}px`);
     await client.screenshot(`legacy-account-menu-${width}`);
     await client.click('Історичний експорт', "document.querySelector('.ui-action-menu-popup')");
-    await client.wait("location.pathname==='/exports' && document.querySelector('h1')?.textContent.trim()==='Історичний експорт' && document.body.textContent.includes('CSV товарів вимкнено')", 'legacy export overview');
-    assert.equal(await client.evaluate("document.querySelector('.export-destination-list a').getAttribute('href')"), '/exports/history');
+    await client.wait("location.pathname==='/exports' && document.querySelector('h1')?.textContent.trim()==='Історичний експорт' && !!document.querySelector('.export-history-table')", 'legacy export overview');
+    assert.equal(await client.evaluate("document.querySelector('[aria-label=\"Розділи експорту\"] a').getAttribute('href')"), '/exports');
     assert.equal(await client.evaluate("!!document.querySelector('a.btn-primary[href=\"/exports/prices\"]')"), false);
     await client.click('Стан сумісного потоку цін');
     await client.wait("document.body.textContent.includes('5 змін у сумісній черзі експорту цін')", 'compatibility price evidence on demand');
@@ -841,7 +872,7 @@ try {
     priceCompatibilityUrl: true, widths: [1440, 390, 360], implicitWrites: 0 };
   await client.command('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   await client.navigate(`/products/open?article=${encodeURIComponent(product.publicSku)}`, `Товар ${product.publicSku}`);
-  await client.wait("document.body.textContent.includes('Стан у базі')", 'manager product detail');
+  await client.wait("!!document.querySelector('.product-final-price')", 'manager product detail');
   await client.click('Історія товару');
   await client.wait("location.pathname==='/products/history' && document.querySelector('h1')?.textContent.trim()==='Історія товару'", 'manager product history route');
   await client.wait(`document.querySelector('[aria-label="Поточний стан товару"]')?.textContent.includes(${JSON.stringify(product.publicSku)}) && document.body.textContent.includes('Ціну товару змінено')`, 'authoritative product timeline');
@@ -849,6 +880,7 @@ try {
     && entry.method === 'GET' && entry.path === '/api/product-timeline'
     && new URLSearchParams(entry.search).get('sku') === product.publicSku), true,
   'Manager product history must use the exact timeline read projection');
+  assert.equal(await client.evaluate("document.querySelectorAll('[data-testid=configuration-snapshot]').length"), 0, 'History starts with events; configuration comparison is optional');
   await client.click('Версії та технічні деталі');
   await client.wait(`document.body.textContent.includes('Внутрішній SKU:') && document.body.textContent.includes(${JSON.stringify(product.internalSku)})`, 'timeline technical identity on demand');
   await client.noOverflow('Manager product history desktop');
@@ -856,7 +888,7 @@ try {
   report.performance.push(await client.metrics());
   await client.evaluate('history.back()');
   await client.wait(`location.pathname==='/products/open' && document.querySelector('h1')?.textContent.trim()===${JSON.stringify(`Товар ${product.publicSku}`)}`, 'return from product history');
-  await client.wait("document.body.textContent.includes('Стан у базі')", 'manager product detail restored');
+  await client.wait("!!document.querySelector('.product-final-price')", 'manager product detail restored');
   assert.equal(await client.evaluate("[...document.querySelectorAll('button')].some((button)=>/Змінити ціну|Підготувати запит|Створити запит/.test(button.textContent))"), false,
     'Historical request permissions must not expose new requests or grant direct price changes');
   assert.equal(requests.some((entry) => entry.persona === 'manager' && entry.method === 'POST'
@@ -866,10 +898,11 @@ try {
   report.performance.push(await client.metrics());
 
   const repricingStartedAt = await client.evaluate('Date.now()');
-  await client.navigate('/admin/repricing', 'Масова переоцінка');
-  await client.wait("[...document.querySelectorAll('button')].some((button)=>button.textContent.trim()==='Попередній перегляд')", 'repricing preparation');
+  await client.navigate('/admin/repricing', 'Переоцінка');
+  await client.wait("[...document.querySelectorAll('button')].some((button)=>button.textContent.trim()==='Підготувати переоцінку')", 'repricing preparation');
   const repricingPreviewStartedAt = await client.evaluate('Date.now()');
-  await client.click('Попередній перегляд');
+  await client.setValue('.repricing-scope select', 'scenario');
+  await client.click('Підготувати переоцінку');
   await client.wait("location.search.includes('view=review') && document.body.textContent.includes('1–50 із 1000')", '1000-row repricing review');
   const repricingRenderedAt = await client.evaluate('Date.now()');
   const repricingRender = await client.evaluate(`({
@@ -882,7 +915,7 @@ try {
   const repricingPreviewLatencyMs = Math.round(repricingRenderedAt - repricingPreviewStartedAt);
   assert.ok(repricingPreviewLatencyMs < 3000, `Fixture repricing review should render within 3s, received ${repricingPreviewLatencyMs}ms`);
   await client.click('Далі', "document.querySelector('.repricing-workspace')");
-  await client.wait("document.body.textContent.includes('51–100 із 1000') && document.querySelector('.repricing-workspace tbody th .font-mono')?.textContent.trim()==='AG-001051'", 'second repricing presentation page');
+  await client.wait("document.body.textContent.includes('51–100 із 1000') && document.querySelector('.repricing-workspace tbody th')?.textContent.trim()==='AG-001051'", 'second repricing presentation page');
   const repricingSecondPage = await client.evaluate(`({
     rows: document.querySelectorAll('.repricing-workspace tbody > tr').length,
     summary: document.querySelector('.action-summary-bar')?.textContent || ''
@@ -891,10 +924,11 @@ try {
   assert.ok(repricingSecondPage.summary.includes('Застосування охопить усі 1000 підготовлені зміни.'),
     'Changing the presentation page must retain the full authoritative apply scope');
   await client.click('Назад', "document.querySelector('.repricing-workspace')");
-  await client.wait("document.body.textContent.includes('1–50 із 1000') && document.querySelector('.repricing-workspace tbody th .font-mono')?.textContent.trim()==='AG-001001'", 'first repricing presentation page restored');
+  await client.wait("document.body.textContent.includes('1–50 із 1000') && document.querySelector('.repricing-workspace tbody th')?.textContent.trim()==='AG-001001'", 'first repricing presentation page restored');
   assert.equal(await client.evaluate("document.querySelectorAll('.repricing-workspace tbody > tr').length"), 50,
     'Returning to the first repricing page must retain the 50-row DOM bound');
-  await client.click('Позначити');
+  await client.evaluate("document.querySelector('[aria-label=\"Переглянути рішення для AG-001001\"]').click()");
+  await client.click('Позначити як переглянутий');
   await client.wait("document.body.textContent.includes('Чернетка #77') && document.body.textContent.includes('Переглянуто: 1')", 'saved repricing draft');
   await client.click('Застосувати переоцінку');
   await client.wait("document.querySelector('[role=dialog]')?.textContent.includes('Застосувати переоцінку?')", 'repricing apply review');
@@ -941,7 +975,7 @@ try {
   readinessSizeApplied = false;
   fixtureProductStatus = 'active';
   const readinessRequestStart = requests.length;
-  await client.navigate('/sync-problems', 'Потребує уваги');
+  await client.navigate('/sync-problems?problem=7', 'Потребує уваги');
   await client.wait("document.body.textContent.includes('Товар не готовий до синхронізації') && document.body.textContent.includes('SV5111010')", 'readiness problem guidance');
   assert.equal(await client.evaluate("document.body.textContent.includes('Не вдалося прочитати назву Magento')"), false);
   assert.equal(await client.evaluate("['Розмір','Назва українською та англійською','Обробка каменю'].every((label)=>document.body.textContent.includes(label))"), true);
@@ -980,10 +1014,10 @@ try {
     for (const width of [1440, 390]) {
       await client.command('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: 1, mobile: false });
       await client.navigate('/attention', 'Потребує уваги');
+      await client.click('Переглянути товари');
       await client.wait("document.querySelectorAll('.sync-problem-queue-item').length===1", 'lifecycle queue');
-      if (width < 720) {
-        await client.evaluate("document.querySelector('.sync-problem-queue-item').click()");
-      }
+      assert.equal(await client.evaluate("!!document.querySelector('.sync-start-task')"), false, 'No implicit product selection');
+      await client.evaluate("document.querySelector('.sync-problem-queue-item').click()");
       await client.wait("document.querySelector('.sync-problem-detail')?.textContent.includes('Немає точного підтвердження, які попередні версії товару доставлено в Magento') && document.querySelector('.sync-problem-detail')?.textContent.includes('Amber ще не підтвердив')", 'exact selected lifecycle problem');
       if (width < 720) {
         assert.equal(await client.evaluate("getComputedStyle(document.querySelector('.sync-problem-filters')).display"), 'none', 'Mobile selected detail prioritizes the problem above filters');
@@ -1019,7 +1053,7 @@ try {
   currentPersona = 'administrator';
   operationalFixture = { code: 'OPTION_BINDING_REVIEW_REQUIRED', message: 'Потрібна відповідність значення',
     resolution: 'integration_configuration', target: 'kamin_obrobka' };
-  await client.navigate('/sync-problems', 'Потребує уваги');
+  await client.navigate('/sync-problems?problem=7', 'Потребує уваги');
   await client.wait("!![...document.querySelectorAll('a')].find((e)=>e.textContent==='Пов’язати значення')", 'mapping problem');
   const repairLink = new URL(await client.evaluate("[...document.querySelectorAll('a')].find((e)=>e.textContent==='Пов’язати значення').getAttribute('href')"), 'http://fixture');
   assert.equal(repairLink.pathname, '/admin/catalog');
@@ -1098,7 +1132,7 @@ try {
   operationalFixture = null;
   await client.command('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   await client.navigate(`/products/open?article=${encodeURIComponent(product.publicSku)}`, `Товар ${product.publicSku}`);
-  await client.wait("document.body.textContent.includes('Стан у базі')", 'administrator product detail');
+  await client.wait("!!document.querySelector('.product-final-price')", 'administrator product detail');
   await client.click('Додаткові дії');
   await client.click('Видалити тестовий товар');
   await client.wait("document.querySelector('[role=dialog]')?.textContent.includes('Видалити тестовий товар')", 'test deletion dialog');
@@ -1110,7 +1144,7 @@ try {
   await client.navigate('/administration', 'Адміністрування');
   const adminLinks = await client.evaluate("[...document.querySelectorAll('.workspace-directory-link')].map((link)=>link.textContent.trim())");
   assert.equal(adminLinks.length, 3, 'Administrator directory exposes users, roles, and audit');
-  await client.navigate('/admin/users', 'Користувачі застосунку');
+  await client.navigate('/admin/users', 'Користувачі');
   await client.wait("!!document.querySelector('[aria-label=\"Відкрити Active User\"]')", 'managed user list');
   await client.evaluate("document.querySelector('[aria-label=\"Відкрити Active User\"]').click()");
   await client.wait("!!document.querySelector('[role=dialog] select[aria-label=\"Роль для Active User\"]')", 'selected-user drawer');
@@ -1127,6 +1161,8 @@ try {
   await client.navigate('/admin/roles', 'Ролі та дозволи');
   await client.wait("!![...document.querySelectorAll('.role-list-item')].find((button)=>button.textContent.includes('Manager'))", 'role list');
   await client.evaluate("[...document.querySelectorAll('.role-list-item')].find((button)=>button.textContent.includes('Manager')).click()");
+  await client.evaluate("document.querySelector('.role-permission-editor > summary').click()");
+  await client.evaluate("[...document.querySelectorAll('.permission-group > summary')].find(summary=>summary.textContent.includes('Товари')).click()");
   await client.wait("!![...document.querySelectorAll('input[type=checkbox]')].find((input)=>input.closest('label')?.textContent.includes('Перегляд товарів'))", 'role permission editor');
   await client.evaluate("[...document.querySelectorAll('input[type=checkbox]')].find((input)=>input.closest('label')?.textContent.includes('Перегляд товарів')).click()");
   await client.wait("document.body.textContent.includes('Запропоновані зміни') && document.body.textContent.includes('Вилучаються: Перегляд товарів')", 'role change summary');
@@ -1141,13 +1177,13 @@ try {
   await client.noOverflow('Roles proposed-change conflict desktop');
   await client.screenshot('administrator-roles-conflict-1440');
 
-  await client.navigate('/admin/audit', 'Глобальний аудит');
+  await client.navigate('/admin/audit', 'Журнал дій');
   await client.wait("document.body.textContent.includes('Роль користувача змінено') && document.body.textContent.includes('Історичне ім’я')", 'dense audit chronology');
   assert.equal(await client.evaluate("document.body.textContent.includes('application_user.role_changed')"), false,
     'technical audit key stays hidden from the chronology');
   await client.click('Відкрити');
   await client.wait("document.querySelector('[role=dialog]')?.textContent.includes('Manager')", 'selected audit evidence');
-  await client.click('Технічні деталі', "document.querySelector('[role=dialog]')");
+  await client.click('Повний запис події', "document.querySelector('[role=dialog]')");
   await client.wait("document.querySelector('[role=dialog]')?.textContent.includes('application_user.role_changed')", 'technical audit disclosure');
   await client.noOverflow('Audit selected evidence desktop');
   await client.screenshot('administrator-audit-evidence-1440');
@@ -1176,6 +1212,7 @@ try {
   await client.wait("!![...document.querySelectorAll('.pricing-master-row')].find((button)=>button.textContent.includes('Базова ціна'))", 'pricing scenario');
   await client.evaluate("[...document.querySelectorAll('.pricing-master-row')].find((button)=>button.textContent.includes('Базова ціна')).click()");
   await client.wait("!!document.querySelector('.pricing-matrix-table input')", 'pricing matrix cell');
+  assert.equal(await client.evaluate("document.body.textContent.includes('Зміни зберігаються автоматично після виходу з клітинки')"), true, 'Matrix autosave must be explained at the edit surface');
   await client.setValue('.pricing-matrix-table input', '125.50');
   await client.evaluate("document.querySelector('.pricing-matrix-table input').focus();document.querySelector('.pricing-matrix-table input').blur()");
   await client.wait("document.body.textContent.includes('Збережено')", 'pricing cell save state');
@@ -1183,7 +1220,7 @@ try {
   await client.screenshot('administrator-pricing-1440');
   await client.navigate('/admin/export-templates', 'Підключення магазину');
   assert.equal(await client.evaluate('location.pathname'), '/admin/magento/rules');
-  await client.wait("document.body.textContent.includes('Шаблонів ще немає')", 'empty export template registry');
+  await client.wait("document.body.textContent.includes('Незавершених змін немає')", 'empty export template registry');
   await client.click('Створити набір правил');
   await client.wait("[...document.querySelectorAll('h1,h2')].some((node)=>node.textContent.trim()==='Новий набір правил')", 'new integration rule set form');
   await client.setValue('input[placeholder="Наприклад, Основний каталог"]', 'Основний каталог');
@@ -1231,12 +1268,12 @@ try {
   assert.equal(focusStyle.color, 'rgb(221, 151, 74)');
   await zoomClient.screenshot('administrator-settings-actual-200-percent');
   await zoomClient.navigate('/admin/magento/overview', 'Підключення магазину');
-  await zoomClient.wait("document.body.textContent.includes('Проблеми поточної доставки')", 'Magento issue-first overview at actual zoom');
-  const magentoIssueTop = await zoomClient.evaluate("document.getElementById('magento-operational-title').getBoundingClientRect().top");
+  await zoomClient.wait("!!document.querySelector('.store-connection-check button')", 'Magento connection check at actual zoom');
+  const magentoIssueTop = await zoomClient.evaluate("document.querySelector('.store-connection-check button').getBoundingClientRect().top");
   const zoomViewportHeight = await zoomClient.evaluate('window.innerHeight');
   assert.ok(magentoIssueTop < zoomViewportHeight,
-    `Magento delivery problems should begin within the first actual-zoom viewport: top=${magentoIssueTop}, viewport=${zoomViewportHeight}`);
-  assert.equal(await zoomClient.evaluate("document.querySelector('.magento-context-toggle').getAttribute('aria-expanded')"), 'false');
+    `Magento connection check should begin within the first actual-zoom viewport: top=${magentoIssueTop}, viewport=${zoomViewportHeight}`);
+  assert.equal(await zoomClient.evaluate("document.querySelector('.store-connection details').open"), false);
   await zoomClient.noOverflow('Magento overview at actual 200% zoom');
   await zoomClient.screenshot('administrator-magento-actual-200-percent');
   report.actualZoom = { ...zoom, noOverflow: true, touchTarget: zoomMenuBox, focusStyle,

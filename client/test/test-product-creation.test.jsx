@@ -168,6 +168,7 @@ it('shows the immutable TEST marker in product details and prevents photo activa
   open('/products/open?article=TEST-000001');
   await screen.findByRole('heading', { level: 1, name: 'Товар TEST-000001' });
   expect(screen.getByRole('region', { name: 'Тестовий товар' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Редагувати фото' }));
   const enable = screen.getByRole('checkbox', { name: 'Увімкнути товар у Magento після перевірки всіх фото' });
   expect(enable.disabled).toBe(true); expect(enable.checked).toBe(false);
   expect(post.mock.calls.map(([url]) => url)).toEqual(['/decode']);

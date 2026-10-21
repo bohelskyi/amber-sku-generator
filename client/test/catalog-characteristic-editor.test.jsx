@@ -139,3 +139,32 @@ it('creates a category using the returned normalized code without publishing or 
   await waitFor(() => expect(callbacks.onSaved).toHaveBeenCalledExactlyOnceWith({ kind: 'category', action: 'created', categoryCode: 'NEW' }));
   expect(post).toHaveBeenCalledExactlyOnceWith('/admin/category', expect.objectContaining({ code: 'NEW', name: 'Нова категорія' }));
 });
+
+it('pages and searches values by either language while editing the exact selected row', async () => {
+  config.questions.BR[0].options = Array.from({ length: 52 }, (_, index) => ({ id: index, db_id: index + 31, label: `Значення ${index}`, label_en: `English ${index}`, sku_code: String(index) }));
+  open({ initialAction: 'summary' });
+  const region = await screen.findByRole('region', { name: 'Значення характеристики' });
+  expect(within(region).getAllByRole('row')).toHaveLength(26);
+  expect(within(region).queryByRole('button', { name: 'Редагувати Значення 51' })).toBeNull();
+  fireEvent.click(within(region).getByRole('button', { name: 'Далі' }));
+  expect(within(region).getByRole('button', { name: 'Редагувати Значення 25' })).toBeTruthy();
+  fireEvent.change(within(region).getByRole('searchbox', { name: 'Пошук значення' }), { target: { value: 'English 51' } });
+  fireEvent.click(within(region).getByRole('button', { name: 'Редагувати Значення 51' }));
+  expect(screen.getByRole('textbox', { name: 'Назва українською' }).value).toBe('Значення 51');
+  expect(post).not.toHaveBeenCalled(); expect(put).not.toHaveBeenCalled();
+});
+
+it('empty hide conditions say never hide and preserve semantic zero when a condition is chosen', async () => {
+  config.questions.BR.push({ ...originalQuestion, id: 'source', q_db_id: 85, label: 'Інша характеристика' });
+  open({ initialAction: 'edit-option', optionValue: 0 });
+  fireEvent.click(await screen.findByText('Умови показу значення'));
+  const hide = screen.getByRole('combobox', { name: 'Приховувати значення' });
+  expect(hide.selectedOptions[0].textContent).toBe('Не приховувати');
+  fireEvent.change(hide, { target: { value: 'conditional' } });
+  const condition = hide.closest('.mb-3');
+  fireEvent.click(within(condition).getByRole('button', { name: 'Без кольору' }));
+  expect(within(condition).getByRole('button', { name: 'Без кольору' }).getAttribute('aria-pressed')).toBe('true');
+  put.mockResolvedValue({ data: { success: true } });
+  fireEvent.click(screen.getByRole('button', { name: 'Зберегти зміни' }));
+  await waitFor(() => expect(put).toHaveBeenCalledWith('/admin/option', expect.objectContaining({ hidden_if_json: { source: 0 } })));
+});

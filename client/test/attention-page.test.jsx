@@ -12,9 +12,16 @@ vi.mock('../src/api/corrections-api.js', () => ({ correctionsApi: { listRequestP
 const auth = (permissions) => ({
   permissions, identity: { name: 'Оператор' }, principalLifetime: { valid: true }, logout: vi.fn(),
 });
-const renderPage = (permissions = ['corrections.view', 'products.view']) => render(
-  <AuthContext.Provider value={auth(permissions)}><MemoryRouter><AttentionPage /></MemoryRouter></AuthContext.Provider>
-);
+const renderPage = (permissions = ['corrections.view', 'products.view'], path = '/attention?problem=7') => {
+  const implementation = api.get.getMockImplementation();
+  api.get.mockImplementation(async (url, ...args) => {
+    const result = await implementation(url, ...args);
+    const exact = /^\/magento\/problems\/(\d+)$/.exec(url);
+    if (exact && Array.isArray(result?.data?.items)) return { data: result.data.items.find(item => Number(item.productId) === Number(exact[1])) };
+    return result;
+  });
+  return render(<AuthContext.Provider value={auth(permissions)}><MemoryRouter initialEntries={[path]}><AttentionPage /></MemoryRouter></AuthContext.Provider>);
+};
 
 beforeEach(() => {
   vi.restoreAllMocks();
@@ -26,8 +33,7 @@ afterEach(cleanup);
 it('keeps an open name review in Attention while a background queue refresh fails', async () => {
   const item = { productId: 7, article: 'AG-000007', category: 'SV', nameConflict: true,
     problems: [{ code: 'NAME_CONFLICT', resolution: 'name', message: 'Потрібно узгодити назву.' }] };
-  api.get.mockResolvedValueOnce({ data: { items: [item], pageInfo: { total: 1 } } })
-    .mockRejectedValue(new Error('Unavailable'));
+  api.get.mockResolvedValue({ data: { items: [item], pageInfo: { total: 1 } } });
   vi.spyOn(api, 'post').mockResolvedValue({ data: {
     amber: { all: 'Назва Amber', en: 'Amber name' }, magento: { all: 'Назва Magento', en: 'Magento name' },
     previewToken: 'exact-name-proof',
@@ -35,6 +41,7 @@ it('keeps an open name review in Attention while a background queue refresh fail
   renderPage(['products.view', 'exports.create']);
   fireEvent.click(await screen.findByRole('button', { name: 'Вибрати актуальну назву' }));
   await screen.findByText(/Назва Amber/);
+  api.get.mockRejectedValue(new Error('Unavailable'));
   act(() => window.dispatchEvent(new Event('focus')));
   await screen.findByText(/Не вдалося оновити проблеми доставки/);
   expect(screen.getByRole('dialog', { name: 'Виберіть актуальну назву' })).toBeTruthy();
@@ -59,17 +66,18 @@ it('turns repeated history diagnostics into one starting task without losing oth
   expect(otherProblems.closest('details').open).toBe(false);
   fireEvent.click(otherProblems);
   expect(otherProblems.closest('details').open).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити відповідність категорії' }));
   const categoryLink = screen.getByRole('link', { name: 'Перевірити відповідність категорії' });
   expect(new URL(categoryLink.href).pathname).toBe('/admin/catalog');
   expect(categoryLink.getAttribute('href')).toContain('path=Default+Category%2F');
   expect(categoryLink.getAttribute('href')).toContain('view=placement');
   expect(categoryLink.getAttribute('href')).not.toContain('tab=placement');
-  expect(start.compareDocumentPosition(categoryLink) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Перевірити товар у Magento' })).toBeNull();
   expect(screen.getByRole('region', { name: 'Інші перешкоди' })).toBeTruthy();
   expect(screen.queryByText('1368')).toBeNull();
   fireEvent.click(screen.getByText('Дані для підтримки'));
   expect(screen.getByText(/1368/)).toBeTruthy();
-  expect(api.get.mock.calls.every(([url]) => url === '/magento/problems/page')).toBe(true);
+  expect(api.get.mock.calls.every(([url]) => ['/magento/problems/page', '/magento/problems/7'].includes(url))).toBe(true);
   expect(post).not.toHaveBeenCalled();
 });
 
@@ -155,12 +163,12 @@ it('selected off-page product stays exact and a failed detail never falls back t
 });
 
 it('search and filters are submitted as bounded server reads', async () => {
-  renderPage();
+  renderPage(undefined, '/attention');
   await screen.findByText('Зафіксованих проблем немає');
   fireEvent.change(screen.getByLabelText('Артикул'), { target: { value: 'AG-000008' } });
   fireEvent.change(screen.getByLabelText('Причина'), { target: { value: 'product' } });
   fireEvent.click(screen.getByRole('button', { name: 'Знайти' }));
-  await waitFor(() => expect(api.get).toHaveBeenLastCalledWith('/magento/problems/page', expect.objectContaining({
+  await waitFor(() => expect(api.get).toHaveBeenLastCalledWith('/magento/problem-groups/page', expect.objectContaining({
     params: expect.objectContaining({ search: 'AG-000008', reason: 'product', limit: 20, offset: 0 }),
   })));
 });
@@ -171,7 +179,7 @@ it('shows the linked category after its options arrive asynchronously and preser
   await screen.findByText('За цими умовами товарів немає');
   expect(screen.getByLabelText('Категорія').value).toBe('KL');
   fireEvent.click(screen.getByRole('button', { name: 'Знайти' }));
-  await waitFor(() => expect(api.get).toHaveBeenLastCalledWith('/magento/problems/page', expect.objectContaining({ params: expect.objectContaining({ category: 'KL' }) })));
+  await waitFor(() => expect(api.get).toHaveBeenLastCalledWith('/magento/problem-groups/page', expect.objectContaining({ params: expect.objectContaining({ category: 'KL' }) })));
 });
 
 it('does not expose a previous principal summary while the next principal is loading', async () => {
@@ -203,7 +211,7 @@ it('successful repair retains the selected product when it leaves the attention 
   ] };
   api.get.mockImplementation(async (url) => ({ data: url === '/magento/problems/page'
     ? { items: corrected ? [] : [item], pageInfo: { total: corrected ? 0 : 1 } }
-    : { ...item, state: 'pending', problems: [] } }));
+    : corrected ? { ...item, state: 'pending', problems: [] } : item }));
   vi.spyOn(api, 'post').mockImplementation(async (url) => {
     if (url === '/product-information/preview') return { data: { previewToken: 'reviewed-size', changes: [{ key: 'size', after: '12×8 см' }] } };
     if (url === '/product-information/apply') { corrected = true; return { data: { productId: 7 } }; }
@@ -278,7 +286,7 @@ it.each(['GET', 'POST', 'ready'])('returning to the first queue item discards fi
   ] };
   let finish; const pending = new Promise((resolve) => { finish = resolve; }); let bindingReads = 0;
   api.get.mockImplementation((url) => {
-    if (url === '/magento/problems/page') return Promise.resolve({ data: { items: [item], pageInfo: { total: 1, hasNext: false, hasPrevious: false } } });
+    if (url === '/magento/problems/page' || url.includes('/problem-groups/')) return Promise.resolve({ data: { items: [{ ...item, groupProblem: item.problems[0] }], pageInfo: { total: 1, hasNext: false, hasPrevious: false } } });
     if (url === '/magento/problems/1488') return Promise.resolve({ data: item });
     if (url === '/integration-tasks') return Promise.resolve({ data: { items: [], nextOffset: null } });
     if (url === '/admin/magento-integration') {
@@ -291,8 +299,10 @@ it.each(['GET', 'POST', 'ready'])('returning to the first queue item discards fi
   if (phase === 'POST') post.mockReturnValueOnce(pending);
   const administrator = { ...auth(['products.view', 'export_templates.view', 'export_templates.manage', 'export_templates.publish', 'exports.view']),
     roles: [{ key: 'administrator' }] };
-  render(<AuthContext.Provider value={administrator}><MemoryRouter initialEntries={['/attention?problem=1488']}><AttentionPage /></MemoryRouter></AuthContext.Provider>);
-  fireEvent.click(await screen.findByRole('button', { name: 'Перевірити актуальні поля' }));
+  render(<AuthContext.Provider value={administrator}><MemoryRouter initialEntries={['/attention?group=' + 'a'.repeat(32) + '&problem=1488']}><AttentionPage /></MemoryRouter></AuthContext.Provider>);
+  fireEvent.click(await screen.findByText('Додаткові перевірки'));
+  fireEvent.click(screen.getByRole('button', { name: 'Переглянути перше отримання полів' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити актуальні поля' }));
   if (phase === 'POST') await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
   if (phase === 'ready') await screen.findByRole('button', { name: 'Отримати значення Magento: Вага · UA / основний магазин' });
   const signal = phase === 'GET' ? api.get.mock.calls.find(([url]) => url === '/admin/magento-integration')[1].signal
@@ -310,6 +320,8 @@ it.each(['GET', 'POST', 'ready'])('returning to the first queue item discards fi
   expect(screen.queryByRole('button', { name: 'Зберегти рішення цього поля' })).toBeNull();
   expect(bindingReads).toBe(1); expect(post).toHaveBeenCalledTimes(phase === 'GET' ? 0 : 1);
 
+  fireEvent.click(screen.getByText('Додаткові перевірки'));
+  fireEvent.click(screen.getByRole('button', { name: 'Переглянути перше отримання полів' }));
   fireEvent.click(screen.getByRole('button', { name: 'Перевірити актуальні поля' }));
   await screen.findByRole('region', { name: 'Вага · UA / основний магазин' });
   expect(bindingReads).toBe(2); expect(post).toHaveBeenCalledTimes(phase === 'GET' ? 1 : 2);

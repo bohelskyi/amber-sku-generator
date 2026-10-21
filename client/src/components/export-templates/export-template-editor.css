@@ -268,3 +268,13 @@
   .integration-rules th, .integration-rules td { border: 0; padding: 4px 0; }
   .integration-rules td::before { content: attr(data-label) ': '; font-weight: 600; }
 }
+.et-registry-scroll { overflow-x: auto; }
+.et-registry-table { width: 100%; border-collapse: collapse; text-align: left; }
+.et-registry-table th, .et-registry-table td { padding: .75rem; border-bottom: 1px solid #e2e8f0; vertical-align: top; overflow-wrap: anywhere; }
+.et-registry-table thead th { color: #64748b; font-size: .8rem; font-weight: 500; }
+.et-registry-table tbody th { font-weight: 500; }
+.et-registry-table td small { display: block; color: #64748b; margin-top: .25rem; }
+.et-sample-single { display: flex; justify-content: space-between; align-items: start; gap: .75rem; }
+.et-sample-single > div { min-width: 0; }
+.catalog-text-preview { padding: 1rem; border-left: 1px solid var(--border); }
+@media (max-width: 1023px) { .catalog-text-preview { border-left: 0; border-top: 1px solid var(--border); padding-inline: 0; } }

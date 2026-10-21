@@ -1,4 +1,4 @@
-const limits = { category: 40, field: 120, question: 120, value: 500, path: 500 };
+const limits = { category: 40, field: 120, question: 120, value: 500, path: 500, route: 160 };
 const hasControl = (value) => [...value].some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127);
 const routeKeys = ['intent', 'tab', 'version', 'templateVersion', 'step', 'draft'];
 

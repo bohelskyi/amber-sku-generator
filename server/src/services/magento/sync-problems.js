@@ -63,11 +63,46 @@ function safeDiagnostics(blockers = []) {
       .filter(([, value]) => typeof value === 'string' && value.length <= 500)),
     ...(isUpgradeProblem({ ...item, diagnosticCode: item.diagnostic?.code }) ? { question: item.question } : {}),
     ...(item.diagnostic?.code ? { diagnosticCode: String(item.diagnostic.code).slice(0, 100) } : {}),
+    ...(safeCauseContext(item.causeContext) ? { causeContext: safeCauseContext(item.causeContext),
+      question: item.causeContext.question, value: item.causeContext.value,
+      ...Object.fromEntries(['fieldLabel', 'valueLabel'].filter(key => typeof item[key] === 'string' && item[key].length <= 500 && !/[\u0000-\u001f\u007f]/.test(item[key]))
+        .map(key => [key, item[key]])) } : {}),
     ...(Array.isArray(item.issueFields) ? { issueFields: item.issueFields.filter((f) => typeof f === 'string').slice(0, 20) } : {}),
     ...(Array.isArray(item.evaluationIssues) ? { evaluationIssues: item.evaluationIssues.slice(0, 40).map((issue) =>
       Object.fromEntries(['code', 'field', 'message'].filter((key) => typeof issue?.[key] === 'string')
         .map((key) => [key, issue[key].replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, key === 'message' ? 600 : 100)]))) } : {}),
   }));
+}
+
+// Only evidence captured by this exact planner invocation can identify a common
+// configuration repair. Never infer it later from mutable catalog or bindings.
+const sharedMappingCodes = new Set(['OPTION_BINDING_REVIEW_REQUIRED', 'OPTION_MAPPING_REVIEW_REQUIRED',
+  'OPTION_UNRESOLVED', 'option_mapping_required', 'option_missing']);
+function safeCauseContext(value) {
+  const text = (item, max) => typeof item === 'string' && item.length > 0 && item.length <= max && !/[\u0000-\u001f\u007f]/.test(item);
+  if (!value || value.kind !== 'semantic_option' || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value.bindingRevisionId || '')
+    || !['category', 'routeKey', 'target', 'question'].every(key => text(value[key], 160))
+    || !text(value.value, 500)) return null;
+  return Object.fromEntries(['kind', 'bindingRevisionId', 'category', 'routeKey', 'target', 'question', 'value'].map(key => [key, value[key]]));
+}
+function recordedDiagnostics(blockers, report, bindingRevisionId) {
+  return blockers.map(item => {
+    if (!sharedMappingCodes.has(item.diagnostic?.code || item.code)) return item;
+    const target = item.target || item.field || item.diagnostic?.target;
+    const attribute = report?.attributes?.find(candidate => candidate.target === target);
+    const sources = attribute?.source || [];
+    const source = sources.length === 1 && sources[0].kind === 'semantic' ? sources[0] : null;
+    const routeKey = report?.attributeSet?.routeKey;
+    if (!source || !['string', 'number'].includes(typeof source.storedValue) || typeof source.storedValue === 'number' && !Number.isFinite(source.storedValue)
+      || attribute?.persistedDecision?.routeKey !== routeKey) return item;
+    const causeContext = safeCauseContext({ kind: 'semantic_option', bindingRevisionId,
+      category: report.attributeSet.amberGroup, routeKey, target,
+      question: source.questionKey, value: String(source.storedValue) });
+    return causeContext ? { ...item, causeContext,
+      ...(typeof attribute.magentoAttributeLabel === 'string' ? { fieldLabel: attribute.magentoAttributeLabel } : {}),
+      ...(typeof attribute.evaluatedValue === 'string' && attribute.evaluatedValue.trim() ? { valueLabel: attribute.evaluatedValue } : {}),
+    } : item;
+  });
 }
 function presentProblem(item, lifecycle) {
   if(item.code.startsWith('FIRST_SYNC_')) {
@@ -255,4 +290,5 @@ async function problemDetail(config, productId, db = pool) {
   return { ...presented, state, problems: state === 'needs_attention' ? presented.problems : [],
     nameConflict: state === 'needs_attention' ? presented.nameConflict : null };
 }
-module.exports = { taxonomy, safeDiagnostics, presentProblem, presentProblems, saveDiagnostics, summary, problems, problemPage, problemDetail };
+module.exports = { taxonomy, safeDiagnostics, safeCauseContext, recordedDiagnostics, presentProblem, presentProblems,
+  presentProblemRow, problemSelectSql, problemJoinSql, normalizePageValue, saveDiagnostics, summary, problems, problemPage, problemDetail };

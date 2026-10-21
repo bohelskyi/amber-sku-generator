@@ -15,7 +15,7 @@ import { WorkspaceHeader } from '../components/workspace/WorkspacePrimitives';
 import { WorkspaceDialog } from '../components/workspace/WorkspaceDialog';
 import { TemplateRegistry } from '../components/export-templates/TemplateRegistry';
 import { dateText } from '../lib/export-review-presentation';
-import { Notice, SaveState, StatusBadge } from '../components/ui/index.js';
+import { Notice, SaveState } from '../components/ui/index.js';
 import { repairContext, withRepairContext } from '../lib/magento-repair-context.js';
 
 function templateRoute(location, templateBase = '/admin/export-templates') {
@@ -249,7 +249,7 @@ function TemplateWorkspace({ permissions, basePath = '/admin/export-templates', 
     {navigation.prompt}
     {screen !== 'editor' && <><Diagnostics error={error} definition={definition} registry={registry} />{busy && <SaveState state="saving" message={`${busy}…`} />}</>}
     {screen === 'list' ? <>
-      <WorkspaceHeader title={integration ? 'Правила передачі даних' : 'Шаблони експорту'} description={integration ? 'Назви, характеристики й поля товарів. Опубліковані правила та чернетки зберігаються окремо.' : 'Налаштуйте назви, характеристики та порядок полів у файлі.'} actions={
+      <WorkspaceHeader title={integration ? 'Правила передачі даних' : 'Шаблони експорту'} actions={
         manage && <button className="btn btn-primary px-4" disabled={Boolean(busy)} onClick={() => run('Підготовка шаблону', () => api.candidate(), (data) => {
           prepareCandidate(data); navigation.commit(() => navigate(templateBase + '/new'));
         })}>{integration ? 'Створити набір правил' : 'Створити шаблон'}</button>
@@ -265,7 +265,6 @@ function TemplateWorkspace({ permissions, basePath = '/admin/export-templates', 
       <label>Назва шаблону<input autoFocus className="input" disabled={Boolean(busy)} value={name} onChange={(e) => { generation.current++; setName(e.target.value); }} maxLength={160} placeholder="Наприклад, Основний каталог" /></label>
       <details><summary>Додаткові налаштування</summary><label>Сталий ключ (латиниця, цифри, _ або -)<input className="input" disabled={Boolean(busy)} value={key} onChange={(e) => { generation.current++; setKey(e.target.value); }} pattern="[a-z][a-z0-9_-]{0,79}" /></label><p className="et-muted">Ключ підготовлено автоматично. Після створення він не змінюється.</p></details>
       {!name.trim() && <p className="et-muted">Вкажіть непорожню назву, щоб зберегти чернетку.</p>}
-      <p className="et-muted">Новий шаблон використовує поточні правила перевірки джерел.</p>
       {!/^[a-z][a-z0-9_-]{0,79}$/.test(key) && <p role="alert">Ключ має починатися з малої латинської літери та містити до 80 малих латинських літер, цифр, _ або -.</p>}
       <SourceDiagnostics diagnostics={candidate?.diagnostics} definition={definition} registry={registry} canSave />
       <button className="btn btn-primary px-4" disabled={!manage || !definition || Boolean(busy) || !name.trim() || !/^[a-z][a-z0-9_-]{0,79}$/.test(key)} onClick={async () => {
@@ -281,10 +280,9 @@ function TemplateWorkspace({ permissions, basePath = '/admin/export-templates', 
         </div></div>
         {!publishReview && !supportProposal && <Diagnostics error={error} definition={definition} registry={registry} onOpenSource={openSource} showSources={view !== 'check'} />}
         {busy && <SaveState state="saving" message={`${busy}…`} />}{message && <Notice tone="success">{message}</Notice>}
-        <div className="et-title-line"><h1>{family?.display_name || 'Завантаження шаблону…'}</h1><StatusBadge tone={selectedVersion ? 'neutral' : dirty ? 'warning' : 'info'}>{selectedVersion ? 'Опублікована v' + selectedVersion.versionNumber + ' · лише читання' : dirty ? 'Незбережена чернетка' : 'Чернетка'}</StatusBadge>
-          {family && <SaveState state={selectedVersion ? 'idle' : dirty ? 'dirty' : 'saved'} message={selectedVersion ? 'Незмінна версія' : dirty ? 'Є незбережені зміни' : 'Збережено · редакція ' + family.draft.revision} />}</div>
-        {family && !selectedVersion && !validation?.valid && <p className="et-muted">{integration ? 'Збережену чернетку ще потрібно перевірити перед публікацією. Чинні налаштування Magento не змінено.' : 'Готовність до публікації не підтверджено. Збереження чернетки не перевіряє джерела та не створює експорт.'}</p>}
-        {integration && <p className="text-sm">{selectedVersion && selectedVersion.id === activePublication?.templateVersionId ? 'Використовується поточною інтеграцією Magento.' : selectedVersion ? 'Зафіксовані правила. Використання в інтеграції визначає окрема публікація відповідностей.' : 'Редагуємо чернетку правил. Поточна інтеграція продовжує використовувати опубліковану версію.'}</p>}
+        <div className="et-title-line"><h1>{family?.display_name || 'Завантаження шаблону…'}</h1>
+          {family && <SaveState state={selectedVersion ? 'idle' : dirty ? 'dirty' : 'saved'} message={selectedVersion ? `Опублікована v${selectedVersion.versionNumber} · лише читання` : dirty ? 'Є незбережені зміни' : 'Збережено · редакція ' + family.draft.revision} />}</div>
+        {integration && selectedVersion?.id === activePublication?.templateVersionId && <p className="et-muted">Використовується поточною інтеграцією Magento.</p>}
         <TemplateLocalNav basePath={templateBase} context={location.search} integration={integration} familyId={route.id} versionId={versionId} />
       </header>
       {family?.id === route.id && definition && <>
@@ -338,7 +336,6 @@ function TemplateWorkspace({ permissions, basePath = '/admin/export-templates', 
             {manage && has('exports.view') && <div className="et-sample space-y-3"><h3>Переглянути результат</h3>
               <SampleProducts search={api.searchSamples} selected={selectedSamples} onChange={(products) => { generation.current++; setSampleProducts(products); setProductIds(products.map((p) => p.id).join(', ')); }} />
               <details><summary>Технічні налаштування вибірки</summary><label>ID товарів (1–100, через кому або пробіл)<input className="input" value={productIds} onChange={(e) => { generation.current++; setProductIds(e.target.value); }} /></label></details>
-              <p className="et-muted">Авторитетні дані та ціни завантажить сервер.</p>
               <button className="btn btn-primary px-4" disabled={!exactSaved} onClick={() => {
                 setPreview(null);
                 run('Тест чернетки', () => api.preview(family.id, { ...precondition(), productIds: parseProductIds(productIds) }), (data) => setPreview({ ...data, sampleIds: parseProductIds(productIds) }));

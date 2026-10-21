@@ -317,9 +317,9 @@ test('decode result keeps authoritative pricing drivers highlighted in a compact
   assert.match(decodeSource, /decode-readonly-value/);
   assert.match(decodeSource, /builder-summary/);
   assert.match(decodeSource, /sticky-summary-container/);
-  assert.match(decodeSource, /label="Артикул"/);
+  assert.doesNotMatch(decodeSource, /label="Артикул"/);
   assert.match(decodeSource, /label="Внутрішній SKU"/);
-  assert.match(decodeSource, /Стан у базі/);
+  assert.doesNotMatch(decodeSource, /Стан у базі/);
   assert.match(decodeSource, /Розраховано до округлення/);
   assert.match(decodeSource, /product-final-price/);
   assert.match(decodeSource, /<summary>Розрахунок ціни<\/summary>/);
@@ -428,11 +428,11 @@ test('recount uses a Builder-aligned editor with one authoritative comparison su
   assert.match(recountSource, /Після/);
   assert.match(
     recountSource,
-    /label="Артикул"[\s\S]*label="Ціна виробу"[\s\S]*label="Ціна за грам"[\s\S]*label="Матриця"[\s\S]*className="recount-comparison-difference"[\s\S]*Різниця в ціні/
+    /label="Ціна виробу"[\s\S]*Розрахунок ціни[\s\S]*label="Ціна за грам"[\s\S]*label="Матриця"[\s\S]*className="recount-comparison-difference"[\s\S]*Різниця в ціні/
   );
   assert.doesNotMatch(recountSource, /label="Джерело"/);
   assert.match(recountSource, /Різниця в ціні/);
-  assert.match(recountSource, /Змінені атрибути/);
+  assert.match(recountSource, /Змінені характеристики/);
   assert.match(recountSource, /isChanged \? 'is-changed' : ''/);
   assert.match(recountSource, /getPresentedAnswerLabel[\s\S]*?→[\s\S]*?getPresentedAnswerLabel/);
   assert.doesNotMatch(recountSource, /PreviousPricingSnapshot/);

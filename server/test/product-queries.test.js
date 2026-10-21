@@ -74,6 +74,10 @@ test('product register is bounded, explicitly projected, and returns a filter-bo
   assert.match(calls[0].sql, /identity\.public_sku AS "publicSku"/);
   assert.doesNotMatch(calls[0].sql, /SELECT p\.\*/);
   assert.match(calls[0].sql, /COALESCE\(\(to_jsonb\(identity\)->>'is_test_product'\)::boolean,FALSE\) AS "isTestProduct"/);
+  assert.match(calls[0].sql, /saved_name\.ua ILIKE/);
+  assert.match(calls[0].sql, /saved_name\.en ILIKE/);
+  assert.match(calls[0].sql, /p\.magento_name_override->'values'->>'all'/);
+  assert.doesNotMatch(calls[0].sql, /p\.magento_name_rule_pin/);
   assert.match(calls[0].sql, /corrected_to_product_id IS NULL/);
   assert.match(calls[0].sql, /ORDER BY p\.id DESC/);
   assert.deepEqual(calls[0].params, ['BR', '%AG-%', 2]);

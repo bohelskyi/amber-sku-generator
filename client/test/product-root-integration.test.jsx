@@ -62,7 +62,7 @@ function openWorkspace(permissions, initialEntry = '/products') {
   return router;
 }
 
-it('shows Magento sync coverage above the register on the products landing page', async () => {
+it('starts with the register and reads optional sync statistics only when opened', async () => {
   const originalGet = get.getMockImplementation();
   get.mockImplementation((url, ...args) => url === '/products/register'
     ? Promise.resolve({ data: { items: [], pageInfo: { hasMore: false, nextCursor: null }, filterOptions: { categories: [] } } })
@@ -71,6 +71,9 @@ it('shows Magento sync coverage above the register on the products landing page'
       : originalGet(url, ...args));
   openWorkspace(['products.view', 'products.decode', 'history.view']);
   await screen.findByRole('heading', { name: 'Реєстр товарів' });
+  expect(screen.queryByRole('progressbar')).toBeNull();
+  expect(get.mock.calls.some(([url]) => url === '/magento/summary')).toBe(false);
+  fireEvent.click(screen.getByText('Статистика передавання в магазин'));
   expect((await screen.findByRole('progressbar', { name: 'Синхронізовано з Magento: синхронізовано 40%' })).getAttribute('aria-valuenow')).toBe('40');
   expect(screen.getByRole('progressbar', { name: 'Намисто: синхронізовано 40%' })).toBeTruthy();
 });
@@ -150,7 +153,8 @@ it.each([false, true])('gates existing-product photo edits on recount permission
   await screen.findByRole('heading', { level: 1, name: 'Товар AG-000091' });
   await screen.findByRole('heading', { name: 'Фотографії' });
   await waitFor(() => expect(get.mock.calls.some(([url]) => url === '/products/91/photos')).toBe(true));
-  expect(Boolean(screen.queryByLabelText('Додати фото'))).toBe(canRecount);
+  expect(screen.queryByLabelText('Додати фото')).toBeNull();
+  if (canRecount) { fireEvent.click(screen.getByRole('button', { name: 'Додати фото' })); expect(screen.getByLabelText('Додати фото')).toBeTruthy(); }
   expect(screen.queryByText('Внутрішній SKU')).toBeNull();
   expect(screen.getByText('Версія характеристик')).toBeTruthy();
   expect(post.mock.calls.map(([url]) => url)).toEqual(['/decode']);
@@ -287,6 +291,7 @@ it('retains an existing product failed first photo upload on Stay and resets it 
     throw new Error(`Unexpected mutation ${url}`);
   });
   router = openWorkspace(['products.view', 'products.decode', 'products.recount'], '/products/open?article=AG-000091');
+  fireEvent.click(await screen.findByRole('button', { name: 'Додати фото' }));
   const upload = await screen.findByLabelText('Додати фото');
   await waitFor(() => expect(upload.disabled).toBe(false));
   fireEvent.change(upload, { target: { files: [new File([new Uint8Array(40)], 'lost-first.png', { type: 'image/png' })] } });

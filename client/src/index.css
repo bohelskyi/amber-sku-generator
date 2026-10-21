@@ -44,7 +44,7 @@
     --font-size-md: 14px;
     --font-size-lg: 16px;
     --font-size-page-title: 24px;
-    --font-size-page-title-wide: 28px;
+    --font-size-page-title-wide: 24px;
     --line-height-tight: 1.25;
     --focus-light: #1d2c4d;
     --focus-dark: #dd974a;
@@ -234,7 +234,6 @@
 
   .notice {
     @apply flex items-start gap-3 rounded-lg border px-4 py-3 text-sm;
-    box-shadow: var(--shadow-sm);
   }
 
   .notice-icon { @apply mt-0.5 shrink-0; }

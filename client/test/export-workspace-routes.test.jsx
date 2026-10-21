@@ -57,7 +57,7 @@ function noExportWork() {
   noMutations();
   expect(downloadBlob).not.toHaveBeenCalled();
   for (const [key, mock] of Object.entries(exports)) {
-    if (!['getStatus', 'getPriceStatus'].includes(key)) expect(mock).not.toHaveBeenCalled();
+    if (!['getStatus', 'getPriceStatus', 'getHistory'].includes(key)) expect(mock).not.toHaveBeenCalled();
   }
   for (const service of [sessions, templates]) for (const mock of Object.values(service)) expect(mock).not.toHaveBeenCalled();
 }
@@ -70,6 +70,7 @@ beforeEach(() => {
   productsApi.listRegister.mockResolvedValue(response({ items: [], pageInfo: { hasMore: false, nextCursor: null }, filterOptions: { categories: [] } }));
   exports.getStatus.mockResolvedValue(response({ delivery: { legacyProductCsvEnabled: true, automaticSyncEnabled: false }, countSinceLastExport: 1 }));
   exports.getPriceStatus.mockResolvedValue(response({ pendingCount: 1 }));
+  exports.getHistory.mockResolvedValue(response({ items: [], next: null }));
   exports.getTemplateOptions.mockResolvedValue(response({ versions: [], activeVersionId: null }));
   exports.preview.mockResolvedValue(response(preview));
   exports.createSnapshot.mockResolvedValue(response(snapshot));
@@ -88,8 +89,8 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 it('mounts every export destination without commands or admin reads, with native active navigation', async () => {
-  const { router } = mount(); await screen.findByText(/1 новий товар очікує/, {}, { timeout: 10000 });
-  for (const [title, path, nav] of [['Робочі експорти', '/exports/sessions', 'Розділи експорту'], ['Спільні зі мною', '/exports/shared', 'Робочі експорти'], ['Запрошення', '/exports/invitations', 'Робочі експорти'], ['Експорт цін (сумісність)', '/exports/prices', 'Розділи експорту'], ['Огляд', '/exports', 'Розділи експорту']]) {
+  const { router } = mount(); await screen.findByRole('heading', { name: 'Історія файлів' }, { timeout: 10000 });
+  for (const [title, path, nav] of [['Робочі експорти', '/exports/sessions', 'Розділи експорту'], ['Спільні зі мною', '/exports/shared', 'Робочі експорти'], ['Запрошення', '/exports/invitations', 'Робочі експорти'], ['Експорт цін (сумісність)', '/exports/prices', 'Розділи експорту'], ['Збережені файли', '/exports', 'Розділи експорту']]) {
     const item = within(screen.getByRole('navigation', { name: nav })).getByRole('link', { name: title });
     item.focus(); expect(document.activeElement).toBe(item); expect(item.tabIndex).toBe(0);
     fireEvent.click(item); await waitFor(() => expect(router.state.location.pathname).toBe(path));
@@ -98,11 +99,12 @@ it('mounts every export destination without commands or admin reads, with native
       expect(within(screen.getByRole('navigation', { name: 'Розділи експорту' })).getByRole('link', { name: 'Робочі експорти' }).getAttribute('aria-current')).toBe('page');
     }
   }
+  fireEvent.click(screen.getByText('Створити сумісний експорт'));
   link('Експорт за опублікованим шаблоном'); await screen.findByLabelText('Назва експорту');
   expect(router.state.location.pathname).toBe('/exports/new/template');
   expect(within(screen.getByRole('navigation', { name: 'Розділи експорту' })).getByRole('link', { name: 'Робочі експорти' }).getAttribute('aria-current')).toBe('page');
   noMutations(); for (const mock of Object.values(templates)) expect(mock).not.toHaveBeenCalled();
-  expect(screen.getByRole('link', { name: 'Історія файлів' }).getAttribute('href')).toBe('/exports/history');
+  expect(screen.getByRole('link', { name: 'Збережені файли' }).getAttribute('href')).toBe('/exports');
 });
 
 it.each([390, 1440])('keeps Magento summary on products and legacy exports accessible by deep link at %i px', async (width) => {
@@ -113,6 +115,8 @@ it.each([390, 1440])('keeps Magento summary on products and legacy exports acces
   expect(screen.queryByRole('link', { name: 'Перейти до експорту' })).toBeNull();
   noExportWork();
   await navigate(router, '/exports');
+  await screen.findByRole('heading', { name: 'Історія файлів' });
+  fireEvent.click(await screen.findByText('Створити сумісний експорт'));
   await screen.findByRole('heading', { name: 'Експорт товарів у Magento' });
   noExportWork();
   await navigate(router, '/exports/prices');
@@ -123,7 +127,9 @@ it('keeps view-only legacy export deep links without create or archive authority
   const { router } = mount('/', ['products.view', 'exports.view']);
   await screen.findByRole('heading', { name: 'Товари' });
   expect(screen.queryByRole('button', { name: 'Архівувати' })).toBeNull();
-  await navigate(router, '/exports'); await screen.findByRole('heading', { name: 'Експорт товарів у Magento' });
+  await navigate(router, '/exports'); await screen.findByRole('heading', { name: 'Історія файлів' });
+  fireEvent.click(await screen.findByText('Створити сумісний експорт'));
+  await screen.findByRole('heading', { name: 'Експорт товарів у Magento' });
   noExportWork();
   expect(screen.queryByRole('button', { name: 'Створити файли Magento' })).toBeNull();
   expect(screen.queryByRole('button', { name: 'Завершити експорт' })).toBeNull();
@@ -170,7 +176,9 @@ it('keeps product creation, history, decode, recount and archive available witho
 it('keeps the original uncertain operation through product → exports → product → exports', async () => {
   exports.createSnapshot.mockRejectedValueOnce(new Error('response lost')).mockResolvedValueOnce(response(snapshot));
   const { router } = mount('/'); await screen.findByRole('heading', { name: 'Товари' });
-  await navigate(router, '/exports'); await screen.findByRole('heading', { name: 'Експорт товарів у Magento' });
+  await navigate(router, '/exports'); await screen.findByRole('heading', { name: 'Історія файлів' });
+  fireEvent.click(await screen.findByText('Створити сумісний експорт'));
+  await screen.findByRole('heading', { name: 'Експорт товарів у Magento' });
   button('Перевірити 1 новий товар'); await screen.findByRole('button', { name: 'Створити файли Magento' });
   button('Створити файли Magento'); await screen.findByText(/response lost/);
   const original = exports.createSnapshot.mock.calls[0];
@@ -181,7 +189,7 @@ it('keeps the original uncertain operation through product → exports → produ
   expect(exports.createSnapshot).toHaveBeenCalledTimes(1); expect(exports.preview).toHaveBeenCalledTimes(1);
   await navigate(router, '/exports'); await screen.findByRole('button', { name: 'Повторити початкове створення' });
   expect(exports.createSnapshot).toHaveBeenCalledTimes(1); expect(exports.preview).toHaveBeenCalledTimes(1);
-  button('Повторити початкове створення'); await screen.findByText('Збережені файли');
+  button('Повторити початкове створення'); await screen.findByText('Збережені файли', { selector: 'p' });
   expect(exports.createSnapshot.mock.calls[1]).toEqual(original);
   expect(exports.getStatus).toHaveBeenCalledTimes(2);
   expect(localStorage.length).toBe(0); expect(sessionStorage.length).toBe(0);
@@ -208,7 +216,9 @@ it('session permalink automatically reads through the current account; invitatio
 });
 
 it('view-only exporter can preview/read but cannot create or confirm; direct admin deep links issue no reads', async () => {
-  const { router } = mount('/exports', ['exports.view']); await screen.findByText(/1 новий товар очікує/);
+  const { router } = mount('/exports', ['exports.view']); await screen.findByRole('heading', { name: 'Історія файлів' });
+  fireEvent.click(await screen.findByText('Створити сумісний експорт'));
+  await screen.findByText(/1 новий товар очікує/);
   button('Перевірити 1 новий товар'); await screen.findByText('ПОПЕРЕДНІЙ ПЕРЕГЛЯД');
   expect(screen.queryByRole('button', { name: 'Створити файли Magento' })).toBeNull();
   await navigate(router, '/exports/prices'); expect(screen.queryByRole('button', { name: 'Створити файл' })).toBeNull(); expect(screen.getByRole('button', { name: 'Оновити / переглянути поточну чергу' })).toBeTruthy();
@@ -373,7 +383,7 @@ it('view-only session result can be reopened, but confirmation remains disabled'
   sessions.get.mockResolvedValue(response({ ...session, snapshotId: snapshot.id }));
   mount('/exports/sessions/saved-a', ['exports.view']);
 
-  await screen.findByText('Збережені файли');
+  await screen.findByText('Збережені файли', { selector: 'p' });
   expect(screen.queryByRole('button', { name: 'Завершити експорт' })).toBeNull();
   expect(screen.queryByRole('button', { name: 'Створити свій експорт' })).toBeNull(); noMutations();
 });
@@ -395,26 +405,30 @@ function authenticated() {
 }
 it('same-user refresh keeps the original pending request across subroutes; permission loss clears create authority', async () => {
   exports.createSnapshot.mockRejectedValueOnce(new Error('unknown')).mockResolvedValueOnce(response(snapshot));
-  const { client, router } = authenticated(); await screen.findByText(/1 новий товар очікує/);
+  const { client, router } = authenticated(); await screen.findByRole('heading', { name: 'Історія файлів' });
+  fireEvent.click(await screen.findByText('Створити сумісний експорт'));
+  await screen.findByText(/1 новий товар очікує/);
   button('Перевірити 1 новий товар'); await screen.findByRole('button', { name: 'Створити файли Magento' }); button('Створити файли Magento'); await screen.findByText(/unknown/);
   await navigate(router, '/exports/prices'); await navigate(router, '/');
   await act(async () => observedAuth.refresh());
   await navigate(router, '/exports'); await screen.findByRole('button', { name: 'Повторити початкове створення' });
   expect(exports.createSnapshot).toHaveBeenCalledTimes(1);
-  button('Повторити початкове створення'); await screen.findByText('Збережені файли');
+  button('Повторити початкове створення'); await screen.findByText('Збережені файли', { selector: 'p' });
   expect(exports.createSnapshot.mock.calls[1]).toEqual(exports.createSnapshot.mock.calls[0]);
   client.get.mockResolvedValue(response(authSession(1, ['exports.view']))); await act(async () => observedAuth.refresh());
-  expect(screen.queryByText('Збережені файли')).toBeNull(); noTemplateReads();
+  expect(screen.queryByText('Збережені файли', { selector: 'p' })).toBeNull(); noTemplateReads();
 });
 function noTemplateReads() { for (const mock of Object.values(templates)) expect(mock).not.toHaveBeenCalled(); }
 it.each([{ ids: [2] }, { ids: [2, 1] }])('principal transition $ids fences a late operation across the new routes', async ({ ids }) => {
   const late = deferred(); exports.createSnapshot.mockReturnValueOnce(late.promise);
-  const { client, router } = authenticated(); await screen.findByText(/1 новий товар очікує/);
+  const { client, router } = authenticated(); await screen.findByRole('heading', { name: 'Історія файлів' });
+  fireEvent.click(await screen.findByText('Створити сумісний експорт'));
+  await screen.findByText(/1 новий товар очікує/);
   button('Перевірити 1 новий товар'); await screen.findByRole('button', { name: 'Створити файли Magento' }); button('Створити файли Magento');
   await navigate(router, '/exports/sessions');
   await navigate(router, '/');
   for (const id of ids) { client.get.mockResolvedValue(response(authSession(id))); await act(async () => observedAuth.refresh()); }
   await navigate(router, '/exports'); await act(async () => late.resolve(response(snapshot)));
-  expect(screen.queryByText('Збережені файли')).toBeNull(); expect(screen.queryByRole('button', { name: 'Повторити початкове створення' })).toBeNull();
+  expect(screen.queryByText('Збережені файли', { selector: 'p' })).toBeNull(); expect(screen.queryByRole('button', { name: 'Повторити початкове створення' })).toBeNull();
   expect(exports.createSnapshot).toHaveBeenCalledTimes(1); expect(exports.getSnapshot).not.toHaveBeenCalled(); noTemplateReads();
 });

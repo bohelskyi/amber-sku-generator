@@ -1,6 +1,6 @@
 # Amber operations interface
 
-This guide describes the local full-application redesign, including the unified Catalog update of 2026-10-15. Its
+This guide describes the local full-application redesign, including the workflow simplification of 2026-10-21. Its
 implementation waves 0–7 are distinct from historical production Wave 1 and
 Magento self-service Wave 2. It is not a deployment or real Magento acceptance
 receipt. Domain guides, current server code and migrations remain authoritative.
@@ -185,9 +185,11 @@ without changing section. Custom text attributes remain characteristics.
 Simple placement rules have a condition/path/actions table. Draft edit/delete
 preserves unsupported shared/complex branches; advanced editing remains available.
 Name/description/SEO editors show an explicit server example for a selected product
-alongside the current UA/EN rule. The example uses a separate unpublished template
-family and cannot apply or publish category work. Its result becomes stale after
-further edits. Existing product names still require separate Administrator review.
+alongside the current UA/EN rule. The stateless `evaluate-example` endpoint validates
+the unsaved definition and stored sample using the existing evaluator, without
+creating a family, draft, publication or review token. Earlier example families
+remain available in the registry. Results become stale after further edits.
+Existing product names still require separate Administrator review.
 
 The workspace reads the exact pinned binding/template, saves an isolated rules
 draft and prepares a successor before explicit review and application. Full
@@ -251,6 +253,42 @@ never blind retry. Stock Magento can verify set membership but does not provide
 assignment group/order readback or remote CAS; see the attribute guide's limits.
 
 ## Verification and human acceptance
+
+### Working screens (2026-10-21)
+
+- Products open the register; synchronization coverage is optional. Search includes
+  saved UA/EN names and explicitly identified saved subjects. It does not guess an
+  effective generated name or evaluate every product while listing. Photos open in
+  view mode, with a separate editing action. The saved final price is prominent.
+- Repricing retains a single scope selector and preparation action. Each result row
+  shows before/after prices and its outcome; one selected row opens decisions and
+  evidence. Paging and selection do not reduce the full authoritative apply scope.
+  History opens the event timeline; configuration comparison is optional.
+- Pricing opens matrices directly and labels units and autosave state. Modifiers
+  show the corresponding markup or discount. Missing data never becomes a zero.
+- Attention starts with bounded cause groups from `/magento/problem-groups/page`.
+  Counts cover the filtered queue and distinct products, not the visible page.
+  Shared causes require exact captured source and publication provenance; legacy
+  evidence and individual name/first-sync/uncertain-operation decisions stay apart.
+  Selecting a group opens its bounded product page, then an explicit product choice.
+  No first product is selected automatically. First-sync starts with unresolved
+  fields and opens one decision at a time; all fields and original records remain
+  accessible. URLs retain the group, product and selected field through repairs.
+- Store connection starts with compact connection facts and an explicit check.
+  Catalog owns category rules and drafts. A check result, Amber save and confirmed
+  Magento delivery remain different states.
+- Catalog starts with category and tabs. Advanced input rules are collapsed.
+  Checking and applying use a separate task dialog with the full package scope,
+  including dependencies from other categories, and explicit remote confirmations.
+- Users have counted state filters and role descriptions. Roles first summarize
+  available tasks, then expose editable permission groups. Audit shows stable public
+  articles where known, recorded changes and immutable actor names; actor lookup
+  searches recorded snapshots and returns exact actor IDs. Raw evidence remains
+  available. Pending or disabled accounts can explicitly recheck access.
+- Historical exports open saved files and preserve original unfinished operations
+  before optional compatibility creation tools. Shared sessions, invitations and
+  old URLs remain available. Historical correction details show one identity and
+  price comparison while retaining ownership, blockers and reviewed completion.
 
 Use Node 20/PostgreSQL 16 and the checks in [AGENTS](../AGENTS.md). Windows
 integration verification uses only disposable canonical `postgres-test` and stops

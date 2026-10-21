@@ -123,8 +123,7 @@ function ProductRegisterContent({ canDecode, onDeleteArchivedTest, initialFilter
     <section className="product-register card" aria-labelledby="product-register-title">
       <div className="product-register-header">
         <div>
-          <h2 id="product-register-title" className="section-title-text">Реєстр товарів</h2>
-          <p className="section-subtitle mt-1">Знайдіть товар за артикулом або оберіть категорію.</p>
+          <h2 id="product-register-title" className="sr-only">Реєстр товарів</h2>
         </div>
         <button type="button" className="btn btn-outline btn-icon" onClick={register.refresh}
           disabled={register.loading} aria-label="Оновити реєстр" title="Оновити">
@@ -138,20 +137,20 @@ function ProductRegisterContent({ canDecode, onDeleteArchivedTest, initialFilter
           <Search size={16} aria-hidden="true" />
           <input className="input-sm" value={draftSearch}
             onChange={(event) => setDraftSearch(event.target.value)}
-            placeholder="Артикул товару" />
+            placeholder="Артикул або збережена назва" />
         </label>
         <select className="input-sm" aria-label="Категорія товарів" value={register.filters.category}
           onChange={(event) => changeFilter('category', event.target.value)}>
           <option value="">Усі категорії</option>
           {register.filterOptions.categories.map((category) => (
-            <option key={category.code} value={category.code}>{category.name} · {category.code}</option>
+            <option key={category.code} value={category.code}>{category.name}</option>
           ))}
         </select>
         <select className="input-sm" aria-label="Стан товарів" value={register.filters.lifecycle}
           onChange={(event) => changeFilter('lifecycle', event.target.value)}>
           {Object.entries(lifecycleLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
         </select>
-        <button type="submit" className="btn btn-primary">Знайти</button>
+        <button type="submit" className="btn btn-outline">Знайти</button>
         {(register.filters.search || register.filters.category || register.filters.lifecycle !== 'current') && (
           <button type="button" className="btn btn-ghost" onClick={reset}>Скинути</button>
         )}
@@ -165,9 +164,9 @@ function ProductRegisterContent({ canDecode, onDeleteArchivedTest, initialFilter
         : !register.error && <>
           <div className="product-register-table-wrap">
             <table className="dense-table min-w-full">
-              <caption className="sr-only">Товари: артикул, категорія, стан, вага, ціна та дії.</caption>
+              <caption className="sr-only">Товари: збережена назва й артикул, категорія, стан, вага, ціна та дії.</caption>
               <thead><tr className="table-head">
-                <th scope="col" className="table-cell text-left">Артикул</th>
+                <th scope="col" className="table-cell text-left">Товар</th>
                 <th scope="col" className="table-cell text-left">Категорія</th>
                 <th scope="col" className="table-cell text-left">Стан</th>
                 <th scope="col" className="table-cell text-right">Вага</th>
@@ -175,8 +174,8 @@ function ProductRegisterContent({ canDecode, onDeleteArchivedTest, initialFilter
                 <th scope="col" className="table-cell text-right"><span className="sr-only">Дії</span></th>
               </tr></thead>
               <tbody>{register.items.map((product) => <tr key={product.id}>
-                <td className="table-cell" data-label="Артикул"><div className="font-mono font-semibold text-slate-900">{product.publicSku}</div>{isTestProduct(product) && <><StatusBadge tone="neutral">TEST</StatusBadge><p className="text-xs text-slate-500">TEST: лише вимкнений стан Magento</p></>}</td>
-                <td className="table-cell" data-label="Категорія"><div>{product.categoryName || product.categoryCode}</div><div className="text-xs text-slate-500">{product.categoryCode}</div></td>
+                <td className="table-cell" data-label="Товар"><div className="product-register-name">{product.nameUa || product.nameEn || 'Назву не збережено'}</div><div className="font-mono text-sm text-slate-600">{product.publicSku}</div>{product.nameKind === 'subject' && <span className="text-xs text-slate-500">Назва предмета</span>}{product.nameKind === 'saved_full_name' && <span className="sr-only">Збережена назва; поточний результат шаблону перевіряється окремо.</span>}{isTestProduct(product) && <StatusBadge tone="neutral">TEST</StatusBadge>}</td>
+                <td className="table-cell" data-label="Категорія">{product.categoryName || product.categoryCode}</td>
                 <td className="table-cell" data-label="Стан"><ProductStatus status={product.status} /></td>
                 <td className="table-cell text-right tabular-nums" data-label="Вага">{Number(product.weight) > 0 ? `${formatDecimal(product.weight)} г` : '—'}</td>
                 <td className="table-cell text-right font-medium tabular-nums" data-label="Ціна">{product.priceUah !== null && product.priceUah !== undefined ? formatUah(product.priceUah) : '—'}</td>

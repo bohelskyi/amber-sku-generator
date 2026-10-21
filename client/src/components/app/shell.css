@@ -45,8 +45,8 @@
 .ui-drawer-surface.app-navigation-drawer > .ui-drawer-body { padding: 0; }
 
 .workspace-directory { width: min(100%, 1120px); margin-inline: auto; padding: 24px; }
-.workspace-directory-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 20px; }
-.workspace-directory-link { display: flex; min-width: 0; min-height: 88px; align-items: center; justify-content: space-between; gap: 18px; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 16px 18px; background: var(--surface); box-shadow: var(--shadow-sm); }
+.workspace-directory-list { display: grid; gap: 0; margin-top: 16px; border-top: 1px solid var(--border); }
+.workspace-directory-link { display: flex; min-width: 0; min-height: 72px; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--border); padding: 12px 8px; background: var(--surface); }
 .workspace-directory-link > span { display: grid; min-width: 0; gap: 3px; }
 .workspace-directory-link strong { color: var(--navy-900); font-size: 15px; }
 .workspace-directory-link span span { color: var(--text-muted); font-size: var(--font-size-sm); }

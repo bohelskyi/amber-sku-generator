@@ -45,6 +45,7 @@ function AppPage() {
   const [historicalSession, setHistoricalSession] = useState(0);
   const [deletionReceipt, setDeletionReceipt] = useState(null);
   const [registerRefresh, setRegisterRefresh] = useState(0);
+  const [statisticsOpen, setStatisticsOpen] = useState(false);
   const [searchParams] = useSearchParams();
   const exportSku = searchParams.get('exportSku')?.slice(0, 160);
   const isLandingRoute = location.pathname === '/products';
@@ -214,10 +215,14 @@ function AppPage() {
     ? requestedReturn : '/products';
   const openedProduct = isOpenRoute && !sku.isDecodeLoading ? sku.decodeData : null;
   const openedArticle = openedProduct?.existsInDb ? openedProduct.publicSku : null;
+  const openedName = openedProduct?.product?.magento_name_override?.values?.all
+    || openedProduct?.product?.magento_name_rule_pin?.values?.all
+    || openedProduct?.product?.magento_name_subject_ua;
   const productState = ({ active: 'Активний', archived: 'Архівний', corrected: 'Переоблікований', voided: 'Анульований' })[openedProduct?.product?.status];
   const pageTitle = isCreateRoute ? 'Створення товару' : !isOpenRoute ? 'Товари'
     : !openedProduct ? 'Відкриття товару' : openedProduct.existsInDb
-      ? `Товар ${openedArticle || 'без доступного артикулу'}` : 'Перевірка коду';
+      ? openedName || `Товар ${openedArticle || 'без доступного артикулу'}`
+      : 'Перевірка коду';
 
   if (canViewConfig && !sku.config) {
     return (
@@ -230,8 +235,8 @@ function AppPage() {
     <div className="app-page">
       <div className="mx-auto max-w-7xl space-y-5 px-4 py-4 sm:px-6 sm:py-6">
         <PageHeader title={pageTitle}
-          description={isCreateRoute ? 'Заповніть характеристики, перевірте розрахунок і збережіть товар.'
-            : isOpenRoute ? openedProduct?.existsInDb ? openedProduct.category?.name
+          description={isCreateRoute ? undefined
+            : isOpenRoute ? openedProduct?.existsInDb ? `${openedName ? `${openedArticle || 'Артикул недоступний'} · ` : ''}${openedProduct.category?.name || ''}`
               : openedProduct ? 'Код розшифровано. Збережений товар не знайдено.' : 'Читаємо актуальні дані товару.' : undefined}
           breadcrumbs={isLandingRoute ? undefined : [{ label: 'Товари', to: registerReturn }, { label: isCreateRoute ? 'Створення' : 'Картка товару' }]}
           status={productState && <StatusBadge tone={openedProduct.product.status === 'active' ? 'success' : 'neutral'}>{productState}</StatusBadge>}
@@ -417,12 +422,15 @@ function AppPage() {
           />
         )}
 
-        {isLandingRoute && !sku.selectedCat && !sku.decodeData && !sku.isDecodeLoading && <SyncCoverage />}
-
         {canViewRegister && isLandingRoute && !sku.selectedCat && !sku.decodeData && !sku.isDecodeLoading && (
           <ProductRegister canDecode={canDecodeProducts} refreshKey={registerRefresh}
             onDeleteArchivedTest={canDeleteTestProduct ? (product) => setTestDeletion({ ...product, public_sku: product.publicSku, full_sku: product.internalSku }) : undefined} />
         )}
+        {isLandingRoute && !sku.selectedCat && !sku.decodeData && !sku.isDecodeLoading && <details className="product-register-statistics"
+          onToggle={(event) => setStatisticsOpen(event.currentTarget.open)}>
+          <summary>Статистика передавання в магазин</summary>
+          {statisticsOpen && <SyncCoverage />}
+        </details>}
       </div>
       <HistoricalReactivationReview key={(auth.principalLifetime?.id || auth.applicationUser?.id || 'anonymous') + ':' + historicalSession}
         open={historicalOpen} config={sku.config} onDirtyChange={setHistoricalDirty} onBusyChange={setHistoricalBusy}

@@ -4,9 +4,9 @@ import { Dialog } from '../ui';
 import { ExchangeRateNotice } from '../ExchangeRateNotice';
 
 const MODES = [
-  { value: 'system_auto', label: 'Автоматична' },
-  { value: 'manual_uah', label: 'Ручна UAH' },
-  { value: 'usd_per_gram', label: 'USD/г' },
+  { value: 'system_auto', label: 'За правилами' },
+  { value: 'manual_uah', label: 'Вказати суму' },
+  { value: 'usd_per_gram', label: 'За грам' },
 ];
 
 function validPositiveDecimal(value, scale) {
@@ -61,8 +61,8 @@ export function ProductPriceChangeDialog({
   const requestAllowedForMode = mode === 'system_auto' || canRequestOverride;
   const actionDisabled = !validInput || !preview || preview.unchanged || isLoading || isApplying;
 
-  return <Dialog open title="Змінити ціну чинного товару?"
-    description="Зміна ціни без переобліку. Перевірте розрахунок перед застосуванням."
+  return <Dialog open title="Змінити ціну"
+    description={sku}
     busy={isApplying} onClose={onCancel} initialFocusRef={confirmButtonRef} size="md"
     footer={<div className={`grid w-full gap-3 ${canApplyDirect && canCreateRequest ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
       <button type="button" className="btn btn-outline" onClick={onCancel} disabled={isApplying}>Скасувати</button>
@@ -76,19 +76,20 @@ export function ProductPriceChangeDialog({
         disabled={actionDisabled}>{isApplying ? 'Змінюємо…' : 'Змінити ціну'}</button>}
     </div>}>
         <div className="space-y-5">
-          <dl className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2">
+          <dl className="product-price-comparison">
             <div>
-              <dt className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Артикул</dt>
-              <dd className="mt-1 break-all font-mono text-sm font-semibold text-slate-900">{sku}</dd>
+              <dt>Зараз</dt>
+              <dd>{optionalUah(currentPriceUah)}</dd>
             </div>
+            <span aria-hidden="true">→</span>
             <div>
-              <dt className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Поточна ціна</dt>
-              <dd className="mt-1 text-sm font-semibold text-slate-900">{optionalUah(currentPriceUah)}</dd>
+              <dt>Буде</dt>
+              <dd>{isLoading ? 'Розраховуємо…' : optionalUah(resultingPrice)}</dd>
             </div>
           </dl>
 
-          <fieldset className="rounded-lg border border-slate-200 p-4">
-            <legend className="px-1 text-sm font-semibold">Режим ціни</legend>
+          <fieldset>
+            <legend className="text-sm font-semibold">Як визначити ціну</legend>
             <div role="radiogroup" aria-label="Режим зміни ціни" className="mt-2 flex gap-1 rounded-md bg-slate-100 p-1">
               {visibleModes.map((item) => (
                 <label key={item.value} className="relative flex-1 cursor-pointer">
@@ -157,20 +158,7 @@ export function ProductPriceChangeDialog({
             )}
           </fieldset>
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
-              <div className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-800">Результуюча ціна</div>
-              <div className="mt-1 text-lg font-semibold text-slate-900">
-                {isLoading ? 'Розраховуємо…' : optionalUah(resultingPrice)}
-              </div>
-            </div>
-            <div className="rounded-lg border border-slate-200 p-4">
-              <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Різниця</div>
-              <div className="mt-1 text-lg font-semibold text-slate-900">
-                {difference === null ? '—' : `${Number(difference) > 0 ? '+' : ''}${formatUah(difference)}`}
-              </div>
-            </div>
-          </div>
+          {!isLoading && difference !== null && <p className="text-sm text-slate-600">Різниця: {Number(difference) > 0 ? '+' : ''}{formatUah(difference)}</p>}
 
           {!isLoading && <ExchangeRateNotice rate={preview?.resultingPricing?.uahRate}
             rateDate={preview?.resultingPricing?.rateMetadata?.date}
@@ -178,8 +166,8 @@ export function ProductPriceChangeDialog({
             stale={preview?.resultingPricing?.rateMetadata?.stale} />}
 
           {preview?.unchanged && (
-            <div className="danger-panel p-4 text-sm" role="alert">
-              Результуюча ціна не відрізняється від поточної.
+            <div className="text-sm text-slate-600" role="status">
+              Ціна залишається без змін.
             </div>
           )}
           {error && <div className="danger-panel p-4 text-sm" role="alert">{error}</div>}

@@ -7,11 +7,9 @@ import { LoadingState, Notice } from '../components/app/UiPrimitives.jsx';
 import { WorkspaceHeader, WorkspaceLocalNav } from '../components/workspace/WorkspacePrimitives.jsx';
 import MagentoOverview from '../components/workspace/MagentoOverview.jsx';
 import MagentoCategoryDetail from '../components/workspace/MagentoCategoryDetail.jsx';
-import MagentoDetails from '../components/workspace/MagentoDetails.jsx';
-import MagentoActionHistory from '../components/workspace/MagentoActionHistory.jsx';
-import MagentoStructureResult from '../components/workspace/MagentoStructureResult.jsx';
 import MagentoCategoryWorkspace from '../components/workspace/MagentoCategoryWorkspace.jsx';
 import '../components/workspace/magento.css';
+import '../components/workspace/store-connection.css';
 
 const Preparation = lazy(() => import('../components/workspace/MagentoPreparationWorkspace.jsx'));
 const Administrator = lazy(() => import('../components/workspace/MagentoAdministratorWorkspace.jsx'));
@@ -19,7 +17,7 @@ const Rules = lazy(() => import('./ExportTemplatesPage.jsx'));
 const Changes = lazy(() => import('../components/workspace/MagentoChangesWorkspace.jsx'));
 const CategorySetup = lazy(() => import('../components/workspace/MagentoCategorySetup.jsx'));
 const root = '/admin/magento-integration';
-const date = (value) => value ? new Date(value).toLocaleString('uk-UA', { dateStyle: 'short', timeStyle: 'short' }) : 'Немає доступного спостереження';
+
 
 function CategoryEntrance({ categories, canManage, canViewProducts, published, ...workspace }) {
   const { search } = useLocation(); const params = new URLSearchParams(search);
@@ -29,27 +27,13 @@ function CategoryEntrance({ categories, canManage, canViewProducts, published, .
   return <MagentoCategoryWorkspace categories={categories} activePublication={published} {...workspace} />;
 }
 
-function useNarrowMagentoLayout() {
-  const [narrow, setNarrow] = useState(() => globalThis.matchMedia?.('(max-width: 900px)').matches || false);
-  useEffect(() => {
-    const query = globalThis.matchMedia?.('(max-width: 900px)');
-    if (!query) return undefined;
-    const update = () => setNarrow(query.matches);
-    update(); query.addEventListener('change', update);
-    return () => query.removeEventListener('change', update);
-  }, []);
-  return narrow;
-}
-
 export default function MagentoIntegrationPage() {
   const auth = useAuth(); const { pathname } = useLocation();
   const canManage = auth.permissions.includes('export_templates.manage');
   const canViewProducts = auth.permissions.includes('products.view');
   const [data, setData] = useState(null); const [error, setError] = useState(''); const [refresh, setRefresh] = useState(0);
   const [observation, setObservation] = useState(null); const [checking, setChecking] = useState(false); const [checkError, setCheckError] = useState('');
-  const narrowViewport = useNarrowMagentoLayout(); const [contextOpen, setContextOpen] = useState(false);
   const categoryWorkspace = pathname === '/admin/magento' || pathname === '/admin/magento/categories' || /^\/admin\/magento\/categories\/[^/]+$/.test(pathname);
-  const narrowLayout = narrowViewport || categoryWorkspace || pathname !== '/admin/magento/overview';
   const discoverySequence = useRef(0);
   useEffect(() => { const reload = () => setRefresh((value) => value + 1); window.addEventListener('focus', reload); return () => window.removeEventListener('focus', reload); }, []);
   useEffect(() => () => { ++discoverySequence.current; }, []);
@@ -62,67 +46,27 @@ export default function MagentoIntegrationPage() {
   }, [refresh, canViewProducts]);
   async function discover() {
     const ticket = ++discoverySequence.current; setChecking(true); setCheckError('');
-    try { const { data: result } = await api.post(`${root}/structure-check`, {}); if (ticket === discoverySequence.current) { setObservation(result); setRefresh((value) => value + 1); } }
-    catch (cause) { if (ticket === discoverySequence.current) setCheckError(cause.response?.data?.error || 'Перевірка структури не завершилася. Попереднє спостереження збережено.'); }
+    try { const { data: result } = await api.post(`${root}/structure-check`, {});
+      if (typeof result?.observedAt !== 'string' || !Number.isFinite(Date.parse(result.observedAt))) throw new Error('Incomplete observation');
+      if (ticket === discoverySequence.current) { setObservation(result); setRefresh((value) => value + 1); } }
+    catch (cause) { if (ticket === discoverySequence.current) setCheckError(cause.response?.data?.error || 'Не вдалося завершити перевірку Magento. Спробуйте ще раз.'); }
     finally { if (ticket === discoverySequence.current) setChecking(false); }
   }
   const integration = data?.integration;
   const published = integration?.activePublication;
-  const stored = integration?.structureObservation;
-  const useExplicit = observation && (!stored || Date.parse(observation.observedAt) >= Date.parse(stored.observedAt));
-  const observedAt = useExplicit ? observation.observedAt : stored?.observedAt;
-  const deliveryText = integration?.delivery.state === 'enabled' ? 'Автоматичну синхронізацію увімкнено'
-    : integration?.delivery.state === 'disabled' ? 'Автоматичну синхронізацію вимкнено' : 'Стан автоматичної синхронізації невідомий';
-  const operationalText = integration?.operational.state !== 'known' ? 'Дані про зафіксовані проблеми недоступні'
-    : integration?.operational.count ? `Потребують уваги: ${integration.operational.count}` : 'Зафіксованих проблем немає';
-  const publicationText = published ? `Версія ${published.versionNumber}` : 'Опублікованих відповідностей ще немає';
   const items = [{ to: '/admin/catalog', label: 'Каталог' },
-    { to: '/admin/magento/overview', label: 'Стан доставки' },
-    ...(canManage ? [{ to: '/admin/magento/changes', label: 'Підготовлені зміни' }] : []),
+    { to: '/admin/magento/overview', label: 'Підключення' },
     { to: '/admin/magento/history', label: 'Історія' },
-    ...(isActualAdministrator(auth) ? [{ to: '/admin/magento/administrator', label: 'Контрольовані операції' }] : [])];
+    ...(isActualAdministrator(auth) ? [{ to: '/admin/magento/administrator', label: 'Службові операції' }] : [])];
   return <main className={categoryWorkspace ? 'app-page magento-category-page' : 'app-page'}><div className="local-workspace magento-workspace">
-    <WorkspaceHeader title="Підключення магазину" description={categoryWorkspace ? 'Що передаємо з менеджера в магазин.' : 'Стан підключення, журнали та спеціальні операції.'} actions={!categoryWorkspace && <button className="btn btn-outline btn-compact-md" onClick={() => setRefresh((value) => value + 1)}>Оновити стан</button>} />
-    <div className={categoryWorkspace ? 'mc-navigation' : undefined}><WorkspaceLocalNav label="Підключення магазину" items={categoryWorkspace ? items.slice(0, 2) : items} />
-      {categoryWorkspace && <div className="mc-extra-nav"><MagentoDetails summary="Інші розділи">{() => <WorkspaceLocalNav label="Додаткові розділи інтеграції" items={items.slice(2)} />}</MagentoDetails></div>}
-    </div>
+    <WorkspaceHeader title={categoryWorkspace ? 'Каталог' : 'Підключення магазину'} actions={!categoryWorkspace && <button type="button" className="btn btn-outline btn-compact-md" onClick={() => setRefresh(value => value + 1)}>Оновити стан</button>} />
+    {!categoryWorkspace && <WorkspaceLocalNav label="Підключення магазину" items={items} />}
     {error && <Notice>{error}</Notice>}
     {!data && !error && <LoadingState label="Читаємо стан інтеграції…" />}
-    {data && <>{categoryWorkspace ? <section className="mc-integration-status" aria-label="Поточна інтеграція"><span><span>{deliveryText}</span> · <span>{operationalText}</span></span><button type="button" className="mc-field-link" aria-expanded={contextOpen} onClick={() => setContextOpen(!contextOpen)}>{contextOpen ? 'Сховати деталі' : 'Деталі інтеграції'}</button></section> : narrowLayout && <section className="magento-compact-context" aria-label="Поточна інтеграція">
-      <div><span>Поточна доставка</span><strong>{deliveryText}</strong><small>{operationalText}</small></div>
-      <div><span>Активні відповідності</span><strong>{publicationText}</strong></div>
-      <button type="button" className="magento-context-toggle" aria-expanded={contextOpen}
-        onClick={() => setContextOpen((value) => !value)}>{contextOpen ? 'Сховати деталі' : 'Деталі інтеграції'}</button>
-    </section>}
-    <div className={`magento-layout${narrowLayout ? ' is-narrow' : ''}`}>
-      <aside hidden={narrowLayout && !contextOpen} className={`magento-context card p-5${narrowLayout ? ' is-narrow-details' : ''}`}
-        aria-label={narrowLayout ? 'Деталі поточної інтеграції' : 'Поточна інтеграція'}>
-        {!narrowLayout && <div className="magento-context-summary"><div><h2 className="font-semibold">Поточна доставка</h2><p className="mt-2 text-sm">{deliveryText}</p>
-          <p className="mt-2 font-medium" role="status">{operationalText}</p><p className="mt-1 text-xs text-slate-500">За записами Amber.</p>
-        </div>
-        <div className="magento-active-publication"><h2 className="font-semibold">Активні відповідності</h2><p className="mt-1">{publicationText}</p>
-          {published && <p className="mt-1 text-sm text-slate-600">Опубліковано: {date(published.publishedAt)}{published.templateVersionNumber ? ` · Шаблон ${published.templateVersionNumber}` : ''}</p>}
-        </div></div>}
-        {(!narrowLayout || contextOpen) && <div className="magento-context-details">
-        <div>
-          {categoryWorkspace && <><p className="mc-mobile-description text-sm">Що передаємо з менеджера в магазин.</p><p className="text-sm">{publicationText}</p><button type="button" className="btn btn-outline btn-compact-md mt-2" onClick={() => setRefresh((value) => value + 1)}>Оновити стан</button></>}
-          {integration.draftCount > 0 && <p className="mt-2 text-sm">Є чернетки змін: {integration.draftCount}. Вони не змінюють поточну доставку.</p>}
-        </div>
-        <div className="border-t pt-4"><p className="text-sm font-medium" role="status">Остання перевірка структури Magento: {date(observedAt)}</p>
-          {observedAt && <p className="mt-1 text-xs text-slate-500">{useExplicit ? 'Явна перевірка в цьому сеансі.' : `Доступне збережене спостереження ${stored.state === 'draft' ? 'чернетки' : 'опублікованої версії'}.`} Не є перевіркою доставки товарів.</p>}
-          <button className="btn btn-outline btn-compact-md mt-3" disabled={checking || !integration.configured} onClick={discover}>Перевірити структуру</button>
-          {!integration.configured && <p className="mt-2 text-sm">Підключення Magento не налаштоване.</p>}
-          {checking && <LoadingState compact label="Перевіряємо структуру…" />}{checkError && <Notice>{checkError}</Notice>}
-          <MagentoStructureResult comparison={checkError ? null : observation?.comparison} activeId={published?.id} />
-        </div>
-        <MagentoDetails>{() => <div className="space-y-2 text-xs"><p>Знімок локальних даних: {date(integration.asOf)}</p><p className="break-all">Активний binding: {published?.id || '—'} · revision: {published?.revision || '—'}</p><p>Спостереження активної публікації: {date(published?.observedAt)}</p><p className="break-all">Джерело спостереження: {useExplicit ? 'Явний GET огляд Magento' : stored?.bindingId || '—'}</p></div>}</MagentoDetails>
-        <MagentoDetails summary="Історія дій">{() => <MagentoActionHistory />}</MagentoDetails>
-        </div>}
-      </aside>
-      <div className="min-w-0">
+    {data && <div className="min-w-0">
         <Suspense fallback={<LoadingState />}><Routes>
           <Route index element={<MagentoCategoryWorkspace categories={data.categories} activePublication={published} onPublished={() => setRefresh((value) => value + 1)} onObserve={discover} checking={checking} />} />
-          <Route path="overview" element={<MagentoOverview categories={data.categories} canManage={canManage} />} />
+          <Route path="overview" element={<MagentoOverview integration={integration} observation={observation} checking={checking} checkError={checkError} onCheck={discover} canManage={canManage} />} />
           <Route path="categories" element={<MagentoCategoryWorkspace categories={data.categories} activePublication={published} onPublished={() => setRefresh((value) => value + 1)} onObserve={discover} checking={checking} />} />
           <Route path="categories/new" element={<CategorySetup activePublication={published} />} />
           <Route path="categories/:categoryCode" element={<CategoryEntrance categories={data.categories} canManage={canManage} canViewProducts={canViewProducts} published={published} onPublished={() => setRefresh((value) => value + 1)} onObserve={discover} checking={checking} />} />
@@ -135,7 +79,6 @@ export default function MagentoIntegrationPage() {
           <Route path="configuration" element={<Navigate to="/admin/magento/prepare" replace />} />
           <Route path="*" element={<Notice>Розділ не знайдено. <Link to="/admin/magento">До огляду</Link></Notice>} />
         </Routes></Suspense>
-      </div>
-    </div></>}
+    </div>}
   </div></main>;
 }

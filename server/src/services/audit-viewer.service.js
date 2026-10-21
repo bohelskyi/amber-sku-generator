@@ -26,6 +26,7 @@ const COMMON_DETAIL_KEYS = new Set([
   'templateId', 'templateVersionId', 'previousTemplateVersionId', 'baseVersionId',
   'requestContract', 'attemptId', 'snapshotId', 'userId', 'epoch', 'revision',
   'draftRevision', 'revisionFrom', 'revisionTo', 'generationFrom', 'generationTo', 'implementation',
+  'publicSku', 'publicArticle', 'price',
 ]);
 
 const KNOWN_EVENT_PREFIXES = new Set([
@@ -96,6 +97,7 @@ function normalizeAuditFilters(query = {}) {
       field: 'subjectType', pattern: SUBJECT_TYPE_PATTERN, maxLength: 80,
     }),
     subjectId: normalizeOptionalString(query.subjectId, { field: 'subjectId', maxLength: 256 }),
+    article: normalizeOptionalString(query.article, { field: 'article', maxLength: 120 }),
   };
   if (filters.from && filters.to && filters.from > filters.to) {
     badRequest('INVALID_DATE_RANGE', 'from must not be after to');
@@ -198,13 +200,21 @@ function normalizeActor(row) {
 
 function normalizeAuditEvent(row) {
   const eventKey = String(row.event_key);
+  const details = normalizeDetails(eventKey, row.details);
+  const article = row.public_sku || details.publicSku || details.publicArticle;
+  const label = row.subject_type === 'product' ? article
+    : details.displayName || details.newDisplayName || details.label || details.name;
   return {
     eventKey,
     domain: eventKey.split('.')[0],
     occurredAt: new Date(row.occurred_at).toISOString(),
     actor: normalizeActor(row),
-    subject: { type: String(row.subject_type), id: String(row.subject_id) },
-    details: normalizeDetails(eventKey, row.details),
+    subject: { type: String(row.subject_type), id: String(row.subject_id),
+      ...(typeof label === 'string' && label ? { label, labelSource: row.public_sku ? 'stable_identity' : 'recorded' } : {}),
+      ...(row.subject_type === 'product' && typeof article === 'string' && article
+        ? { productArticle: article } : {}),
+    },
+    details,
   };
 }
 
@@ -223,6 +233,9 @@ async function getAuditEvents(query = {}, { databasePool = pool } = {}) {
   if (filters.actorId) where.push(`actor_user_id = ${add(filters.actorId)}`);
   if (filters.subjectType) where.push(`subject_type = ${add(filters.subjectType)}`);
   if (filters.subjectId) where.push(`subject_id = ${add(filters.subjectId)}`);
+  if (filters.article) where.push(`subject_type = 'product' AND EXISTS (
+    SELECT 1 FROM products p JOIN public_product_identities identity ON identity.id = p.public_product_identity_id
+    WHERE p.id::text = audit_events.subject_id AND identity.public_sku ILIKE ${add(`%${filters.article.replace(/[\\%_]/g, '\\$&')}%`)} ESCAPE '\\')`);
   if (cursor) {
     const occurredAtParam = add(cursor.occurredAt);
     const idParam = add(cursor.id);
@@ -230,12 +243,14 @@ async function getAuditEvents(query = {}, { databasePool = pool } = {}) {
   }
   const limitParam = add(limit + 1);
   const result = await databasePool.query(
-    `SELECT id, event_key, actor_user_id, actor_snapshot, subject_type, subject_id,
-            details, occurred_at
-     FROM audit_events
-     ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-     ORDER BY occurred_at DESC, id DESC
-     LIMIT ${limitParam}`,
+    `SELECT page.*, (SELECT identity.public_sku FROM products p
+       JOIN public_product_identities identity ON identity.id = p.public_product_identity_id
+       WHERE page.subject_type = 'product' AND p.id::text = page.subject_id) AS public_sku
+     FROM (SELECT id, event_key, actor_user_id, actor_snapshot, subject_type, subject_id, details, occurred_at
+       FROM audit_events
+       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+       ORDER BY occurred_at DESC, id DESC LIMIT ${limitParam}) page
+     ORDER BY occurred_at DESC, id DESC`,
     values
   );
   const hasMore = result.rows.length > limit;
@@ -251,11 +266,25 @@ async function getAuditEvents(query = {}, { databasePool = pool } = {}) {
   };
 }
 
+async function getAuditActors(query = {}, { databasePool = pool } = {}) {
+  const search = normalizeOptionalString(query.q, { field: 'q', maxLength: 120 });
+  if (!search || search.length < 2) return { items: [] };
+  const result = await databasePool.query(`SELECT DISTINCT ON (actor_user_id)
+      actor_user_id, actor_snapshot FROM audit_events
+    WHERE actor_user_id IS NOT NULL AND (
+      actor_snapshot->>'displayName' ILIKE $1 ESCAPE '\\' OR
+      actor_snapshot->>'preferredUsername' ILIKE $1 ESCAPE '\\')
+    ORDER BY actor_user_id, occurred_at DESC, id DESC LIMIT 20`,
+  [`%${search.replace(/[\\%_]/g, '\\$&')}%`]);
+  return { items: result.rows.map(normalizeActor) };
+}
+
 module.exports = {
   AuditViewerError,
   MAX_PAGE_SIZE,
   decodeCursor,
   getAuditEvents,
+  getAuditActors,
   normalizeAuditEvent,
   normalizeAuditFilters,
   normalizeDetails,

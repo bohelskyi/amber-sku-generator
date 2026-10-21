@@ -15,45 +15,44 @@ const shell = (path = '/admin/magento/overview', permissions = ['export_template
   <AuthContext.Provider value={{ permissions, roles }}><MemoryRouter initialEntries={[path]}><Routes><Route path="/admin/magento/*" element={<MagentoIntegrationPage />} /></Routes></MemoryRouter></AuthContext.Provider>);
 beforeEach(() => { vi.resetAllMocks(); api.get.mockResolvedValue({ data }); });
 
-it('separates active delivery from future preparation and loads only the lightweight overview', async () => {
-  shell(); await screen.findByText('Автоматичну синхронізацію увімкнено');
-  expect(screen.getByText('Зафіксованих проблем немає')).toBeTruthy();
-  expect(screen.getByText('Версія 3')).toBeTruthy();
-  expect(screen.getByText('Ще не підключено')).toBeTruthy();
+it('shows compact connection facts without category preparation noise or automatic Magento reads', async () => {
+  shell(); await screen.findByText('Увімкнено');
+  expect(screen.getByText('Налаштовано')).toBeTruthy();
+  expect(screen.getByText('Зафіксованих проблем товарів немає.')).toBeTruthy();
+  expect(screen.queryByText(/Версія 3/)).toBeNull();
+  expect(screen.queryByText('Ще не підключено')).toBeNull();
   expect(screen.queryByText('Готова категорія')).toBeNull();
-  expect(screen.queryByText('Категорія ще не готова до Magento')).toBeNull();
-  expect(screen.queryByText('Редактор відповідностей ще недоступний')).toBeNull();
+  expect(screen.queryByText('Нова категорія')).toBeNull();
   expect(api.get.mock.calls.map(([path]) => path)).toEqual(['/admin/magento-integration/overview']);
   expect(api.post).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('link', { name: 'Усі категорії' }));
-  expect(await screen.findByRole('link', { name: /Готова категорія/ })).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'Відкрити Каталог' }).getAttribute('href')).toBe('/admin/catalog');
+  fireEvent.click(screen.getByText('Технічні дані підключення'));
+  expect(screen.getByText(/Версія 3/)).toBeTruthy();
 });
 
-it('discovery is explicit and failed checks retain the prior factual observation without age warnings', async () => {
-  shell(); await screen.findByText('Версія 3');
-  const stored = screen.getByText(/Остання перевірка структури Magento:/).textContent;
-  expect(stored).not.toContain('02.10.26');
-  api.post.mockRejectedValueOnce({ response: { data: { error: 'Magento недоступний' } } });
-  fireEvent.click(screen.getByRole('button', { name: 'Перевірити структуру' }));
-  await screen.findByText('Magento недоступний');
-  expect(screen.getByText(/Остання перевірка структури Magento:/).textContent).toBe(stored);
-  expect(screen.getByText('Зафіксованих проблем немає')).toBeTruthy();
-  expect(screen.queryByText(/застаріл|7 днів/i)).toBeNull();
+it('a configured store has no claimed live connection until an explicit successful check', async () => {
+  shell(); await screen.findByText('Налаштовано');
+  expect(screen.getByText('Ще не перевірено')).toBeTruthy();
   api.post.mockResolvedValueOnce({ data: { observedAt: '2026-10-02T14:32:00Z', schema: { attributes: [] }, categories: [] } });
-  fireEvent.click(screen.getByRole('button', { name: 'Перевірити структуру' }));
-  await screen.findByText(/Явна перевірка в цьому сеансі/);
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити підключення' }));
+  await screen.findByText(/Magento відповів/);
+  const observed = screen.getByText('Перевірка в цьому сеансі').nextElementSibling.textContent;
+  api.post.mockRejectedValueOnce({ response: { data: { error: 'Magento недоступний' } } });
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити підключення' }));
+  await screen.findByText(/Magento недоступний/);
+  expect(screen.getByText('Перевірка в цьому сеансі').nextElementSibling.textContent).toBe(observed);
+  expect(screen.queryByText(/Magento відповів/)).toBeNull();
   expect(api.post.mock.calls).toEqual([['/admin/magento-integration/structure-check', {}], ['/admin/magento-integration/structure-check', {}]]);
 });
 
 it('does not turn unknown evidence into zero problems or Administrator authority', async () => {
   api.get.mockResolvedValue({ data: { ...data, integration: { ...data.integration, delivery: { state: 'unknown' }, operational: { state: 'unavailable', count: null } } } });
-  shell('/admin/magento', ['export_templates.view', 'export_templates.manage', 'export_templates.publish']);
-  await screen.findByText('Стан автоматичної синхронізації невідомий');
-  expect(screen.getByText('Дані про зафіксовані проблеми недоступні')).toBeTruthy();
-  expect(screen.queryByText('Зафіксованих проблем немає')).toBeNull();
-  expect(screen.queryByRole('link', { name: 'Дії Адміністратора' })).toBeNull();
-  fireEvent.click(screen.getByText('Інші розділи'));
-  expect(screen.getByRole('link', { name: 'Підготовлені зміни' })).toBeTruthy();
+  shell('/admin/magento/overview', ['export_templates.view', 'export_templates.manage', 'export_templates.publish']);
+  await screen.findByText('Стан невідомий');
+  expect(screen.getByText('Дані про проблеми товарів недоступні.')).toBeTruthy();
+  expect(screen.queryByText('Зафіксованих проблем товарів немає.')).toBeNull();
+  expect(screen.queryByRole('link', { name: 'Службові операції' })).toBeNull();
+  expect(screen.getByRole('link', { name: 'Продовжити зміни (1)' })).toBeTruthy();
 });
 
 it('mounts only issue rows; all mappings start collapsed and page an opened group', async () => {
@@ -123,14 +122,15 @@ it('late local overview responses cannot overwrite a newer refresh', async () =>
   let resolveOld;
   api.get.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve; })).mockResolvedValue({ data });
   shell(); fireEvent.click(screen.getByRole('button', { name: 'Оновити стан' }));
-  await screen.findByText('Версія 3');
+  await screen.findByText('Увімкнено');
+  fireEvent.click(screen.getByText('Технічні дані підключення'));
   await act(async () => resolveOld({ data: { ...data, integration: { ...data.integration, activePublication: null } } }));
-  expect(screen.getByText('Версія 3')).toBeTruthy();
+  expect(screen.getByText(/Версія 3/)).toBeTruthy();
 });
 
 it('on focus refreshes only local integration counters and never performs a remote check', async () => {
-  api.get.mockResolvedValue({ data }); shell('/admin/magento');
-  await screen.findByText('Автоматичну синхронізацію увімкнено');
+  api.get.mockResolvedValue({ data }); shell('/admin/magento/overview');
+  await screen.findByText('Увімкнено');
   const before = api.get.mock.calls.filter(([url]) => url === '/admin/magento-integration/overview').length;
   fireEvent(window, new Event('focus'));
   await vi.waitFor(() => expect(api.get.mock.calls.filter(([url]) => url === '/admin/magento-integration/overview').length).toBe(before + 1));

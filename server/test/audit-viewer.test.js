@@ -5,6 +5,7 @@ const {
   AuditViewerError,
   MAX_PAGE_SIZE,
   getAuditEvents,
+  getAuditActors,
   normalizeAuditEvent,
   normalizeAuditFilters,
   normalizeDetails,
@@ -27,7 +28,7 @@ function row(id, overrides = {}) {
 test('audit viewer validates filters and requires a subject type for subject IDs', () => {
   assert.deepEqual(normalizeAuditFilters({ domain: 'product', actorId: '7' }), {
     from: null, to: null, eventKey: null, domain: 'product', actorId: 7,
-    subjectType: null, subjectId: null,
+    subjectType: null, subjectId: null, article: null,
   });
   for (const query of [
     { domain: 'Product!' },
@@ -37,6 +38,42 @@ test('audit viewer validates filters and requires a subject type for subject IDs
     { from: '2026-09-10' },
     { from: '2026-09-11T00:00:00Z', to: '2026-09-10T00:00:00Z' },
   ]) assert.throws(() => normalizeAuditFilters(query), AuditViewerError);
+});
+
+test('audit actor lookup uses recorded snapshots, bounded literal search and no user directory', async () => {
+  const calls = [];
+  const databasePool = { query: async (sql, values) => {
+    calls.push({ sql, values });
+    return { rows: [row(1)] };
+  } };
+  assert.deepEqual(await getAuditActors({ q: 'a' }, { databasePool }), { items: [] });
+  assert.equal(calls.length, 0);
+  const result = await getAuditActors({ q: 'Hist%_' }, { databasePool });
+  assert.equal(result.items[0].displayName, 'Historical Name');
+  assert.match(calls[0].sql, /FROM audit_events/);
+  assert.match(calls[0].sql, /LIMIT 20/);
+  assert.doesNotMatch(calls[0].sql, /application_users/);
+  assert.deepEqual(calls[0].values, ['%Hist\\%\\_%']);
+});
+
+test('audit subject identifies immutable public article without relabelling actor history', () => {
+  const event = normalizeAuditEvent(row(1, { public_sku: 'AG-000001' }));
+  assert.equal(event.subject.productArticle, 'AG-000001');
+  assert.equal(event.subject.labelSource, 'stable_identity');
+  assert.equal(event.actor.displayName, 'Historical Name');
+  assert.equal(normalizeAuditEvent(row(2)).subject.productArticle, undefined);
+});
+
+test('audit product search is literal, filter-bound and parameterized', async () => {
+  const calls = [];
+  const databasePool = { query: async (sql, values) => {
+    calls.push({ sql, values }); return { rows: [row(3), row(2)] };
+  } };
+  const result = await getAuditEvents({ article: "AG_%'", limit: 1 }, { databasePool });
+  assert.ok(calls[0].values.includes("%AG\\_\\%'%"));
+  assert.doesNotMatch(calls[0].sql, /AG_/);
+  await assert.rejects(getAuditEvents({ article: 'AG-2', cursor: result.page.nextCursor }, { databasePool }),
+    (error) => error.code === 'INVALID_CURSOR');
 });
 
 test('audit viewer normalizes immutable snapshot actors and explicit missing profile attribution', () => {

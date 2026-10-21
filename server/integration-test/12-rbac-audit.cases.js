@@ -1324,6 +1324,10 @@ test('global audit viewer enforces audit.view and returns safe deterministic fil
   assert.equal(denied.response.status, 403, denied.text);
   assert.equal(denied.data.code, 'INSUFFICIENT_PERMISSION');
 
+  for (const [authentication, expected] of [[null, 401], [managerSession, 403], [pendingSession, 403], [disabledSession, 403]]) {
+    assert.equal((await request('/api/admin/audit-events/actors?q=Admin', { authentication })).response.status, expected);
+  }
+
   const occurredAt = '2099-01-01T12:00:00.000Z';
   const fixtures = [
     ['application_user.role_changed', 'application_user', '501', { previousRole: { displayName: 'Manager' }, newRole: { displayName: 'Storekeeper' } }],
@@ -1381,6 +1385,15 @@ test('global audit viewer enforces audit.view and returns safe deterministic fil
   assert.equal(allItems.every((event) => !Object.hasOwn(event, 'id')), true);
   assert.equal(allItems.every((event) => event.actor.displayName !== 'Mutated Current Name'), true);
   assert.equal(allItems.find((event) => event.eventKey === 'product.created').actor.displayName, 'Historical Audit Admin');
+  const actors = await request('/api/admin/audit-events/actors?q=Historical%20Audit', { authentication: adminSession });
+  assert.equal(actors.response.status, 200, actors.text);
+  assert.ok(actors.data.items.some((item) => item.id === actorUserId && item.displayName === 'Historical Audit Admin'));
+  assert.ok(actors.data.items.length <= 20);
+  const literalActors = await request('/api/admin/audit-events/actors?q=%25_', { authentication: adminSession });
+  assert.deepEqual(literalActors.data.items, []);
+  const literalArticles = await request('/api/admin/audit-events?article=%25_', { authentication: adminSession });
+  assert.equal(literalArticles.response.status, 200, literalArticles.text);
+  assert.deepEqual(literalArticles.data.items, []);
   assert.equal(allItems.find((event) => event.eventKey === 'future_domain.future_action').actor.status, 'recorded_reference');
   assert.deepEqual(allItems.find((event) => event.eventKey === 'future_domain.future_action').details, {});
   assert.deepEqual(allItems.find((event) => event.eventKey === 'product.created').details, { fullSku: 'AU-EXACT-503' });

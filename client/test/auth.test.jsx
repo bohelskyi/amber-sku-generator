@@ -201,7 +201,7 @@ describe('authentication bootstrap and gate', () => {
 
     await screen.findByText('Доступ очікує підтвердження');
     expect(screen.queryByText('Business application')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Вийти' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Увійти іншим обліковим записом' }));
     await waitFor(() => expect(apiClient.post).toHaveBeenCalledWith('/auth/logout'));
     expect(locationObject.assign).toHaveBeenCalledWith('/');
   });
@@ -935,8 +935,8 @@ describe('permission-aware business UI', () => {
     expect(get).toHaveBeenCalledWith('/admin/prices/BR');
     expect(screen.queryByRole('button', { name: 'Дублювати сценарій' })).toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Модифікатори' }));
-    expect(await screen.findByText('Модифікатор ×1.2')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Націнки та знижки' }));
+    expect(await screen.findByRole('heading', { name: 'Націнка 20%' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /Редагувати/ })).toBeNull();
   });
 

@@ -43,7 +43,7 @@ attributes.push({ code: 'texture', target: 'texture', label: 'Фактура м�
 const projection = (rowId) => ({ category, revision, template: { definition, versionId: revision.templateVersionId },
   groupIndex: 0, rowIndex: rowId === 'english' ? 1 : 0, observedAt: '2026-10-01T00:00:00Z', routeKey: 'BR:all', routes: [{ routeKey: 'BR:all', setName: 'Браслети' }],
   questions: config.questions.BR.map((question) => ({ ...question, uses: question.id === 'color' ? [{ target: 'kolir', rowId: 'base' }] : [] })), attributes, unboundCount: 0 });
-let created = false, previewFamily = null, overviewUnavailable = false;
+let created = false, overviewUnavailable = false;
 const server = http.createServer(async (request, response) => {
   const url = new URL(request.url, 'http://fixture');
   if (url.pathname.startsWith('/api/')) {
@@ -63,9 +63,8 @@ const server = http.createServer(async (request, response) => {
       case 'GET /api/admin/magento-integration': data = { revision: { ...revision, schema: { attributeSets: [{ attribute_set_id: 1, attribute_set_name: 'Браслети', attributeCodes: ['texture'] }], attributes: [{ attribute_code: 'texture', default_frontend_label: 'Фактура магазину', frontend_input: 'select' }] }, bindings: { routes: [{ routeKey: 'BR:all', setId: 1 }] } } }; break;
       case 'POST /api/admin/question': assert.equal(created, false); assert.equal(body.label, 'Фактура'); assert.equal(Object.hasOwn(body, 'key'), false); created = true; config.questions.BR.push({ ...body, id: 'q_exact_server', q_db_id: 901, options: [] }); data = { id: 901, key: 'q_exact_server' }; break;
       case 'GET /api/admin/export-templates/sample-products': data = { products: [{ id: 21, category: 'BR', public_sku: 'AG-000021', status: 'active' }], nextOffset: null }; break;
-      case 'POST /api/admin/export-templates': previewFamily = { id: 'example', draft: { revision: '1', definitionHash: 'example-hash', definition: body.definition } }; data = previewFamily; break;
-      case 'POST /api/admin/export-templates/example/test-preview':
-        assert.deepEqual(body.productIds, [21]); data = { revision: '1', definitionHash: 'example-hash', result: { artifacts: [{ groupCode: 'BR', csvContent: 'store_view_code,name\n,Браслет: приклад UA\nen,Bracelet: EN example\n' }], errors: [] } }; break;
+      case 'POST /api/admin/export-templates/evaluate-example':
+        assert.deepEqual(body.productIds, [21]); assert.ok(body.definition); data = { result: { artifacts: [{ groupCode: 'BR', csvContent: 'store_view_code,name\n,Браслет: приклад UA\nen,Bracelet: EN example\n' }], errors: [] } }; break;
       case 'POST /api/admin/magento-integration/discovery': data = { observedAt: '2026-10-15T12:00:00Z', categories: [
         { categoryId: 8, path: 'Default/Браслети', normalizedPath: 'Default/Браслети', comparable: true },
         { categoryId: 9, path: 'Default/Нові браслети', normalizedPath: 'Default/Нові браслети', comparable: true },
@@ -166,12 +165,14 @@ try {
   assert.equal(requests.filter((item) => item.method !== 'GET').length, 1, 'Opening and paging mappings cannot mutate');
   checks.push({ createdCharacteristic: 'q_exact_server', localReceipt: 'retained', mapping: 'existing attribute; 25 per page; search resets page; no mutation' });
   await navigate('/admin/catalog?category=BR&tab=text&field=name');
-  await wait("document.body.textContent.includes('Приклад на товарі')");
+  await wait("!!document.querySelector('[aria-label=\"Приклад тексту\"]')");
   await setField('Пошук за артикулом або внутрішнім SKU', 'AG-21'); await wait("document.body.textContent.includes('Обрати AG-000021')"); await click('Обрати AG-000021');
   await click('Оновити приклад'); await wait("!!document.querySelector('[aria-label=\"Приклад UA\"]')");
   assert.equal(await evaluate("document.querySelector('[aria-label=\"Приклад UA\"]').textContent.includes('Браслет: приклад UA') && document.querySelector('[aria-label=\"Приклад EN\"]').textContent.includes('Bracelet: EN example')"), true);
   await noOverflow('Text example overflow 360px'); await evaluate("document.querySelector('[aria-label=\"Приклад EN\"]').scrollIntoView({block:'center'})"); await screenshot('text-example-360');
-  checks.push({ textPreview: 'server fixture UA and EN, exact product, isolated unpublished family' });
+  assert.equal(requests.some((item) => item.path === '/api/admin/export-templates' && item.method === 'POST'), false, 'Examples cannot create template families');
+  assert.equal(await evaluate("!!document.querySelector('[aria-label=\"Приклад тексту\"] input[type=search]')"), false, 'Chosen example keeps one compact product control');
+  checks.push({ textPreview: 'server fixture UA and EN, exact product, no template mutations' });
   overviewUnavailable = true; const writesBeforeOffline = requests.filter((item) => item.method !== 'GET').length;
   await navigate('/admin/catalog?category=BR'); await wait("document.body.textContent.includes('Налаштування магазину недоступні')"); await click('Фактура');
   await wait("!![...document.querySelectorAll('label')].find(label=>label.childNodes[0]?.textContent==='Назва характеристики')?.querySelector('input')");
@@ -187,7 +188,7 @@ try {
   await noOverflow('Placement table overflow 360px'); await screenshot('placement-table-360');
   checks.push({ placement: 'exact existing table row edited locally, no publication' });
   assert.deepEqual(unexpected, []); assert.deepEqual(blockedExternal, []); assert.deepEqual(browserErrors, []);
-  const allowedWrites = ['/api/admin/question', '/api/admin/export-templates', '/api/admin/export-templates/example/test-preview', '/api/admin/magento-integration/discovery'];
+  const allowedWrites = ['/api/admin/question', '/api/admin/export-templates/evaluate-example', '/api/admin/magento-integration/discovery'];
   assert.deepEqual(requests.filter((item) => item.method !== 'GET' && !allowedWrites.includes(item.path)), []);
   console.log(JSON.stringify({ result: 'passed', authentication: 'fixture only; no real login or human acceptance', checks, requestCount: requests.length, runtimeErrors: browserErrors.length, externalRequests: blockedExternal.length, artifacts: directory }));
 } finally {

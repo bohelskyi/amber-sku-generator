@@ -1,11 +1,8 @@
-import {
-  CircleDollarSign,
-  FilePenLine,
-} from 'lucide-react';
+import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../auth/auth-context.js';
 import { RepricingRecountDrawer } from '../components/app/RepricingRecountDrawer';
-import { Button, LoadingState, Notice, PageHeader } from '../components/ui/index.js';
+import { LoadingState, Notice, PageHeader } from '../components/ui/index.js';
 import { RepricingBatchHistory } from '../components/repricing/RepricingBatchHistory';
 import {
   ConfirmDialog,
@@ -17,8 +14,10 @@ import { RepricingWorkspace } from '../components/repricing/RepricingWorkspace';
 import { useRepricingController } from '../hooks/repricing/useRepricingController';
 import { getPermissionUiState } from '../lib/permission-ui.js';
 import '../components/workspace/workspace.css';
+import '../components/repricing/repricing.css';
 
 export default function RepricingPage() {
+  const [preparationScope, setPreparationScope] = useState('global');
   const auth = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedView = searchParams.get('view');
@@ -58,21 +57,7 @@ export default function RepricingPage() {
         {controller.applying && <LoadingState label="Застосовуємо нові ціни…" />}
         <PageHeader
           breadcrumbs={[{ label: 'Ціни' }, { label: 'Переоцінка' }]}
-          title="Масова переоцінка"
-          description="Підготуйте й перевірте повний набір змін, збережіть чернетку та застосуйте ціни однією операцією."
-          actions={<>
-            {auth.permissions.includes('repricing.prepare') && <Button
-              variant="amber"
-              onClick={prepareGlobal}
-              disabled={controller.previewing}
-              title={controller.globalDraft ? 'Продовжити збережену загальну чернетку' : undefined}
-            >
-              {controller.globalDraft
-                ? <FilePenLine size={16} />
-                : <CircleDollarSign size={16} />}
-              Підготувати переоцінку
-            </Button>}
-          </>}
+          title="Переоцінка"
         />
 
         <nav className="local-workspace-nav" aria-label="Розділи переоцінки">
@@ -93,6 +78,9 @@ export default function RepricingPage() {
           canPrepareRepricing={auth.permissions.includes('repricing.prepare')}
           mayApplyRepricing={mayApplyRepricing}
           onBuildPreview={prepareSelected}
+          onBuildGlobal={prepareGlobal}
+          preparationScope={preparationScope}
+          onPreparationScope={setPreparationScope}
           onOpenPrepare={() => setView('prepare')}
           onOpenReview={() => setView('review')}
           view={view}

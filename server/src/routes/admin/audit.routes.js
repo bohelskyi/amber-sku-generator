@@ -1,9 +1,17 @@
 const express = require('express');
-const { AuditViewerError, getAuditEvents } = require('../../services/audit-viewer.service');
+const { AuditViewerError, getAuditEvents, getAuditActors } = require('../../services/audit-viewer.service');
 const { requirePermission } = require('../../auth/authorization');
 const { sendHttpError } = require('../../http/errors');
 
 const router = express.Router();
+
+router.get('/admin/audit-events/actors', requirePermission('audit.view'), async (req, res) => {
+  try { res.json(await getAuditActors(req.query || {})); }
+  catch (error) {
+    return sendHttpError(res, error, { defaultMessage: 'Audit actor lookup failed', includeCode: true,
+      isExpected: (candidate) => candidate instanceof AuditViewerError });
+  }
+});
 
 router.get('/admin/audit-events', requirePermission('audit.view'), async (req, res) => {
   try {

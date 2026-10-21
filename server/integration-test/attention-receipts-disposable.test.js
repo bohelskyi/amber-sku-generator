@@ -125,6 +125,59 @@ test('attention confirmation timestamps require exact PostgreSQL delivery receip
       await db.query('UPDATE magento_product_sync_requests SET public_product_identity_id=$2 WHERE product_id=$1', [product.id, other.public_product_identity_id]);
       await check(product, null);
     });
+    await t.test('cause groups count the whole queue, distinguish semantic identities and read exact bounded members without writes', async () => {
+      const groups = require('../src/services/magento/problem-groups');
+      const beforeGroups = await groups.groupPage(config, {}, db);
+      const products = await Promise.all([makeProduct(), makeProduct(), makeProduct(), makeProduct()]);
+      const context = value => ({ kind: 'semantic_option', bindingRevisionId: publication.id, category: 'KL',
+        routeKey: 'KL.base', target: 'color', question: 'ux-color', value });
+      const mapping = value => ({ code: 'OPTION_BINDING_REVIEW_REQUIRED', target: 'color', question: 'ux-color', value,
+        causeContext: context(value) });
+      const diagnostics = [[mapping('0'), mapping('0'), { code: 'FIRST_SYNC_FIELD_CONFLICT', target: 'weight', scope: 'all' }],
+        [mapping('0')], [mapping('1')], [{ code: 'OPTION_BINDING_REVIEW_REQUIRED', target: 'color', question: 'ux-color', value: '0' }]];
+      const placements = [
+        { path: 'Прикраси/Кулони', routeKey: 'KL.base' },
+        { path: 'Прикраси/Кулони', routeKey: 'KL.base' },
+        { path: 'Подарунки/Кулони', routeKey: 'KL.base' },
+        { path: 'Прикраси/Кулони', routeKey: 'KL.gifts' },
+      ];
+      diagnostics.forEach((entries, index) => entries.push({ code: 'CATEGORY_PATH_MISSING', target: 'categories', ...placements[index] }));
+      for (const [index, product] of products.entries()) await db.query(`UPDATE magento_product_sync_requests SET state='needs_attention',
+        reason_code='data_or_binding',diagnostics=$2::jsonb WHERE product_id=$1`, [product.id, JSON.stringify(diagnostics[index])]);
+      const before = await snapshot();
+      const client = await db.connect();
+      try {
+        await client.query('BEGIN READ ONLY');
+        const all = await groups.groupPage(config, { limit: 100 }, client);
+        assert.equal(all.summary.productCount, beforeGroups.summary.productCount + 4, 'Each product counts once across causes');
+        const zero = all.items.find(group => group.problem.causeContext?.value === '0');
+        const one = all.items.find(group => group.problem.causeContext?.value === '1');
+        assert.equal(zero.productCount, 2); assert.equal(zero.diagnosticCount, 3);
+        assert.equal(zero.sharedConfiguration, true); assert.notEqual(zero.id, one.id);
+        const legacy = all.items.find(group => group.problem.code === 'OPTION_BINDING_REVIEW_REQUIRED' && !group.problem.causeContext);
+        assert.equal(legacy.sharedConfiguration, false); assert.equal(legacy.productCount, 1);
+        const placementGroups = all.items.filter(group => group.problem.code === 'CATEGORY_PATH_MISSING');
+        assert.equal(placementGroups.length, 3, 'Different target paths or routes never share a sampled repair destination');
+        assert.deepEqual(placementGroups.map(group => group.productCount).sort(), [1, 1, 2]);
+        assert.equal(new Set(placementGroups.map(group => group.id)).size, 3);
+        for (const group of placementGroups) {
+          assert.equal(group.sharedConfiguration, false, 'Path evidence does not invent semantic source provenance');
+          const page = await groups.groupProducts(config, group.id, {}, client);
+          assert.equal(page.items.every(member => member.groupProblem.path === group.problem.path && member.groupProblem.routeKey === group.problem.routeKey), true);
+        }
+        const page = await groups.groupPage(config, { limit: 1 }, client);
+        assert.equal(page.items.length, 1); assert.equal(page.summary.productCount, all.summary.productCount);
+        assert.equal(page.pageInfo.total, all.pageInfo.total);
+        const members = await groups.groupProducts(config, zero.id, { limit: 1 }, client);
+        const next = await groups.groupProducts(config, zero.id, { limit: 1, offset: 1 }, client);
+        assert.equal(members.pageInfo.total, 2); assert.equal(members.pageInfo.hasNext, true);
+        assert.deepEqual(new Set([members.items[0].productId, next.items[0].productId]), new Set(products.slice(0, 2).map(product => product.id)));
+        assert.equal(members.items[0].groupProblem.value, '0');
+        assert.equal((await groups.groupPage(config, { search: '%_' }, client)).summary.productCount, 0);
+        await client.query('COMMIT');
+      } finally { await client.query('ROLLBACK'); client.release(); }
+      assert.deepEqual(await snapshot(), before, 'Grouping never changes requests, products, jobs or receipts');
+    });
   } finally {
     if (db) await db.end();
     if (created) {
