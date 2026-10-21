@@ -1,0 +1,6 @@
+.pricing-rule-details { padding: 0 20px; }
+.pricing-rule-details > summary { color: var(--text-muted); cursor: pointer; min-height: 36px; padding-top: 8px; }
+.pricing-matrix-panel .pricing-matrix-heading { margin-bottom: 8px; }
+.pricing-master-row-meta, .pricing-matrix-heading > span, .pricing-master-list .pricing-master-row strong { font-size: 14px; }
+.pricing-matrix-table input[aria-invalid=true] { outline: 2px solid #b91c1c; outline-offset: -2px; }
+@media (max-width: 639px) { .pricing-rule-details > summary { min-height: 44px; } }

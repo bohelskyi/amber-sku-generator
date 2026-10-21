@@ -12,7 +12,14 @@ const problem = { code: 'AMBER_SYNC_ELIGIBILITY_UNRESOLVED', resolution: 'lifecy
     lifecycleRoute: 'hold', holdReason: 'historical_ambiguity', primaryReason: 'INFERRED_HISTORY_WITHOUT_EXACT_MEMBERSHIP',
     classification: 'historical_ambiguous', sourceCorrectionId: 1509, ancestorProductIds: [1368], deliveryVersion: '1' } };
 const permissions = ['products.view', 'products.decode', 'history.view', 'export_templates.view'];
-const shell = (element, capabilities) => render(<AuthContext.Provider value={{ permissions: capabilities }}><MemoryRouter>{element}</MemoryRouter></AuthContext.Provider>);
+const shell = (element, capabilities) => {
+  const implementation = api.get.getMockImplementation();
+  if (implementation) api.get.mockImplementation(async (url, ...args) => {
+    const result = await implementation(url, ...args);
+    return url === '/magento/problems/5033' && result?.data?.items ? { data: result.data.items[0] } : result;
+  });
+  return render(<AuthContext.Provider value={{ permissions: capabilities }}><MemoryRouter initialEntries={['/attention?problem=5033']}>{element}</MemoryRouter></AuthContext.Provider>);
+};
 beforeEach(() => vi.resetAllMocks());
 afterEach(cleanup);
 
@@ -55,6 +62,7 @@ it('actual mapping problem opens exact field while resource configuration opens 
   expect(mapping.pathname).toBe('/admin/catalog');
   expect(Object.fromEntries(mapping.searchParams)).toMatchObject({ category: 'SV', field: 'kamin_obrobka', productId: '5033', view: 'attributes', returnTo: '/attention?problem=5033' });
   fireEvent.click(screen.getByText('Інші перешкоди (1)', { selector: 'summary' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Налаштувати атрибут Magento' }));
   expect(screen.getByRole('link', { name: 'Налаштувати атрибут Magento' }).getAttribute('href')).toContain('/admin/catalog?view=attributes');
   expect(api.post).not.toHaveBeenCalled();
 });

@@ -4,11 +4,11 @@ import { useAuth } from '../../auth/auth-context.js';
 import { isActualAdministrator } from '../../auth/auth-model.js';
 import { ProductNameConflict } from '../app/ProductNameConflict.jsx';
 import { ProductMagentoAttention } from '../app/ProductMagentoAttention.jsx';
-import { TechnicalDisclosure } from '../ui/index.js';
+import { Button, TechnicalDisclosure } from '../ui/index.js';
 import { MagentoRecovery, ProductResync } from './MagentoRecovery.jsx';
 import MagentoProductDiagnosis from './MagentoProductDiagnosis.jsx';
 import MagentoFirstSyncFields from './MagentoFirstSyncFields.jsx';
-import { attentionProblemGroups, isFirstSyncFieldsProblem, needsDeliveryRecovery, nextAction, problemImpact, problemRepairUrl, problemSubject, problemTitle, PRODUCT_FIELD_LABELS } from './sync-problem-presentation.js';
+import { attentionProblemGroups, isFirstSyncFieldsProblem, needsDeliveryRecovery, nextAction, problemImpact, problemRepairUrl, problemSubject, problemTaskKey, problemTitle, PRODUCT_FIELD_LABELS } from './sync-problem-presentation.js';
 
 function ProblemFacts({ problem }) {
   const subject = problemSubject(problem);
@@ -25,19 +25,26 @@ function ProblemFacts({ problem }) {
   </>;
 }
 
-export default function AttentionProblemDetail({ product, productUrl, returnTo, onSaved, onRepairCharacteristics }) {
+export default function AttentionProblemDetail({ product, productUrl, returnTo, onSaved, onRepairCharacteristics, taskContext, onSelectTask }) {
   const auth = useAuth(); const { permissions } = auth;
   const [recoveryEvidence, setRecoveryEvidence] = useState(null);
   const [comparisonEvidence, setComparisonEvidence] = useState(null);
-  const groups = attentionProblemGroups(product.problems);
-  const main = groups[0]?.problem;
-  const firstSyncProblem = groups.find(({ problem }) => isFirstSyncFieldsProblem(problem))?.problem;
+  const [activeTask, setActiveTask] = useState(null);
+  const [extraFirstSync, setExtraFirstSync] = useState(false);
+  const groups = attentionProblemGroups([...product.problems,
+    ...(product.nameConflict && !product.problems.some(problem => problem.resolution === 'name')
+      ? [{ code: 'NAME_CONFLICT', resolution: 'name', message: 'Назви Amber і Magento потребують узгодження.' }] : [])]);
+  const contextual = taskContext?.key ? groups.filter(({ problem }) => problemTaskKey(problem) === taskContext.key)
+    : taskContext?.code ? groups.filter(({ problem }) => problem.code === taskContext.code
+    && (problem.target || problem.field || '') === taskContext.field && (problem.scope || '') === taskContext.scope) : [];
+  const activeGroup = taskContext ? (contextual.length === 1 ? contextual[0] : null) : groups.find(group => group.key === activeTask) || groups[0];
+  const main = activeGroup?.problem;
   const canReviewFirstSync = auth.principalLifetime?.valid === true && isActualAdministrator(auth)
     && ['export_templates.view', 'export_templates.manage', 'export_templates.publish', 'exports.view'].every((permission) => permissions.includes(permission));
   const exactFirstSyncContext = typeof product.article === 'string' && product.article.length > 0 && product.article.length <= 256
     && product.article === product.article.trim() && !Array.from(product.article).some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127);
   const firstSyncPanel = <MagentoFirstSyncFields key={JSON.stringify([product.productId, product.article, product.bindingRevisionId, product.observedAt])}
-    sku={product.article} bindingRevisionId={product.bindingRevisionId} onChange={() => onSaved?.('first_sync_fields')} />;
+    sku={product.article} bindingRevisionId={product.bindingRevisionId} returnTo={returnTo} onChange={() => onSaved?.('first_sync_fields')} />;
   const recovery = groups.some(({ problem }) => needsDeliveryRecovery(problem));
   const identityProblem = (main?.diagnosticCode || main?.code) === 'NAME_REMOTE_IDENTITY_CHANGED';
   const canCompare = permissions.includes('export_templates.manage') && permissions.includes('exports.view');
@@ -51,9 +58,7 @@ export default function AttentionProblemDetail({ product, productUrl, returnTo, 
     if (isFirstSyncFieldsProblem(problem)) {
       if (!canReviewFirstSync) return <p className="sync-problem-guidance">Передайте артикул і причини Адміністратору з дозволами на перевірку та застосування правил Magento.</p>;
       if (!exactFirstSyncContext) return <p className="sync-problem-guidance">Точний артикул ще не підтверджено. Оновіть стан товару перед перевіркою полів.</p>;
-      return problem === firstSyncProblem
-        ? firstSyncPanel
-        : <p className="sync-problem-guidance">Це поле перевіряється у спільній панелі першого отримання для цього товару.</p>;
+      return firstSyncPanel;
     }
     if (problem.code === 'unexpected_failure') {
       if (recovery) return <p className="sync-problem-guidance">Спочатку перевірте попередню операцію у процедурі відновлення вище.</p>;
@@ -80,30 +85,28 @@ export default function AttentionProblemDetail({ product, productUrl, returnTo, 
   }
 
   return <div className="sync-problem-detail-body">
-    {main && <section className="sync-start-task" aria-label="З чого почати">
-      <p className="sync-problem-guidance">Збережена діагностика{product.observedAt ? ` · ${new Date(product.observedAt).toLocaleString('uk-UA')}` : ' · час фіксації не підтверджено'}. Вона описує попередню перевірку; актуальні поля перевіряються окремо.</p>
+    {!main && taskContext && <p className="sync-problem-guidance">Вибрану причину не підтверджено в поточному стані товару. Оберіть доступну перешкоду нижче.</p>}
+    {extraFirstSync ? <section className="sync-start-task"><Button size="compactMd" onClick={() => setExtraFirstSync(false)}>Повернутися до причини</Button>{firstSyncPanel}</section> : main && <section key={activeGroup.key} className="sync-start-task" aria-label="З чого почати">
       <h3>{problemTitle(main)}</h3>
       <p className="sync-problem-guidance">{problemImpact(main)}</p>
-      <ProblemFacts problem={main} />
+      {!isFirstSyncFieldsProblem(main) && <ProblemFacts problem={main} />}
       {needsDeliveryRecovery(main) && !canOpenRecovery && <p className="sync-problem-guidance">Потрібне узгодження Адміністратора або відповідального оператора з дозволом на відновлення доставки. Скопіюйте опис проблеми та передайте йому.</p>}
       {needsDeliveryRecovery(main) && canOpenRecovery && <MagentoRecovery guided productId={product.productId} categoryCode={product.category} onTechnicalEvidence={setRecoveryEvidence} onSaved={() => onSaved('recovery')} />}
       {identityProblem && canCompare ? <MagentoProductDiagnosis product={product} returnTo={returnTo} identityOnly onTechnicalEvidence={setComparisonEvidence} /> : repair(main)}
       {main.resolution === 'name' && <ProductNameConflict productId={product.productId} available={Boolean(product.nameConflict)} onSaved={onSaved} />}
     </section>}
-    {!firstSyncProblem && canReviewFirstSync && exactFirstSyncContext && firstSyncPanel}
-    {groups.length > 1 && <details className="ui-technical-disclosure">
-      <summary>Інші перешкоди ({groups.length - 1})</summary>
+    {(groups.length > (main ? 1 : 0) || !isFirstSyncFieldsProblem(main) && canReviewFirstSync && exactFirstSyncContext) && <details className="ui-technical-disclosure">
+      <summary>{groups.length > (main ? 1 : 0) ? `Інші перешкоди (${groups.length - (main ? 1 : 0)})` : 'Додаткові перевірки'}</summary>
       <section className="sync-other-problems" aria-label="Інші перешкоди">
-      <p className="sync-problem-guidance">Ці причини також зафіксовано для товару. Після виправлення перевірте оновлений стан доставки.</p>
-      <ul>{groups.slice(1).map(({ key, problem }) => <li key={key}>
+      <ul>{groups.filter(group => group.key !== activeGroup?.key).map(({ key, problem }) => <li key={key}>
         <h4>{problemTitle(problem)}</h4>
-        <ProblemFacts problem={problem} />
-        {needsDeliveryRecovery(problem) ? <p className="sync-problem-guidance">Перевіряється у процедурі відновлення доставки на цій сторінці.</p> : repair(problem)}
+        {problem.code === 'unexpected_failure' && recovery
+          ? <p className="sync-problem-guidance">Спочатку перевірте результат попередньої операції.</p>
+          : <Button size="compactMd" onClick={() => { setExtraFirstSync(false); setActiveTask(key); onSelectTask?.(problem); }}>{nextAction(problem)}</Button>}
       </li>)}</ul>
+      {!isFirstSyncFieldsProblem(main) && canReviewFirstSync && exactFirstSyncContext && <Button size="compactMd" onClick={() => setExtraFirstSync(true)}>Переглянути перше отримання полів</Button>}
     </section>
     </details>}
-    {main?.resolution !== 'name' && <ProductNameConflict productId={product.productId} available={Boolean(product.nameConflict)} onSaved={onSaved} />}
-    {recovery && !needsDeliveryRecovery(main) && <MagentoRecovery productId={product.productId} categoryCode={product.category} onTechnicalEvidence={setRecoveryEvidence} onSaved={() => onSaved('recovery')} />}
     {canCompare && !identityProblem && <TechnicalDisclosure summary="Додаткова перевірка даних у Magento">
       {() => <MagentoProductDiagnosis key={`${product.productId}:${product.observedAt || product.state || ''}`} product={product} returnTo={returnTo} onTechnicalEvidence={setComparisonEvidence} />}
     </TechnicalDisclosure>}

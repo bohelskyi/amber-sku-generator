@@ -83,3 +83,31 @@
   .local-workspace-nav a { min-height: var(--control-height-touch); }
 }
 @media (prefers-reduced-motion: reduce) { .ui-technical-disclosure > summary svg { transition: none; } }
+
+/* Dense task surfaces share spacing and controls without changing workflow state. */
+.auth-access-actions { display: grid; gap: 10px; margin-top: 20px; }
+.user-status-filters { display: flex; flex-wrap: wrap; gap: 8px; }
+.user-status-filters button { gap: 8px; }
+.user-status-filters button[aria-pressed="true"] { border-color: var(--amber-600); background: var(--amber-50); color: var(--navy-900); }
+.user-status-filters button span { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.role-capability-summary { display: grid; gap: 8px; font-size: 14px; }
+.role-capability-summary h3 { font-weight: 600; }
+.role-capability-summary ul { display: grid; gap: 6px; }
+.role-capability-summary li { display: flex; gap: 12px; justify-content: space-between; }
+.role-capability-summary li span { color: var(--text-muted); }
+.role-permission-editor { border-block: 1px solid var(--border); }
+.role-permission-editor > summary { cursor: pointer; padding: 12px 0; font-weight: 600; }
+.role-permission-editor[open] > :not(summary) { margin-bottom: 16px; }
+.role-permission-editor .permission-group > summary { cursor: pointer; }
+.role-permission-editor .permission-group:not([open]) > summary { border-bottom: 0; }
+.audit-actor-filter { position: relative; min-width: 0; }
+.audit-actor-results { position: absolute; z-index: 10; left: 0; right: 0; max-height: 240px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); box-shadow: var(--shadow-md); }
+.audit-actor-results button { display: flex; width: 100%; gap: 8px; justify-content: space-between; padding: 10px; text-align: left; }
+.audit-actor-results button:hover { background: var(--surface-muted); }
+.audit-actor-results button span, .audit-actor-results p { color: var(--text-muted); font-size: 13px; }
+.audit-actor-results p { padding: 10px; }
+.export-continuation-links { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+.export-continuation-links a { text-decoration: underline; text-underline-offset: 3px; }
+@media (max-width: 640px), (pointer: coarse) {
+  .role-permission-editor summary, .audit-actor-results button { min-height: 44px; }
+}

@@ -1,9 +1,34 @@
-import { useId, useRef } from 'react';
+import { useId, useRef, useState } from 'react';
 import { Camera, GripVertical, ImagePlus } from 'lucide-react';
 import { usePhotoSort } from '../../hooks/usePhotoSort.js';
 
 const statuses={pending:'Очікує передавання',running:'Передаються фото',uncertain:'Потрібно перевірити результат передавання',blocked:'Передавання потребує уваги',succeeded:'Фото перевірено в Magento',superseded:'Передавання продовжується для актуального товару'};
 const controlStyle={minHeight:34};
+
+// Viewing a product does not open its separate photo-saving task.
+export function ProductPhotoGallery({ controller, canEdit = false, activationDisabledReason }) {
+  const [editing, setEditing] = useState(false);
+  const p = controller;
+  if (!p) return null;
+  if (editing) return <div className="product-photo-editor">
+    <div className="product-photo-editor-toolbar"><button type="button" className="btn btn-outline"
+      disabled={p.busy || p.dirty || p.hasPendingUploads} onClick={() => setEditing(false)}>Готово</button>
+      {p.dirty && <span role="status">Є незбережені зміни фотографій.</span>}</div>
+    <ProductPhotos controller={p} canEdit={canEdit} activationDisabledReason={activationDisabledReason} existingProduct />
+  </div>;
+  return <section className="product-photos product-photo-overview" aria-label="Фотографії товару">
+    <div className="product-photos-heading"><h3>Фотографії</h3>{canEdit && <button type="button" className="btn btn-outline" onClick={() => setEditing(true)}>
+      {p.photos.length ? 'Редагувати фото' : 'Додати фото'}</button>}</div>
+    {p.loading ? <p role="status">Завантаження фотографій…</p> : <>
+      {p.photos.length ? <ol className="product-photo-thumbnails">{p.photos.map((photo, index) => <li key={photo.id}>
+        <img src={p.contentUrl(photo.id)} alt={`${index === 0 ? 'Головне фото: ' : ''}${photo.name}`} loading="lazy" width="120" height="120" />
+      </li>)}</ol> : !p.error && <p className="text-sm text-slate-500">Фото в Менеджері ще не додані.</p>}
+      {p.error && <p role="alert">{p.error}</p>}
+      {p.delivery && p.delivery.state !== 'succeeded' && <p role="status">{statuses[p.delivery.state] || 'Стан передавання фото невідомий'}</p>}
+    </>}
+  </section>;
+}
+
 export function ProductPhotos({controller,canEdit=true,existingProduct=false,activationDisabledReason=null}) {
   const id=useId(); const picker=useRef(null); const camera=useRef(null); const p=controller;
   const supportsCamera=typeof HTMLInputElement!=='undefined' && 'capture' in HTMLInputElement.prototype;

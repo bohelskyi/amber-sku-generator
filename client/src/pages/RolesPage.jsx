@@ -367,7 +367,6 @@ export default function RolesPage() {
         <AppPageHeader
           eyebrow="Доступ"
           title="Ролі та дозволи"
-          description="Налаштуйте можливості ролей. Зміни діють з наступного запиту користувача."
         />
 
         {error && <Notice>{error}</Notice>}
@@ -389,7 +388,7 @@ export default function RolesPage() {
           <div className="grid gap-5 lg:grid-cols-[360px_minmax(0,1fr)]">
             <section className="card h-fit overflow-hidden p-0 lg:sticky lg:top-[calc(var(--workspace-nav-height)+1rem)]">
               <div className="border-b border-slate-200 px-4 py-3 sm:px-5">
-                <button type="button" className="btn btn-primary w-full gap-2" onClick={() => dirtyNavigation.request(applyCreateForm)}><Plus size={16} aria-hidden="true" />Створити роль</button>
+                <button type="button" className="btn btn-outline w-full gap-2" onClick={() => dirtyNavigation.request(applyCreateForm)}><Plus size={16} aria-hidden="true" />Створити роль</button>
               </div>
               <ul className="role-master-list" aria-label="Ролі">
                 {roles.map((role) => (
@@ -422,19 +421,28 @@ export default function RolesPage() {
                 <label className="text-sm font-medium text-slate-700">Опис<input className="input-sm mt-1" value={form.description} disabled={busy || selectedRole?.isProtected} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} /></label>
               </div>
 
-              <div className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:grid-cols-[minmax(0,1fr)_220px]">
+              <section className="role-capability-summary" aria-label="Доступні робочі дії">
+                <h3>Доступні робочі дії</h3>
+                <ul>{permissionGroups.filter((group) => group.permissions.some((permission) => form.permissionKeys.includes(permission.key))).map((group) =>
+                  <li key={group.key}>{group.label} <span>{group.permissions.filter((permission) => form.permissionKeys.includes(permission.key)).length} дій</span></li>)}</ul>
+                {selectedPermissionCount === 0 && <p>Дозволів ще не обрано.</p>}
+              </section>
+              <details key={selectedRole?.id || 'new'} className="role-permission-editor" open={!selectedRole || undefined}>
+              <summary>{selectedRole?.isProtected ? 'Переглянути права' : 'Змінити права'} · {selectedPermissionCount}</summary>
+              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_220px]">
                 <label className="relative text-sm font-medium text-slate-700"><span className="sr-only">Пошук дозволу</span><Search size={16} aria-hidden="true" className="pointer-events-none absolute left-3 top-3 text-slate-400" /><input type="search" className="input-sm pl-9" aria-label="Пошук дозволу" placeholder="Назва або технічний ключ" value={permissionQuery} onChange={(event) => setPermissionQuery(event.target.value)} /></label>
                 <label className="text-sm font-medium text-slate-700"><span className="sr-only">Група дозволів</span><select className="input-sm" aria-label="Група дозволів" value={permissionGroupFilter} onChange={(event) => setPermissionGroupFilter(event.target.value)}><option value="all">Усі групи</option>{permissionGroups.map((group) => <option key={group.key} value={group.key}>{group.label}</option>)}</select></label>
               </div>
 
               <div className="space-y-4">
                 {visiblePermissionGroups.map((group) => (
-                  <fieldset key={group.key} className="permission-group" disabled={busy || selectedRole?.isProtected}>
-                    <legend className="sr-only">{group.label}</legend>
-                    <div className="permission-group-header flex flex-wrap items-start justify-between gap-2">
+                  <details key={group.key} className="permission-group" open={Boolean(permissionQuery || permissionGroupFilter !== 'all') || undefined}>
+                    <summary className="permission-group-header flex flex-wrap items-start justify-between gap-2">
                       <div><h3 className="text-sm font-semibold text-slate-900">{group.label}</h3><p className="mt-0.5 text-xs text-slate-500">{group.description}</p></div>
                       <span className="text-xs font-medium tabular-nums text-slate-500">{group.permissions.filter((permission) => form.permissionKeys.includes(permission.key)).length} / {group.permissions.length}</span>
-                    </div>
+                    </summary>
+                    <fieldset disabled={busy || selectedRole?.isProtected}>
+                    <legend className="sr-only">{group.label}</legend>
                     <div className="grid gap-px bg-slate-200 sm:grid-cols-2">
                       {group.permissions.map((permission) => {
                         const locked = permission.reserved && !selectedRole?.isProtected;
@@ -443,7 +451,8 @@ export default function RolesPage() {
                         return <label key={permission.key} className={`permission-option ${readOnly ? 'is-locked' : ''}`}><input type="checkbox" checked={form.permissionKeys.includes(permission.key)} disabled={busy || readOnly} onChange={() => togglePermission(permission)} /><span className="min-w-0"><span className="flex flex-wrap items-center gap-2"><span className="text-sm font-semibold text-slate-800">{permissionLabel(permission)}</span>{permission.reserved && <StatusBadge tone="warning">Лише Адміністратор</StatusBadge>}</span><span className="mt-0.5 block text-xs leading-5 text-slate-500">{presentation.description}</span></span></label>;
                       })}
                     </div>
-                  </fieldset>
+                    </fieldset>
+                  </details>
                 ))}
                 {visiblePermissionGroups.length === 0 && <p className="rounded-lg border border-dashed border-slate-300 p-4 text-sm text-slate-600">Дозволів за цими умовами не знайдено.</p>}
               </div>
@@ -451,6 +460,7 @@ export default function RolesPage() {
               <TechnicalDisclosure summary="Технічні ключі дозволів">
                 <dl className="space-y-2 text-sm">{visiblePermissionGroups.flatMap((group) => group.permissions).map((permission) => <div key={permission.key} className="grid gap-1 sm:grid-cols-[minmax(0,1fr)_minmax(180px,0.7fr)]"><dt>{permissionLabel(permission)}</dt><dd className="break-all font-mono text-xs">{permission.key}</dd></div>)}</dl>
               </TechnicalDisclosure>
+              </details>
 
               {!selectedRole?.isProtected && <div className="flex flex-wrap justify-between gap-3">
                 <div>{selectedRole?.status === 'active' ? <button type="button" className="btn btn-danger" disabled={busy || selectedRole.assignedUserCount > 0} title={selectedRole.assignedUserCount > 0 ? 'Спочатку призначте користувачам інші ролі' : ''} onClick={() => dirtyNavigation.request(() => setConfirmation({ kind: 'deactivate', role: selectedRole }))}>Деактивувати</button> : selectedRole && <button type="button" className="btn btn-outline" disabled={busy} onClick={() => dirtyNavigation.request(() => void changeStatus(selectedRole, 'reactivate'))}>Активувати</button>}</div>

@@ -110,7 +110,18 @@ export function getAuditEventLabel(eventKey) {
 }
 
 export function getAuditSubjectLabel(subject = {}) {
+  if (subject.label) return `${SUBJECT_LABELS[subject.type] || 'Об’єкт'} · ${subject.label}`;
   return `${SUBJECT_LABELS[subject.type] || subject.type || 'Об’єкт'} · ${subject.id || 'не записано'}`;
+}
+
+export function getAuditChangeSummary(event = {}) {
+  const details = event.details || {};
+  const pair = (before, after, suffix = '') => before != null && after != null
+    ? `${before} → ${after}${suffix}` : '';
+  if (event.eventKey === 'product.price_changed') return pair(details.price?.beforeUah ?? details.oldPrice, details.price?.afterUah ?? details.newPrice, ' грн');
+  if (details.previousRole && details.newRole) return pair(details.previousRole.displayName, details.newRole.displayName);
+  return pair(details.previousDisplayName, details.newDisplayName)
+    || (Number.isInteger(details.changedCount) ? `Змінено: ${details.changedCount}` : '');
 }
 
 export function getAuditActorLabel(actor = {}) {

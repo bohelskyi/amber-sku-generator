@@ -13,6 +13,9 @@ export function RepricingWorkspace({
   controller,
   mayApplyRepricing,
   onBuildPreview,
+  onBuildGlobal,
+  preparationScope,
+  onPreparationScope,
   onOpenPrepare,
   onOpenReview,
   view = 'prepare',
@@ -35,12 +38,14 @@ export function RepricingWorkspace({
     <section className="card repricing-workspace min-w-0">
       {view === 'prepare' && <>
         <RepricingScopePanel canPrepareRepricing={canPrepareRepricing}
+          onBuildGlobal={onBuildGlobal}
+          scope={preparationScope} onScopeChange={onPreparationScope}
           controller={{ ...controller, openSelectedRepricing: onBuildPreview }} />
         {preview && <>
           <RepricingDraftPanel canPrepareRepricing={canPrepareRepricing} controller={controller} />
           <div className="p-5 sm:p-6">
             <Notice tone="success" title="Результат підготовлено" actions={<Button variant="primary" onClick={onOpenReview}>Перейти до перевірки</Button>}>
-              Перевірте весь набір змін перед застосуванням. Чернетка й повний серверний результат залишаються активними між розділами.
+              Перевірте ціни перед застосуванням.
             </Notice>
           </div>
         </>}

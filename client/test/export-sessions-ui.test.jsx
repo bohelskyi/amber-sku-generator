@@ -78,7 +78,7 @@ it('explicit private create persists before prepare/generate and a remount resum
   click('Перевірити товари'); await screen.findByText('ПОПЕРЕДНІЙ ПЕРЕГЛЯД'); click('Зберегти перевірку'); await screen.findByText('Готовий до створення файлів'); click('Створити файли'); await screen.findByText('lost response');
   expect(api.generate.mock.calls[0]).toEqual(['session-a', { expectedRevision: '1', expectedAccessEpoch: 'owner', attemptId: 'attempt-a' }]);
   first.unmount(); page(); await screen.findByText('Сесія A'); expect(exportsApi.getSnapshot).not.toHaveBeenCalled();
-  click('Відкрити / продовжити Сесія A'); await screen.findByText(/Збережені файли/);
+  click('Відкрити / продовжити Сесія A'); await screen.findByText('Збережені файли', { selector: 'p.ui-operation-receipt-title' });
   expect(exportsApi.getSnapshot).toHaveBeenCalledWith('snapshot-a'); expect(api.generate).toHaveBeenCalledTimes(1); expect(exportsApi.confirmSnapshot).not.toHaveBeenCalled();
   expect(localStorage.length).toBe(0); expect(sessionStorage.length).toBe(0);
 });
@@ -109,7 +109,7 @@ it('dirty session conflict preserves exact fields and Stay/Discard protect openi
   page(); await screen.findByText('Сесія A'); click('Відкрити / продовжити Сесія A'); await screen.findByLabelText('Назва експорту');
   fireEvent.change(screen.getByLabelText('Назва експорту'), { target: { value: '  local title ' } });
   api.save.mockRejectedValue({ response: { status: 409, data: { error: 'revision conflict', code: 'EXPORT_SESSION_CONFLICT' } } });
-  fireEvent.click(screen.getByRole('link', { name: 'Огляд' })); await screen.findByRole('dialog'); click('Зберегти й перейти');
+  fireEvent.click(screen.getByRole('link', { name: 'Збережені файли' })); await screen.findByRole('dialog'); click('Зберегти й перейти');
   await screen.findByText('revision conflict'); expect(screen.getByRole('dialog')).toBeTruthy();
   // The form registers its settled busy state with the navigation guard in an effect.
   await waitFor(() => expect(screen.getByRole('button', { name: 'Залишитися' }).disabled).toBe(false));
@@ -135,18 +135,18 @@ it('authorized deep link automatically reads through the current account and nev
   expect(api.get).toHaveBeenCalledWith('session-a'); expect(api.create).not.toHaveBeenCalled(); expect(api.prepare).not.toHaveBeenCalled(); expect(api.preview).not.toHaveBeenCalled(); expect(api.generate).not.toHaveBeenCalled();
   fireEvent.click(screen.getByText('Відкрити відомий історичний знімок'));
   fireEvent.change(screen.getByLabelText('ID збереженого знімка'), { target: { value: 'historical-id' } }); click('Прочитати знімок без підтвердження');
-  await screen.findByText(/Збережені файли/); expect(exportsApi.getSnapshot).toHaveBeenCalledWith('historical-id'); expect(exportsApi.confirmSnapshot).not.toHaveBeenCalled();
+  await screen.findByText('Збережені файли', { selector: 'p.ui-operation-receipt-title' }); expect(exportsApi.getSnapshot).toHaveBeenCalledWith('historical-id'); expect(exportsApi.confirmSnapshot).not.toHaveBeenCalled();
 });
 
 it('principal switch discards late private bytes and auto-opens only through a new authorized request', async () => {
   api.get.mockResolvedValue(response({ ...own, snapshotId: snapshot.id })); const late = deferred(); exportsApi.downloadMagentoArtifact.mockReturnValue(late.promise);
-  const first = page(); await screen.findByText('Сесія A'); click('Відкрити / продовжити Сесія A'); await screen.findByText(/Збережені файли/);
+  const first = page(); await screen.findByText('Сесія A'); click('Відкрити / продовжити Сесія A'); await screen.findByText('Збережені файли', { selector: 'p.ui-operation-receipt-title' });
   click(/Завантажити/); await waitFor(() => expect(exportsApi.downloadMagentoArtifact).toHaveBeenCalled());
   first.auth.principalLifetime.valid = false;
   const secondRead = deferred(); api.get.mockReturnValue(secondRead.promise);
   first.rerender(<AuthContext.Provider value={{ applicationUser: { id: 2 }, permissions: ['exports.view','exports.create'], principalLifetime: { id: 2, valid: true } }}><RouterProvider router={first.router} /></AuthContext.Provider>);
-  await act(async () => late.resolve(response('private bytes'))); expect(downloadBlob).not.toHaveBeenCalled(); expect(screen.queryByText(/Збережені файли/)).toBeNull();
-  await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2)); expect(screen.queryByText(/Збережені файли/)).toBeNull();
+  await act(async () => late.resolve(response('private bytes'))); expect(downloadBlob).not.toHaveBeenCalled(); expect(screen.queryByText('Збережені файли', { selector: 'p.ui-operation-receipt-title' })).toBeNull();
+  await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2)); expect(screen.queryByText('Збережені файли', { selector: 'p.ui-operation-receipt-title' })).toBeNull();
   await act(async () => secondRead.reject({ response: { status: 403 } })); await screen.findByText(/Доступ до цього експорту втрачено|Експорт не знайдено/);
   expect(exportsApi.getSnapshot).toHaveBeenCalledTimes(1); expect(api.generate).not.toHaveBeenCalled();
 });

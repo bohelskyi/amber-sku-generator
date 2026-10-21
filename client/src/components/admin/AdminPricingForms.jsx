@@ -167,7 +167,7 @@ export function ScenarioForm({ config, currentCatQuestions, groupOptions, isNew 
 export function ModifierForm({ config, currentCatQuestions, isNew = false, modifier, onCancel, onSave, setModifier }) {
   return (
     <div className="pricing-settings-form">
-      <FormSection title="Правило модифікатора">
+      <FormSection title="Націнка або знижка">
         <FieldControl label="Множник" hint="0.7 = знижка 30%, 1.15 = націнка 15%.">
           <input
             className="input-sm pricing-factor-input"
@@ -180,6 +180,7 @@ export function ModifierForm({ config, currentCatQuestions, isNew = false, modif
             onKeyDown={handleNumberKeyDown}
           />
         </FieldControl>
+        {modifier.factor !== '' && Number.isFinite(Number(modifier.factor)) && <p role="status">Результат: {Number(modifier.factor) === 1 ? 'ціна без змін' : `${Number(modifier.factor) < 1 ? 'знижка' : 'націнка'} ${formatDecimal(Math.abs(Number(((Number(modifier.factor) - 1) * 100).toFixed(4))))}%`}</p>}
         <ConditionBuilder config={config} label="Коли застосовувати модифікатор" questions={currentCatQuestions} value={modifier.match_json} onChange={(nextValue) => setModifier({ ...modifier, match_json: nextValue })} />
       </FormSection>
       <div className="pricing-form-actions">
@@ -197,7 +198,7 @@ export function ScenarioMatrix({ currentCatQuestions, handlePriceChange, matrixC
   return (
     <div className="pricing-matrix-panel">
       <div className="pricing-matrix-heading">
-        <div><h4>Матриця цін</h4><p>{axisX.label} × {axisY.label}</p></div>
+        <div><h4>Матриця цін · {scenario.price_mode === 'fixed_uah' ? 'грн' : scenario.price_mode === 'per_gram_usd' ? 'USD/г' : 'одиниці категорії'}</h4><p>{axisX.label} × {axisY.label}</p></div>
         <span>Порожня клітинка — немає автоматичної ціни</span>
       </div>
       {!readOnly && <p className="mb-3 text-sm text-slate-600">Зміни зберігаються автоматично після виходу з клітинки. Щоб прибрати ціну, очистіть клітинку.</p>}
@@ -227,6 +228,7 @@ export function ScenarioMatrix({ currentCatQuestions, handlePriceChange, matrixC
                         placeholder="—"
                         aria-label={`${xOption.label}, ${yOption.label}`}
                         readOnly={readOnly}
+                        aria-invalid={saveState?.state === 'error' || undefined}
                         onChange={(event) => { event.currentTarget.value = normalizeDecimalInput(event.currentTarget.value); }}
                         onBlur={(event) => {
                           if (readOnly) return;

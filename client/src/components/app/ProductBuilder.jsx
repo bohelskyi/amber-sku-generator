@@ -246,18 +246,17 @@ export function ProductBuilder({
       <section className="builder-workspace card overflow-hidden fade-up">
         <header className="builder-header">
           <div>
-            <p className="eyebrow">Новий товар</p>
-            <h2 className="section-title-text mt-1">{category.name}</h2>
-            <p className="mt-1 text-sm text-slate-500">Заповніть характеристики, перевірте розрахунок і збережіть товар.</p>
+            <h2 className="section-title-text">{category.name}</h2>
           </div>
           <button onClick={onCancel} disabled={isSaving || isCreationSaveUncertain} className="btn btn-ghost">До категорій</button>
         </header>
 
-        {canCreateTestProducts && <div className="test-product-control">
+        {canCreateTestProducts && <details className="test-product-control" open={isTestProduct || undefined}>
+          <summary>Тестовий товар</summary>
           <label><input type="checkbox" checked={isTestProduct} disabled={isVerifying || isSaving || isCreationSaveUncertain}
             onChange={(event) => { prepareForEdit(); onTestProductChange?.(event.target.checked); }} />Створити TEST товар</label>
           <p>Лише для Адміністратора. Окремий артикул TEST-…; товар залишається вимкненим для покупців у Magento.</p>
-        </div>}
+        </details>}
         {isTestProduct && <p className="test-product-selection" role="status">Обрано TEST товар. Ознака зберігається назавжди; звичайна серія AG не використовується.</p>}
         {isTestProduct && !canCreateTestProducts && <p className="test-product-selection" role="alert">Для продовження створення TEST товару потрібен чинний доступ Адміністратора. Ознака TEST збережена.</p>}
         <div className="builder-field-list">
@@ -413,13 +412,13 @@ export function ProductBuilder({
 
             {validationFailed && (
               <div className="builder-blockers" role="alert">
-                <p>Перевірте дані</p>
-                <ul>
-                  {fieldBlockers.map((blocker) => (
-                    <li key={blocker.fieldId}>{blocker.message}</li>
-                  ))}
-                  {generalVerificationError && <li>{generalVerificationError}</li>}
-                </ul>
+                {fieldBlockers.length > 0 && <><p>Заповніть або виправте {fieldBlockers.length} полів.</p>
+                  <button type="button" className="btn btn-outline" onClick={() => {
+                    const field = workspaceRef.current?.querySelector('[data-builder-blocker="true"]');
+                    field?.scrollIntoView({ block: 'center' });
+                    field?.querySelector('input, button, select')?.focus();
+                  }}>Перейти до першого поля</button></>}
+                {generalVerificationError && <p>{generalVerificationError}</p>}
               </div>
             )}
 
@@ -501,7 +500,7 @@ export function ProductBuilder({
                 >
                   {isSaving ? isCreationSaveUncertain ? 'Перевіряємо результат…' : 'Зберігаємо...' : isCreationSaveUncertain ? 'Перевірити результат збереження' : 'Зберегти товар'}
                 </button>
-                {!isNativeCreation && <button onClick={onAddVariation} className="btn btn-primary" disabled={isVariationLoading}>
+                {!isNativeCreation && <button onClick={onAddVariation} className="btn btn-outline" disabled={isVariationLoading}>
                   {isVariationLoading ? 'Підбираємо...' : 'Додати варіацію'}
                 </button>}
               </div>

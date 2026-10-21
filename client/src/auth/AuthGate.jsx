@@ -1,7 +1,37 @@
+import { useState } from 'react';
 import { KeyRound, Monitor } from 'lucide-react';
 import amberLogo from '../assets/amber-logo-white-orange.png';
 import { useAuth } from './auth-context.js';
 import { AUTH_STATUS } from './auth-model.js';
+
+function AccessState({ auth, pending }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const act = async (action) => {
+    setBusy(true);
+    setError('');
+    try { await action(); }
+    catch { setError('Не вдалося виконати дію. Спробуйте ще раз.'); }
+    finally { setBusy(false); }
+  };
+  const account = auth.applicationUser?.displayName || auth.identity?.name || auth.identity?.preferredUsername;
+  return <main className="auth-gate"><div className="card auth-card">
+    <h1 className="text-xl font-semibold">{pending ? 'Доступ очікує підтвердження' : 'Доступ вимкнено'}</h1>
+    {account && <p className="mt-3 font-medium">{account}</p>}
+    <p className="mt-2 text-sm text-slate-600">{pending
+      ? 'Адміністратор має підтвердити ваш доступ. Після підтвердження перевірте його тут.'
+      : 'Зверніться до адміністратора, щоб відновити доступ.'}</p>
+    {error && <p role="alert" className="mt-3 text-sm text-red-700">{error}</p>}
+    <div className="auth-access-actions">
+      <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void act(auth.refresh)}>
+        {busy ? 'Перевіряємо…' : 'Перевірити доступ'}
+      </button>
+      <button type="button" className="btn btn-outline" disabled={busy} onClick={() => void act(auth.logout)}>
+        {pending ? 'Увійти іншим обліковим записом' : 'Вийти'}
+      </button>
+    </div>
+  </div></main>;
+}
 
 export function AuthGate({ children }) {
   const auth = useAuth();
@@ -70,43 +100,11 @@ export function AuthGate({ children }) {
   }
 
   if (auth.status === AUTH_STATUS.PENDING) {
-    return (
-      <main className="auth-gate">
-        <div className="card auth-card">
-          <h1 className="text-xl font-semibold">Доступ очікує підтвердження</h1>
-          <p className="mt-2 text-sm text-slate-500">
-            Вхід виконано. Адміністратор має активувати ваш доступ до Amber SKU Manager.
-          </p>
-          <button
-            type="button"
-            className="btn btn-outline mt-5"
-            onClick={() => { void auth.logout(); }}
-          >
-            Вийти
-          </button>
-        </div>
-      </main>
-    );
+    return <AccessState auth={auth} pending />;
   }
 
   if (auth.status === AUTH_STATUS.DISABLED) {
-    return (
-      <main className="auth-gate">
-        <div className="card auth-card">
-          <h1 className="text-xl font-semibold">Доступ вимкнено</h1>
-          <p className="mt-2 text-sm text-slate-500">
-            Ваш обліковий запис автентифіковано, але доступ до застосунку деактивовано.
-          </p>
-          <button
-            type="button"
-            className="btn btn-outline mt-5"
-            onClick={() => { void auth.logout(); }}
-          >
-            Вийти
-          </button>
-        </div>
-      </main>
-    );
+    return <AccessState auth={auth} pending={false} />;
   }
 
   if (auth.status === AUTH_STATUS.ERROR) {

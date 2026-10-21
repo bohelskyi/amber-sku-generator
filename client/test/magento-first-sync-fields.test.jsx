@@ -33,7 +33,7 @@ it('saves the initial SEO receipt without editing its template or claiming deliv
     local:known('Active SEO template'),remote:known('Existing Magento SEO'),canKeepLocal:false});
   api.post.mockResolvedValueOnce({data:plan([seo])}).mockResolvedValueOnce({data:receipt({target:'meta_title',scope:'en',
     receipt:{sessionId:'edcd2e97-8708-4e06-9c2b-55bdbf61a3e2',revision:'1',state:'seo_pending_initial_readback',alreadyApplied:false}})});
-  render(shell());read();await screen.findByText(/Перше SEO/);
+  render(shell());read();await screen.findAllByText(/Перше SEO/);
   fireEvent.click(screen.getByRole('button',{name:'Отримати значення Magento: SEO заголовок · EN'}));
   expect(within(screen.getByRole('dialog')).getByText(/Текст чинного шаблону/)).toBeTruthy();
   expect(within(screen.getByRole('dialog')).getByText(/Наступні окремі синхронізації/)).toBeTruthy();confirm();
@@ -152,10 +152,13 @@ it('distinguishes unknown from empty and renders zero and false without a fallba
     field({ target: 'price', local: known(0), remote: known(false), reason: 'REMOTE_BOOLEAN_INVALID', canAcceptRemote: false }),
   ]) });
   render(shell()); read();
+  fireEvent.click(await screen.findByRole('button', { name: 'Розглянути: Вага · UA / основний магазин' }));
   const weight = await screen.findByRole('region', { name: 'Вага · UA / основний магазин' });
   expect(within(weight).getByText('Не заповнено')).toBeTruthy();
   expect(within(weight).getAllByText('Дані не підтверджено')).toHaveLength(2);
   expect(within(weight).getByRole('button', { name: /Отримати/ }).disabled).toBe(true);
+  fireEvent.click(screen.getByRole('button', { name: 'Розглянути: Ціна · UA / основний магазин' }));
+  expect(screen.queryByRole('region', { name: 'Вага · UA / основний магазин' })).toBeNull();
   const price = screen.getByRole('region', { name: 'Ціна · UA / основний магазин' });
   expect(within(price).getByText('0')).toBeTruthy(); expect(within(price).getByText('false')).toBeTruthy();
   expect(within(price).getByText('Логічне значення має непідтримуваний формат у Magento.')).toBeTruthy();
@@ -173,11 +176,15 @@ it('shows per-language received name and unresolved EN without claiming the whol
     field({ target: 'name', scope: 'en', status: 'unknown', reason: 'REMOTE_READ_UNKNOWN', local: known('Name'), remote: { known: false }, canAcceptRemote: false, canKeepLocal: false }),
   ]) });
   render(shell()); read();
+  await screen.findByRole('region', { name: 'Назва · EN' });
+  fireEvent.click(screen.getByRole('button', { name: 'Усі поля (2)' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Розглянути: Назва · UA / основний магазин' }));
   const ua = await screen.findByRole('region', { name: 'Назва · UA / основний магазин' });
   expect(within(ua).getByText('Перший етап завершено')).toBeTruthy();
   expect(within(ua).queryByRole('button', { name: /Отримати/ })).toBeNull();
-  expect(screen.getByText(/Одноразове отримання ще не завершене/)).toBeTruthy();
-  expect(screen.getByRole('region', { name: 'Назва · EN' })).toBeTruthy();
+  expect(screen.getByText(/Потребують перевірки: 1 із 2/)).toBeTruthy();
+  expect(screen.queryByRole('region', { name: 'Назва · EN' })).toBeNull();
+  expect(screen.getByRole('button', { name: 'Розглянути: Назва · EN' })).toBeTruthy();
 });
 
 it('shows the current computed size after a completed first phase without claiming a canonical import', async () => {
@@ -186,6 +193,7 @@ it('shows the current computed size after a completed first phase without claimi
     local: known('7.5/7.5/7'), remote: known('7.5/7.5/7'), canAcceptRemote: false, canKeepLocal: false,
   })], { coverage: { fields: [{ target: 'rozmir_suveniriv', scope: 'all', state: 'projected', persistence: 'derived' }], fullProductAdoption: false } }) });
   render(shell()); read();
+  fireEvent.click(await screen.findByRole('button', { name: 'Усі поля (1)' }));
   const size = await screen.findByRole('region', { name: 'Розмір сувеніру · UA / основний магазин' });
   expect(within(size).getAllByText('7.5/7.5/7')).toHaveLength(2);
   expect(within(size).queryByText('Не заповнено')).toBeNull();
@@ -203,11 +211,12 @@ it('a completed optional-empty field does not claim that a value was imported or
     local: empty, remote: empty, canAcceptRemote: false, canKeepLocal: false,
   })]) });
   render(shell()); read();
+  fireEvent.click(await screen.findByRole('button', { name: 'Усі поля (1)' }));
   const size = await screen.findByRole('region', { name: 'Розмір сувеніру · UA / основний магазин' });
   expect(within(size).getAllByText('Не заповнено')).toHaveLength(2);
   expect(within(size).getByText('Перший етап завершено')).toBeTruthy();
   expect(within(size).queryByText(/отримано/i)).toBeNull();
-  expect(screen.getByText(/Одноразове отримання ще не завершене для всіх передбачених полів/)).toBeTruthy();
+  expect(screen.getByText(/Передавання ще не підтверджено/)).toBeTruthy();
   expect(screen.queryByRole('dialog')).toBeNull(); expect(api.post).toHaveBeenCalledTimes(1);
 });
 
@@ -218,7 +227,8 @@ it('does not present an unverified current derived value as an empty value or a 
   })]) }).mockResolvedValueOnce({ data: plan([field({ target: 'rozmir_suveniriv', status: 'unknown', reason: 'LOCAL_VALUE_UNKNOWN', received: true,
     local: { known: false }, remote: known('8/8/8'), canAcceptRemote: false, canKeepLocal: false,
   })]) });
-  render(shell()); read(); await screen.findByRole('region', { name: 'Розмір сувеніру · UA / основний магазин' }); read();
+  render(shell()); read();
+  fireEvent.click(await screen.findByRole('button', { name: 'Усі поля (1)' })); await screen.findByRole('region', { name: 'Розмір сувеніру · UA / основний магазин' }); read();
   const size = await screen.findByRole('region', { name: 'Розмір сувеніру · UA / основний магазин' });
   expect(within(size).getByText('Дані не підтверджено')).toBeTruthy();
   expect(within(size).getByText('8/8/8')).toBeTruthy();
@@ -422,8 +432,9 @@ it('callback refresh failure retains a verified committed receipt instead of por
 
 it('explicitly describes approved automatic empty-field imports without claiming preview has already saved them', async () => {
   api.post.mockResolvedValue({ data: plan([field({ status: 'imported', reason: 'EMPTY_LOCAL_VALID_REMOTE', local: empty })]) });
-  render(shell()); read(); await screen.findByText(/Під час збереження порожні підтверджені поля/);
-  expect(screen.getByText('Готове до отримання')).toBeTruthy(); expect(screen.queryByText(/Рішення для поля збережено/)).toBeNull();
+  render(shell()); read(); await screen.findByText('Amber не має значення; підтверджене значення Magento можна отримати.');
+  expect(screen.getAllByText('Готове до отримання').length).toBeGreaterThan(0);
+  accept(); expect(within(screen.getByRole('dialog')).getByText(/Порожні підтверджені поля й перші назви/)).toBeTruthy(); expect(screen.queryByText(/Рішення для поля збережено/)).toBeNull();
   expect(api.post).toHaveBeenCalledTimes(1);
 });
 
@@ -455,6 +466,7 @@ it('does not let a delayed old callback refresh error overwrite the next fresh p
   api.post.mockResolvedValueOnce({ data: plan() }).mockResolvedValueOnce({ data: receipt() }).mockResolvedValueOnce({ data: plan([field({ local: known('15'), remote: known('15'), status: 'equal', reason: 'NORMALIZED_VALUES_EQUAL' })]) });
   render(shell({ onChange: () => refresh })); read(); await screen.findByRole('region', { name: 'Вага · UA / основний магазин' }); accept(); confirm();
   fireEvent.click(await screen.findByRole('button', { name: 'Перевірити поля після рішення' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Усі поля (1)' }));
   await screen.findByText('Підтверджені значення збігаються після нормалізації.');
   await act(async () => failRefresh(new Error('old refresh')));
   expect(screen.queryByRole('alert')).toBeNull(); expect(screen.getByText('Підтверджені значення збігаються після нормалізації.')).toBeTruthy();
@@ -491,7 +503,7 @@ it('explains a populated price conflict blocker and confirms keeping 4600 withou
     receipt: { sessionId: 'edcd2e97-8708-4e06-9c2b-55bdbf61a3e2', revision: '2',
       state: 'pending_outward_confirmation', alreadyApplied: false } }) });
   render(shell()); read();
-  await screen.findByText('Заповнені значення різняться. Потрібне рішення адміністратора для цього поля.');
+  await screen.findByText('Обидві системи мають різні значення. Оберіть джерело для цього поля.');
   expect(screen.queryByText('Причина потребує окремого технічного уточнення. Код наведено в деталях.')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Залишити значення Amber: Ціна · UA / основний магазин' }));
   const dialog = screen.getByRole('dialog');

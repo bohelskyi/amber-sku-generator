@@ -3,7 +3,7 @@ import { act,cleanup,fireEvent,render,renderHook,screen } from '@testing-library
 import { afterEach,beforeEach,describe,expect,it,vi } from 'vitest';
 import { AuthContext } from '../src/auth/auth-context.js';
 import { useProductPhotos } from '../src/hooks/useProductPhotos.js';
-import { ProductPhotos } from '../src/components/app/ProductPhotos.jsx';
+import { ProductPhotoGallery, ProductPhotos } from '../src/components/app/ProductPhotos.jsx';
 
 const mocks=vi.hoisted(()=>({get:vi.fn(),post:vi.fn(),defaults:{baseURL:'/api'}}));
 vi.mock('../src/lib/api.js',()=>({api:mocks}));
@@ -14,6 +14,25 @@ const file=()=>new File([new Uint8Array(68)],'camera.png',{type:'image/png'});
 const flush=async()=>{await act(async()=>{await Promise.resolve();await Promise.resolve();});};
 beforeEach(()=>{mocks.get.mockReset();mocks.post.mockReset();});
 afterEach(()=>{cleanup();vi.useRealTimers();});
+
+it('keeps product photo viewing separate from editing and preserves unsaved photo intent', () => {
+  const controller = { photos: originalPhotos, contentUrl: (id) => `/api/photos/${id}`, ready: true,
+    failedUploads: [], reorderPhotos: vi.fn(), removePhoto: vi.fn(), dirty: false, save: vi.fn() };
+  const { rerender } = render(<ProductPhotoGallery controller={controller} canEdit />);
+  expect(screen.getAllByRole('img')).toHaveLength(2);
+  expect(screen.queryByLabelText('Додати фото')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Зберегти фотографії' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Редагувати фото' }));
+  expect(screen.getByLabelText('Додати фото')).toBeTruthy();
+  rerender(<ProductPhotoGallery controller={{ ...controller, dirty: true }} canEdit />);
+  expect(screen.getByRole('button', { name: 'Готово' }).disabled).toBe(true);
+  expect(screen.getByRole('button', { name: 'Зберегти фотографії' }).disabled).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name: 'Зберегти фотографії' }));
+  expect(controller.save).toHaveBeenCalledOnce();
+  rerender(<ProductPhotoGallery controller={controller} canEdit />);
+  fireEvent.click(screen.getByRole('button', { name: 'Готово' }));
+  expect(screen.queryByLabelText('Додати фото')).toBeNull();
+});
 describe('product photo controller',()=>{
   it.each([1048575,1048576])('stages the original photo at the one-MiB boundary: %i bytes',async(size)=>{
     mocks.post.mockResolvedValue({data:originalPhotos[0]});

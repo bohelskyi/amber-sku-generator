@@ -22,7 +22,7 @@ function ReviewList({ items, label, render }) {
     </nav>}
   </div>;
 }
-function PublicationWorkspace({ revision, currentPublishedId, representatives = empty, onPublished, onRepresentative, definition, registry, categories, repairContext, compact = false, autoPreview = false, disabled: suppliedDisabled = false, editScope }) {
+function PublicationWorkspace({ revision, currentPublishedId, representatives = empty, onPublished, onRepresentative, onBusyChange, definition, registry, categories, repairContext, compact = false, autoPreview = false, disabled: suppliedDisabled = false, editScope }) {
   const auth = useAuth(); const { permissions } = auth; const administrator = isActualAdministrator(auth);
   const retired = Boolean(revision.catalogAvailability?.publicationBlocked);
   const disabled = suppliedDisabled || retired;
@@ -35,6 +35,7 @@ function PublicationWorkspace({ revision, currentPublishedId, representatives = 
   const [exampleCategory, setExampleCategory] = useState(null);
   const sequence = useRef(0); const inFlight = useRef(false);
   const automaticallyChecked = useRef(false);
+  useEffect(() => { onBusyChange?.(busy); return () => onBusyChange?.(false); }, [busy, onBusyChange]);
   useEffect(() => { const requests = sequence; return () => { ++requests.current; }; }, []);
   useEffect(() => {
     if (revision.state !== 'published' || auth.principalLifetime?.valid === false) return undefined;
@@ -89,15 +90,15 @@ function PublicationWorkspace({ revision, currentPublishedId, representatives = 
   const currentStatuses = status.filter((item, index) => index === 0 || item.pending_handoff > 0 || item.waiting > 0 || item.needs_attention > 0 || item.protected > 0);
   const history = status.filter((item) => !currentStatuses.includes(item));
   const applyDisabledReason = busy ? 'Перевірка або застосування виконується.' : disabled ? 'Завершіть локальні рішення або оновіть неактуальну перевірку.' : review?.blockers.length ? `Застосування заблоковано: ${review.blockers.length} перешкод у пакеті.` : loss && (!ack || reason.trim().length < 3) ? 'Підтвердьте точну втрату покриття й додайте пояснення.' : '';
-  return <section className={`card space-y-3 p-5${compact ? ' mc-publication-actions' : ''}`}><h2 className="font-semibold">{compact ? 'Застосування змін' : 'Публікація та передача товарів'}</h2>
+  return <section className={compact ? 'space-y-3 mc-publication-actions' : 'card space-y-3 p-5'}>{!compact && <h2 className="font-semibold">Публікація та передача товарів</h2>}
     <RetiredCatalogNotice availability={revision.catalogAvailability} />
     {error && <Notice tone="error">{error}</Notice>}
     {rejectedReview && <MagentoPublicationProblems review={rejectedReview} revision={revision} currentPublishedId={currentPublishedId} definition={definition} registry={registry} categories={categories} repairContext={repairContext} compact={compact} />}
-    <p className="text-sm">Публікація застосовує правила та планує синхронізацію. Готовність кожного товару до надсилання перевіряється окремо, зокрема історія та поля першої синхронізації.</p>
+    {!compact && <p className="text-sm">Публікація застосовує правила та планує синхронізацію. Готовність кожного товару до надсилання перевіряється окремо, зокрема історія та поля першої синхронізації.</p>}
     {revision.state === 'draft' ? <>
       {!compact && <><p className="text-sm">Публікація змінить правила доставки. Чинні назви товарів зберігаються; застосування нового правила назв — окрема контрольована дія.</p><p className="text-sm">Перевірених прикладів CREATE: {representatives.length}. Нові маршрути потребують готового прикладу у розділі «Перевірка товару».</p></>}
       {canPublish && (!autoPreview || error || review?.blockers.length > 0) && <button type="button" className="btn btn-outline btn-compact-md" disabled={busy || disabled} onClick={() => { setReview(null); setAck(false); setReason(''); action('publication/preview', request, setReview); }}>{busyStage === 'preview' ? 'Перевіряємо вплив на товари…' : compact ? 'Перевірити вплив на товари' : 'Перевірити вплив публікації'}</button>}
-      <p className="text-sm">Перевірка показує вплив правил на поточний каталог. Правила застосовуються й синхронізація планується лише окремим підтвердженням нижче.</p>
+      {!review && <p className="text-sm">Перевірте вплив на товари, потім підтвердьте застосування правил.</p>}
       {review && <div className="space-y-3"><p>Перевірено вплив правил на поточні товари: {review.totalProducts}. Для перевірки й синхронізації: {review.affected.length}. Назв збережено: {review.preservedNames.length}.</p>
         <MagentoPublicationProblems review={review} revision={revision} currentPublishedId={currentPublishedId} definition={definition} registry={registry} categories={categories} repairContext={repairContext} compact={compact} onExample={onRepresentative ? setExampleCategory : undefined} />
         {exampleCategory && onRepresentative && <section className="space-y-3" aria-label="Приклад для застосування змін"><h3 className="font-semibold">Приклад нового товару</h3><MagentoProductChecks revision={revision} categoryCode={exampleCategory} onRepresentative={onRepresentative} /></section>}

@@ -104,7 +104,9 @@ async function getProductRegisterPage(queryable, query = {}) {
   if (filters.search) {
     const searchParam = add(`%${escapeLikeFragment(filters.search)}%`);
     where.push(`(identity.public_sku ILIKE ${searchParam} ESCAPE '\\'
-      OR p.full_sku ILIKE ${searchParam} ESCAPE '\\')`);
+      OR p.full_sku ILIKE ${searchParam} ESCAPE '\\'
+      OR saved_name.ua ILIKE ${searchParam} ESCAPE '\\'
+      OR saved_name.en ILIKE ${searchParam} ESCAPE '\\')`);
   }
   if (cursor) {
     const idParam = add(cursor.id);
@@ -118,6 +120,9 @@ async function getProductRegisterPage(queryable, query = {}) {
               identity.public_sku AS "publicSku",
               COALESCE((to_jsonb(identity)->>'is_test_product')::boolean,FALSE) AS "isTestProduct",
               p.full_sku AS "internalSku",
+              saved_name.ua AS "nameUa",
+              saved_name.en AS "nameEn",
+              saved_name.kind AS "nameKind",
               p.category AS "categoryCode",
               category.name AS "categoryName",
               COALESCE(p.status, 'active') AS status,
@@ -127,6 +132,18 @@ async function getProductRegisterPage(queryable, query = {}) {
        FROM products p
        JOIN public_product_identities identity ON identity.id = p.public_product_identity_id
        LEFT JOIN categories category ON category.code = p.category
+       CROSS JOIN LATERAL (
+         SELECT CASE
+           WHEN NULLIF(p.magento_name_override->'values'->>'all', '') IS NOT NULL THEN 'saved_full_name'
+           WHEN NULLIF(p.magento_name_subject_ua, '') IS NOT NULL THEN 'subject'
+           WHEN NULLIF(p.magento_name_override->'values'->>'en', '') IS NOT NULL THEN 'saved_full_name'
+           WHEN NULLIF(p.magento_name_subject_en, '') IS NOT NULL THEN 'subject'
+           ELSE 'unavailable' END AS kind,
+         COALESCE(NULLIF(p.magento_name_override->'values'->>'all', ''),
+                  NULLIF(p.magento_name_subject_ua, '')) AS ua,
+         COALESCE(NULLIF(p.magento_name_override->'values'->>'en', ''),
+                  NULLIF(p.magento_name_subject_en, '')) AS en
+       ) saved_name
        WHERE ${where.join(' AND ')}
        ORDER BY p.id DESC
        LIMIT ${pageLimitParam}`,

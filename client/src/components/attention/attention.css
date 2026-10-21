@@ -307,3 +307,29 @@
 .sync-support-evidence h4 { font-weight:600; margin-bottom:8px; }
 .sync-recovery-attestation input { accent-color:#14203B; }
 @media(max-width:800px) { .sync-recovery-action-bar { bottom:0; } .sync-recovery-actions .btn { width:100%; } }
+.attention-tabs { display:flex; gap:6px; flex-wrap:wrap; border-bottom:1px solid var(--border); padding-bottom:10px; }
+.attention-tabs [aria-current="page"], .attention-tabs [aria-pressed="true"] { background:var(--surface-muted); box-shadow:inset 0 -2px var(--amber-500); }
+.attention-groups { border-top:1px solid var(--border); }
+.attention-groups table, .first-sync-table { width:100%; border-collapse:collapse; font-size:var(--font-size-sm); }
+.attention-groups th, .attention-groups td, .first-sync-table th, .first-sync-table td { text-align:left; vertical-align:top; padding:12px; border-bottom:1px solid var(--border); overflow-wrap:anywhere; }
+.attention-groups thead, .first-sync-table thead { color:var(--text-muted); background:var(--surface-muted); }
+.attention-groups tbody th, .first-sync-table tbody th { font-weight:500; }
+.attention-groups tbody th small { display:block; margin-top:5px; color:var(--text-muted); }
+.attention-groups td:last-child { width:235px; }
+.attention-text-action { text-decoration:underline; text-underline-offset:3px; min-width:36px; min-height:36px; }
+.first-sync-fields { min-width:0; }
+.first-sync-table .btn { white-space:nowrap; }
+.first-sync-field-decision { padding:16px 0; border-top:2px solid var(--border-strong); }
+.sync-problem-master-detail:not(.has-selection) { grid-template-columns:1fr; min-height:0; }
+.sync-problem-master-detail:not(.has-selection) .sync-problem-detail { display:none; }
+.sync-problem-master-detail:not(.has-selection) .sync-problem-queue { border-right:0; }
+.sync-back { display:inline-flex; margin-bottom:12px; }
+@media(max-width:640px) {
+  .attention-groups table,.attention-groups tbody,.attention-groups tr { display:block; }
+  .attention-groups thead { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
+  .attention-groups tr { padding:12px 0; border-bottom:1px solid var(--border); }
+  .attention-groups th,.attention-groups td { display:block; width:auto!important; border:0; padding:6px 0; }
+  .attention-groups td[data-label="Товари"]::before { content:'Товарів: '; color:var(--text-muted); }
+  .first-sync-table th,.first-sync-table td { padding:8px 4px; }
+  .first-sync-table button { padding-inline:6px; }
+}

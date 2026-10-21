@@ -2,7 +2,6 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { useAuth } from '../../auth/auth-context.js';
 import { exportTemplatesApi as templates } from '../../api/export-templates-api.js';
 import { parsePreviewCsv } from '../../lib/export-template-csv.js';
-import { rulesIdentity } from '../../lib/magento-category-workspace.js';
 import { getApiError } from '../../lib/http-error.js';
 import { SampleProducts } from '../export-templates/SampleProducts.jsx';
 
@@ -27,8 +26,8 @@ function TextResult({ response, categoryCode, column, rowId }) {
   </div>;
 }
 
-// The API needs a stored draft. This isolated, unpublished family is used only
-// for examples; it never replaces the category editor's family or saved draft.
+// Examples use the unsaved definition and authoritative server product data.
+// No template family or draft is created as a side effect of viewing text.
 export default function CatalogTextPreview(props) {
   const auth = useAuth();
   return <TextPreviewEditor key={`${auth.principalLifetime?.id || auth.applicationUser?.id || 'session'}:${props.categoryCode}:${props.column}`} {...props} auth={auth} />;
@@ -39,7 +38,6 @@ function TextPreviewEditor({ getDefinition, changeKey, disabled = false, categor
   const allowed = ['export_templates.view', 'export_templates.manage', 'exports.view'].every((permission) => permissions.includes(permission)) && principalLifetime?.valid !== false;
   const [selected, setSelected] = useState([]); const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState(null); const [error, setError] = useState(null);
-  const family = useRef(null); const creationKey = useRef(null); const createAttempted = useRef(false);
   const scope = useRef(null); const flight = useRef(false); const accessible = useRef(null); const busyCallback = useRef(onBusyChange);
   useLayoutEffect(() => { accessible.current = { allowed, disabled, owner: principalLifetime }; busyCallback.current = onBusyChange; }, [allowed, disabled, principalLifetime, onBusyChange]);
   useEffect(() => {
@@ -58,55 +56,22 @@ function TextPreviewEditor({ getDefinition, changeKey, disabled = false, categor
     const current = () => lifetime?.valid && accessible.current.owner === principalLifetime && accessible.current.allowed && !accessible.current.disabled && principalLifetime?.valid !== false;
     flight.current = true; setBusy(true); setError(null); busyCallback.current?.(true);
     try {
-      const definition = structuredClone(getDefinition()); const identity = rulesIdentity(definition);
-      const recoverCreation = async () => {
-        const response = await templates.list(); if (!current()) return null;
-        const found = response.data.templates.find((item) => item.template_key === creationKey.current);
-        return found ? (await templates.get(found.id)).data : null;
-      };
-      let next = family.current;
-      if (!next) {
-        creationKey.current ||= `catalog-example-${crypto.randomUUID()}`;
-        if (createAttempted.current) next = await recoverCreation();
-        if (!current()) return;
-        if (!next) {
-          createAttempted.current = true;
-          try { next = (await templates.create({ key: creationKey.current, displayName: `Приклад тексту · ${categoryCode}`, definition })).data; }
-          catch (cause) { if (!current()) return; next = await recoverCreation(); if (!next) throw cause; }
-        }
-        if (!current()) return;
-        family.current = next;
-      }
-      if (rulesIdentity(next.draft.definition) !== identity) {
-        try { next = { ...next, draft: (await templates.save(next.id, { expectedRevision: next.draft.revision, definition })).data }; }
-        catch (cause) {
-          if (!current()) return;
-          const recovered = (await templates.get(next.id)).data;
-          if (!current()) return;
-          family.current = recovered;
-          if (rulesIdentity(recovered.draft.definition) !== identity) throw cause;
-          next = recovered;
-        }
-        if (!current()) return;
-        family.current = next;
-      }
-      const { data } = await templates.preview(next.id, { expectedRevision: next.draft.revision, expectedDefinitionHash: next.draft.definitionHash, productIds: [selected[0].id] });
+      const definition = structuredClone(getDefinition());
+      const { data } = await templates.evaluateExample({ definition, productIds: [selected[0].id] });
       if (!current()) return;
-      if (data.revision !== next.draft.revision || data.definitionHash !== next.draft.definitionHash) throw new Error('Сервер повернув приклад іншої редакції. Оновіть приклад.');
       setPreview({ response: data, changeKey, productId: selected[0].id, owner: principalLifetime });
     } catch (cause) { if (current()) setError(cause); }
     finally { if (lifetime?.valid) { flight.current = false; setBusy(false); busyCallback.current?.(false); } }
   };
   const visible = allowed && preview?.owner === principalLifetime ? preview : null;
   const stale = visible && (visible.changeKey !== changeKey || visible.productId !== selected[0]?.id);
-  return <section aria-label="Приклад тексту" className="space-y-3 rounded-lg border bg-slate-50 p-4">
-    <h3 className="font-semibold">Приклад на товарі</h3>
+  return <section aria-label="Приклад тексту" className="space-y-3 catalog-text-preview">
     {!allowed ? <p>Для прикладу потрібні права на редагування правил і перегляд товарів експорту.</p> : <>
       <fieldset disabled={disabled || busy} className="min-w-0 space-y-3">
         <SampleProducts search={search} selected={selected} onChange={setSelected} maxSelected={1} />
         <button type="button" className="btn btn-outline" disabled={disabled || busy || selected.length !== 1} onClick={update}>{busy ? 'Обчислюємо…' : 'Оновити приклад'}</button>
       </fieldset>
-      <p className="text-sm text-slate-600">Приклад враховує поточне введення. Щоб залишити зміни у правилі, натисніть «Готово».</p>
+      {!visible && <p className="text-sm text-slate-600">Приклад врахує поточне введення.</p>}
       {error && <div role="alert"><p>Не вдалося обчислити приклад. Перевірте правило та спробуйте ще раз.</p><details><summary>Подробиці</summary><p>{getApiError(error)}</p></details></div>}
       {stale && <p role="status">Правило або товар змінилися. Оновіть приклад — нижче попередній результат.</p>}
       {visible && <TextResult response={visible.response} categoryCode={categoryCode} column={column} rowId={rowId} />}

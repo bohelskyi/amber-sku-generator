@@ -269,3 +269,31 @@
 
 /* Keep the exact batch summary and action in view while reviewing long lists. */
 .restore-review-summary { position: sticky; top: 0; z-index: 2; margin-top: 1rem; padding: 1rem; border: 1px solid #DD974A; border-radius: .75rem; background: #fff; color: #14203B; box-shadow: 0 4px 12px #14203b12; }
+
+/* Daily product work starts with identity and the result, with editing opt-in. */
+.product-register { position: relative; }
+.product-register-header { position: absolute; top: 14px; right: 14px; padding: 0; border: 0; }
+.product-register-toolbar { padding-right: 66px; }
+.product-register-name { max-width: 32rem; font-weight: 600; overflow-wrap: anywhere; }
+.product-register-statistics > summary { width: fit-content; cursor: pointer; padding: 10px 0; color: var(--text-muted); }
+.product-photo-thumbnails { display: flex; flex-wrap: wrap; gap: 12px; list-style: none; }
+.product-photo-thumbnails img { border-radius: 6px; object-fit: cover; }
+.product-photo-editor-toolbar { display: flex; gap: 12px; align-items: center; padding: 16px 20px 0; }
+.product-photo-editor-toolbar span { font-size: 14px; }
+.product-photo-overview .product-photos-heading { justify-content: space-between; }
+.product-price-comparison { display: grid; grid-template-columns: 1fr auto 1fr; gap: 16px; align-items: center; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+.product-price-comparison dt { color: var(--text-muted); font-size: 14px; }
+.product-price-comparison dd { font-weight: 650; font-size: 24px; overflow-wrap: anywhere; }
+.product-history-views { display: flex; flex-wrap: wrap; gap: 8px; }
+.product-history-views [aria-pressed=true] { background: var(--surface-muted); border-color: #94a3b8; }
+.test-product-control { border: 0; border-radius: 0; background: transparent; padding: 0; }
+.test-product-control > summary { cursor: pointer; color: var(--text-muted); min-height: 36px; padding-top: 8px; }
+@media (max-width: 639px) {
+  .product-register-header { top: 12px; right: 12px; }
+  .product-register-toolbar { padding-right: 64px; }
+  .product-photo-thumbnails img { width: 88px; height: 88px; }
+  .product-photo-editor-toolbar { flex-wrap: wrap; padding: 12px 16px 0; }
+  .product-price-comparison { gap: 8px; }
+  .product-price-comparison dd { font-size: 20px; }
+  .test-product-control > summary { min-height: 44px; }
+}

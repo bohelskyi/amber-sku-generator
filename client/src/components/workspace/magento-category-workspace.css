@@ -223,3 +223,12 @@
 
 .mc-selected-products > ul, .mc-exact-results { max-height: 260px; overflow: auto; }
 .mc-selected-products > ul:focus-visible, .mc-exact-results:focus-visible { outline: 2px solid var(--navy-900); outline-offset: 3px; }
+.mc-compact-change-bar { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; padding: .65rem .8rem; }
+.mc-compact-change-bar > span { margin-right: auto; }
+.mc-compact-change-bar .mw-details { flex-basis: auto; }
+.mc-task-heading { display: flex; align-items: center; justify-content: space-between; gap: .75rem; position: sticky; top: 0; background: white; z-index: 2; padding-block: .6rem; }
+.mc-review-dialog { width: min(72rem, calc(100vw - 2rem)); }
+.mc-review-dialog > * { min-width: 0; }
+.mc-review-dialog .mc-scope-summary { font-size: .875rem; }
+.mc-fields > header { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: .5rem; }
+.mc-fields > .mc-work-state { font-size: .875rem; color: #64748b; margin-block: .4rem; }

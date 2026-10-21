@@ -223,9 +223,9 @@ it('guards changed pricing settings before switching category', async () => {
   fireEvent.click(await screen.findByRole('button', { name: 'Редагувати' }));
   fireEvent.change(screen.getByRole('textbox', { name: 'Назва сценарію' }), { target: { value: 'Changed locally' } });
 
-  fireEvent.click(screen.getByRole('button', { name: 'Модифікатори' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Націнки та знижки' }));
   let dialog = await screen.findByRole('dialog', { name: 'Незбережені зміни' });
-  expect(screen.getByRole('button', { name: 'Сценарії' }).getAttribute('aria-pressed')).toBe('true');
+  expect(screen.getByRole('button', { name: 'Матриці' }).getAttribute('aria-pressed')).toBe('true');
   fireEvent.click(within(dialog).getByRole('button', { name: 'Залишитися' }));
 
   fireEvent.click(screen.getByRole('button', { name: /Necklaces/ }));

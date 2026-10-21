@@ -44,6 +44,9 @@ export function problemSubject(problem = {}) {
 }
 
 export function problemTitle(problem = {}) {
+  if (problem.causeContext?.kind === 'semantic_option') {
+    return `${problem.fieldLabel || PRODUCT_FIELD_LABELS[problem.causeContext.target] || problem.causeContext.question}: значення «${problem.valueLabel ?? problem.causeContext.value}» потребує відповідності`;
+  }
   if (problem.code === 'unexpected_failure') return 'Не вдалося завершити синхронізацію';
   if (problem.resolution === 'lifecycle_reconciliation') {
     if (problem.eligibilityIssue?.primaryReason === 'INFERRED_HISTORY_WITHOUT_EXACT_MEMBERSHIP') return 'Немає точного підтвердження, які попередні версії товару доставлено в Magento';
@@ -64,12 +67,21 @@ export function problemRepairUrl(problem, product, returnTo) {
     productId: String(product.productId), category: product.category, field: placement ? undefined : target,
     question: problem.question || problem.questionKey,
     value: typeof value === 'string' || typeof value === 'number' ? String(value) : undefined,
-    path: problem.path, returnTo,
+    path: problem.path, route: problem.causeContext?.routeKey || problem.routeKey, returnTo,
   });
 }
 
+// A URL selects only an exact, still-present diagnostic. It never authorizes a
+// repair or derives missing provenance from the current Catalog configuration.
+export function problemTaskKey(problem = {}) {
+  return JSON.stringify(['code', 'diagnosticCode', 'scope', 'reason',
+    'target', 'field', 'path', 'routeKey', 'question', 'questionKey', 'value', 'valueId', 'expectedValue']
+    .map(key => problem[key] ?? null).concat(['kind', 'bindingRevisionId', 'category', 'routeKey', 'target', 'question', 'value']
+      .map(key => problem.causeContext?.[key] ?? null)));
+}
+
 export function problemImpact(problem = {}) {
-  if (isFirstSyncFieldsProblem(problem)) return 'Перше отримання полів Amber і Magento ще не завершено. Потрібно перевірити точні значення та рішення окремо для кожного поля й мови. Доставку заблоковано до підтвердження потрібних полів.';
+  if (isFirstSyncFieldsProblem(problem)) return 'Передавання зупинено до вибору значень для непідтверджених полів.';
   if (problem.code === 'unexpected_failure') return 'Остання спроба не завершилася. Причину помилки ще не підтверджено; це не свідчить про неправильні відповідності. Перед повторним надсиланням потрібно перевірити поточний товар і незавершені операції.';
   if (problem.code === 'reconciliation_required') return 'Зміну вже надіслано. Поки результат не підтверджено, повторне надсилання заблоковане.';
   if (problem.code === 'TEST_DELETION_PENDING') return 'Результат видалення потрібно перевірити через початкову операцію товару.';
@@ -95,7 +107,7 @@ export function attentionProblemGroups(problems = []) {
       : JSON.stringify([problem.code, problem.diagnosticCode, problem.resolution, problem.resolutionKind, problem.message, problem.scope, problem.reason,
         problem.target, problem.field, problem.path, problem.routeKey, problem.question, problem.questionKey,
         problem.value, problem.valueId, problem.expectedValue, problem.valueLabel,
-        problem.issueFields, problem.evaluationIssues]);
+        problem.issueFields, problem.evaluationIssues, problem.causeContext]);
     if (groups.has(key)) groups.get(key).evidence.push(problem);
     else groups.set(key, { key, problem, evidence: [problem] });
   }

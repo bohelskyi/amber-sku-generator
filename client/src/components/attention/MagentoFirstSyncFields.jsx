@@ -161,7 +161,7 @@ function checkedReceipt(data, request) {
 }
 
 const correctionReasons = new Set(['FIRST_SYNC_CANONICAL_CALIBRATION_REVIEW_REQUIRED', 'FIRST_SYNC_LEGACY_SKU_CORRECTION_REQUIRED', 'FIRST_SYNC_LEGACY_MISSING_ONLY_REVIEW_REQUIRED', 'FIRST_SYNC_LEGACY_WEIGHT_IDENTITY_REVIEW_REQUIRED', 'FIRST_SYNC_LEGACY_IDENTITY_UNPROVEN']);
-function FieldPanel({ sku, onChange, principalLifetime, canRecount }) {
+function FieldPanel({ sku, onChange, principalLifetime, canRecount, returnTo = '/attention' }) {
   const [preview, setPreview] = useState(null);
   const [receipt, setReceipt] = useState(null);
   const [decision, setDecision] = useState(null);
@@ -170,6 +170,8 @@ function FieldPanel({ sku, onChange, principalLifetime, canRecount }) {
   const [operation, setOperation] = useState(null);
   const [error, setError] = useState(null);
   const [page, setPage] = useState(0);
+  const [filter, setFilter] = useState('needed');
+  const [fieldKey, setFieldKey] = useState(null);
   const flight = useRef(null);
   const sequence = useRef(0);
   useEffect(() => () => { ++sequence.current; flight.current?.abort(); flight.current = null; }, [principalLifetime]);
@@ -206,7 +208,7 @@ function FieldPanel({ sku, onChange, principalLifetime, canRecount }) {
     } finally { if (current()) { flight.current = null; setOperation(null); } }
   }
   function review() {
-    setPage(0);
+    setPage(0); setFieldKey(null);
     request('preview', { sku }, (data, _current, bindingRevisionId) => {
       const checked = checkedPreview(data, sku);
       if (checked.historyReview !== undefined) {
@@ -236,10 +238,16 @@ function FieldPanel({ sku, onChange, principalLifetime, canRecount }) {
       catch { if (isCurrent()) setError({ actor: principalLifetime, text: 'Рішення збережено, але пов’язаний огляд не оновився. Оновіть перевірку полів.' }); }
     });
   }
-  const fields = plan?.fields.slice(page * 50, (page + 1) * 50) || [];
-  return <section className="card space-y-4 p-5" aria-label={`Перше отримання полів ${sku}`}>
-    <div><h2 className="font-semibold">Перше отримання полів</h2><p className="text-sm break-words">Артикул: <strong>{sku}</strong></p></div>
-    <p className="text-sm">Перевірка читає актуальні поля за чинними правилами незалежно від збереженої діагностики. Вона не змінює дані й не запускає синхронізацію. Збереження рішення для поля та доставка виконуються окремо.</p>
+  const needsDecision = field => !field.received && !['equal', 'optional_empty'].includes(field.status);
+  const allFields = plan?.fields || [];
+  const filteredFields = filter === 'all' ? allFields : allFields.filter(needsDecision);
+  const fields = filteredFields.slice(page * 20, (page + 1) * 20);
+  const keyOf = field => JSON.stringify([field.target, field.scope]);
+  const activeField = filteredFields.find(field => keyOf(field) === fieldKey) || (filteredFields.length === 1 ? filteredFields[0] : null);
+  const generalBlockers = plan?.blockers.filter(blocker => !allFields.some(field => blocker.target === field.target && (!blocker.scope || blocker.scope === field.scope))) || [];
+  return <section className="first-sync-fields space-y-4" aria-label={`Перше отримання полів ${sku}`}>
+    <h2 className="font-semibold">Перше отримання полів</h2>
+    {!plan && !saved && <p className="text-sm">Порівняйте поля товару з Magento, потім виберіть значення. Читання не змінює дані.</p>}
     <Button size="compactMd" busy={busy} disabled={!active()} onClick={review}>{busy ? visible(operation)?.kind === 'history-apply' ? 'Зберігаємо перевірку історії…' : visible(operation)?.kind === 'apply' ? 'Зберігаємо рішення поля…' : 'Читаємо актуальні поля…' : saved ? 'Перевірити поля після рішення' : 'Перевірити актуальні поля'}</Button>
     {currentError && <Notice tone="error">{currentError}</Notice>}
     {savedHistory && <Notice tone="success">{savedHistory.receipt.alreadyApplied ? 'Цю перевірку історії вже збережено.' : 'Перевірку історії збережено.'} Тепер повторіть перевірку актуальних полів. Значення полів, історичні лічильники та доставка не змінювалися.</Notice>}
@@ -256,20 +264,27 @@ function FieldPanel({ sku, onChange, principalLifetime, canRecount }) {
       {plan.historyReviewAssessment.status === 'blocked' && plan.historyReviewAssessment.legacySnapshotFlag === true && <p>Історичну позначку експорту збережено. Вона не підтверджує доставку й не скасовує перевірку файлів.</p>}
     </Notice>}
     {plan?.historyReview && <Notice tone="info"><p>Підтверджено єдиний історичний товар і погоджений початковий baseline. Він не підтверджує фактичну доставку або рівність поточних полів.</p><p>Адміністратор може дозволити окремий перегляд полів для артикула <strong>{sku}</strong> · Magento ID <strong>{plan.historyReview.remoteProductId}</strong>. Кожний конфлікт полів і доставка потребують власної перевірки.</p><Button size="compactMd" disabled={busy} onClick={() => setHistoryDecision({ actor: principalLifetime })}>Переглянути допуск до полів</Button></Notice>}
-    {plan?.blockers.length > 0 && <Notice tone="warning"><ul className="space-y-2">{plan.blockers.map((blocker, index) => <li key={index}>{blocker.target && <strong>{fieldLabel({ target: blocker.target, scope: blocker.scope || 'all' })}: </strong>}{reasonText(blocker.code)}</li>)}</ul></Notice>}
-    {plan?.mode === 'first' && <div className="space-y-2 text-sm"><p>Під час збереження порожні підтверджені поля заповнюються автоматично за погодженими правилами; назви отримуються один раз окремо для кожної мови. Рішення нижче стосується одного вибраного поля.</p><p>{plan.complete ? 'Одноразове отримання всіх передбачених полів підтверджено.' : 'Одноразове отримання ще не завершене для всіх передбачених полів.'} {plan.readyForOutbound ? 'Попередня перевірка полів дозволяє перейти до окремої перевірки доставки.' : 'Перед доставкою залишаються непідтверджені поля або рішення.'}</p></div>}
-    {fields.map((field) => {
+    {generalBlockers.length > 0 && <Notice tone="warning"><ul className="space-y-2">{generalBlockers.map((blocker, index) => <li key={index}>{blocker.target && <strong>{fieldLabel({ target: blocker.target, scope: blocker.scope || 'all' })}: </strong>}{reasonText(blocker.code)}</li>)}</ul></Notice>}
+    {plan?.mode === 'first' && <p className="text-sm" role="status">{plan.complete ? 'Перший етап для всіх полів завершено.' : `Потребують перевірки: ${allFields.filter(needsDecision).length} із ${allFields.length} полів.`} {plan.readyForOutbound ? 'Можна окремо перевірити доставку.' : 'Передавання ще не підтверджено.'}</p>}
+    {allFields.length > 0 && <>
+      <div className="attention-tabs" aria-label="Показані поля"><Button size="compactMd" aria-pressed={filter === 'needed'} onClick={() => { setFilter('needed'); setPage(0); setFieldKey(null); }}>Потребують рішення</Button><Button size="compactMd" aria-pressed={filter === 'all'} onClick={() => { setFilter('all'); setPage(0); setFieldKey(null); }}>Усі поля ({allFields.length})</Button></div>
+      {fields.length ? <table className="first-sync-table"><thead><tr><th>Поле</th><th>Стан</th><th>Дія</th></tr></thead><tbody>{fields.map(field => <tr key={keyOf(field)}>
+        <th scope="row">{fieldLabel(field)}</th><td>{field.received ? 'Перший етап завершено' : statusLabels[field.status] || 'Потрібна перевірка'}</td>
+        <td><Button size="compactMd" aria-label={`Розглянути: ${fieldLabel(field)}`} aria-pressed={activeField === field} onClick={() => setFieldKey(keyOf(field))}>Обрати</Button></td>
+      </tr>)}</tbody></table> : <p className="text-sm">Полів для окремого рішення немає. Решта результатів доступна в «Усі поля».</p>}
+      {filteredFields.length > 20 && <Pagination label="Сторінки полів першого отримання" busy={busy} hasPrevious={page > 0} hasNext={(page + 1) * 20 < filteredFields.length} onPrevious={() => { setPage(page - 1); setFieldKey(null); }} onNext={() => { setPage(page + 1); setFieldKey(null); }} summary={`Сторінка ${page + 1} · полів ${filteredFields.length}`} />}
+    </>}
+    {[activeField].filter(Boolean).map((field) => {
       const available = plan.mode === 'first' && statuses.has(field.status) && !field.received;
-      return <section key={JSON.stringify([field.target, field.scope])} className="space-y-2 rounded-xl border border-slate-200 p-4" aria-label={fieldLabel(field)}>
+      return <section key={keyOf(field)} className="first-sync-field-decision space-y-3" aria-label={fieldLabel(field)}>
         <div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold">{fieldLabel(field)}</h3><StatusBadge tone={field.received ? 'success' : field.status === 'conflict' || field.status === 'review_required' || field.status === 'unknown' ? 'warning' : 'neutral'}>{field.received ? 'Перший етап завершено' : statusLabels[field.status] || 'Потрібне уточнення стану'}</StatusBadge></div>
         <dl className="grid gap-3 sm:grid-cols-2"><div><dt className="text-sm font-semibold">Поточне Amber</dt><dd className="whitespace-pre-wrap break-words text-sm">{valueText(field.local)}</dd></div><div><dt className="text-sm font-semibold">Поточне Magento</dt><dd className="whitespace-pre-wrap break-words text-sm">{valueText(field.remote)}</dd></div></dl>
         <p className="text-sm">{reasonText(field.reason)}</p>
-        {canRecount && !field.received && correctionReasons.has(field.reason) && <a className="btn btn-outline" href={`/products/open?article=${encodeURIComponent(sku)}&action=recount&returnTo=${encodeURIComponent('/attention')}`}>Переглянути виправлення адміністратором</a>}
+        {canRecount && !field.received && correctionReasons.has(field.reason) && <a className="btn btn-outline" href={`/products/open?article=${encodeURIComponent(sku)}&action=recount&returnTo=${encodeURIComponent(returnTo)}`}>Переглянути виправлення адміністратором</a>}
         {plan.mode === 'first' && !field.received && <div className="flex flex-wrap gap-2"><Button size="compactMd" disabled={busy || !available || !field.canAcceptRemote} onClick={() => setDecision({ actor: principalLifetime, field, choice: 'accept_remote' })} aria-label={`Отримати значення Magento: ${fieldLabel(field)}`}>Отримати значення Magento</Button><Button size="compactMd" disabled={busy || !available || !field.canKeepLocal} onClick={() => setDecision({ actor: principalLifetime, field, choice: 'keep_local' })} aria-label={`Залишити значення Amber: ${fieldLabel(field)}`}>Залишити значення Amber</Button></div>}
         <TechnicalDisclosure summary="Причина й підтвердження поля">{() => <pre className="overflow-auto text-xs">{JSON.stringify({ target: field.target, scope: field.scope, status: field.status, reason: field.reason, received: field.received, blockers: plan.blockers.filter((blocker) => blocker.target === field.target && (!blocker.scope || blocker.scope === field.scope)) }, null, 2)}</pre>}</TechnicalDisclosure>
       </section>;
     })}
-    {plan?.fields.length > 50 && <Pagination label="Сторінки полів першого отримання" busy={busy} hasPrevious={page > 0} hasNext={(page + 1) * 50 < plan.fields.length} onPrevious={() => setPage(page - 1)} onNext={() => setPage(page + 1)} summary={`Сторінка ${page + 1} · полів ${plan.fields.length}`} />}
     {plan && <TechnicalDisclosure summary="Межі перевірки й технічні причини">{() => <pre className="overflow-auto text-xs">{JSON.stringify({ mode: plan.mode, blockers: plan.blockers, coverage: plan.coverage }, null, 2)}</pre>}</TechnicalDisclosure>}
     <ConfirmDialog open={Boolean(selected)} title={selected ? `Підтвердити поле: ${fieldLabel(selected.field)}` : 'Підтвердити поле'} confirmLabel="Зберегти рішення цього поля" busy={busy} onClose={() => setDecision(null)} onConfirm={apply}>
       {selected && <div className="space-y-3"><p className="text-sm">Артикул: <strong>{sku}</strong></p><p>{seoField(selected.field)?'Текст чинного шаблону':'Значення Amber перед рішенням'}: <strong className="whitespace-pre-wrap break-words">{valueText(selected.field.local)}</strong></p><p>{seoField(selected.field)?selected.choice==='keep_local'?'SEO Amber до передавання':'SEO Magento для першої доставки':'Значення Amber після рішення'}: <strong className="whitespace-pre-wrap break-words">{valueText(selected.choice === 'accept_remote' ? selected.field.remote : selected.field.local)}</strong></p>

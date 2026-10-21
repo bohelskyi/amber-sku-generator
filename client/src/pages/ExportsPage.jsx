@@ -19,7 +19,7 @@ export default function ExportsPage() {
     canActivateTemplate={permissions.includes('export_templates.activate')}
     canCreateExport={permissions.includes('exports.create')} />;
   return <ExportWorkspaceShell><Routes>
-    <Route index element={<ExportLanding workflow={workflow} productTools={tools('products')} />} />
+    <Route index element={<ExportLanding workflow={workflow} productTools={tools('products')} historyContent={<ExportHistoryPage />} />} />
     <Route path="prices" element={<PriceExportWorkspace workflow={workflow.priceWorkflow} canCreate={permissions.includes('exports.create')} />} />
     <Route path="history" element={<ExportHistoryPage />} />
     <Route path="history/:stream/:snapshotId" element={<ExportHistoryPage />} />

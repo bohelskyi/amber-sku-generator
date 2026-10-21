@@ -1,0 +1,8 @@
+.store-connection { max-width:850px; display:grid; gap:24px; padding-top:20px; }
+.store-connection-facts { display:grid; grid-template-columns:1fr 1fr; gap:18px 32px; }
+.store-connection-facts dt { color:var(--text-muted); font-size:var(--font-size-sm); }
+.store-connection-facts dd { margin-top:5px; font-weight:600; overflow-wrap:anywhere; }
+.store-connection-check { display:flex; gap:14px; align-items:center; }
+.store-connection-check p { max-width:420px; color:var(--text-muted); font-size:var(--font-size-sm); }
+.store-connection-work { display:flex; flex-wrap:wrap; align-items:center; gap:12px; padding:20px 0; border-block:1px solid var(--border); }
+@media(max-width:640px) { .store-connection-facts { grid-template-columns:1fr; } .store-connection-check { flex-direction:column; align-items:stretch; } }

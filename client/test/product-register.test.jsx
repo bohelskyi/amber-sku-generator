@@ -79,6 +79,18 @@ it('keeps search and filters in the address so browser Back restores the registe
   expect(router.state.location.search).toBe('');
 });
 
+it('shows saved names without inventing a generated name and searches Ukrainian or English text', async () => {
+  productsApi.listRegister.mockResolvedValue(response([product(20, { nameUa: 'Бурштиновий кулон', nameEn: 'Amber pendant', nameKind: 'subject' }), product(21)]));
+  const { router } = mount();
+  const name = await screen.findByText('Бурштиновий кулон');
+  expect(within(name.closest('tr')).getByText('Назва предмета')).toBeTruthy();
+  expect(screen.getByText('Назву не збережено')).toBeTruthy();
+  fireEvent.change(screen.getByRole('textbox', { name: 'Пошук товарів' }), { target: { value: 'Amber pendant' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Знайти' }));
+  await waitFor(() => expect(productsApi.listRegister).toHaveBeenLastCalledWith(expect.objectContaining({ search: 'Amber pendant' })));
+  expect(new URLSearchParams(router.state.location.search).get('search')).toBe('Amber pendant');
+});
+
 it('returns from an opened product to the reviewed filter and cursor page', async () => {
   productsApi.listRegister
     .mockResolvedValueOnce(response([product(22)], { hasMore: true, nextCursor: 'filtered-next' }))

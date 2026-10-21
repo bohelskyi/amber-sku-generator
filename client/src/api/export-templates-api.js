@@ -18,6 +18,7 @@ export function createExportTemplatesApi(client = api) {
     clone: (id, body) => client.post(`${root}/${id}/draft/from-version`, body),
     validate: (id, body) => client.post(`${root}/${id}/validate`, body),
     preview: (id, body) => client.post(`${root}/${id}/test-preview`, body),
+    evaluateExample: (body) => client.post(`${root}/evaluate-example`, body),
     publish: (id, body) => client.post(`${root}/${id}/publish`, body),
     activation: () => client.get(`${root}/activation`),
     select: (body) => client.put(`${root}/activation`, body),

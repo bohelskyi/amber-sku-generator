@@ -17,6 +17,7 @@ const context = (req) => ({ mutationContext: getRequestMutationContext(req) });
 // Static endpoints must precede /:id.
 router.get(`${root}/system`, permission('view'), handle(() => templates.systemProfile()));
 router.get(`${root}/sample-products`, permission('manage'), requirePermission('exports.view'), handle((req) => templates.searchSampleProducts(req.query)));
+router.post(`${root}/evaluate-example`, permission('manage'), requirePermission('exports.view'), handle((req) => templates.evaluateExample(req.body)));
 router.get(`${root}/source-details`, permission('view'), handle((req) => templates.sourceDetails(req.query)));
 router.get(`${root}/candidate`, permission('view'), permission('manage'), handle((req) => templates.prepareMagentoCandidate({ supportPolicy: req.query.supportPolicy })));
 router.get(`${root}/sources`, permission('view'), handle(() => templates.listSources()));

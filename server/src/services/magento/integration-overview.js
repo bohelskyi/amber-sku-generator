@@ -128,6 +128,7 @@ async function overview(config, { canViewProducts = false, ...options } = {}) {
     }
     return { integration: {
       configured: config.configured === true,
+      storeHost: config.configured && config.baseUrl ? new URL(config.baseUrl).host : null,
       activePublication: revision ? { id: revision.id, versionNumber: revision.versionNumber, revision: revision.revision,
         templateId: revision.templateId, templateVersionId: revision.templateVersionId, templateVersionNumber: template?.version_number ?? null,
         publishedAt: revision.publishedAt, observedAt: revision.observedAt } : null,

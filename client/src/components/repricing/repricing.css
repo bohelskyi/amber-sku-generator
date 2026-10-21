@@ -1,0 +1,19 @@
+.repricing-scope { display: flex; align-items: end; flex-wrap: wrap; gap: 16px; }
+.repricing-scope label { display: grid; gap: 6px; min-width: 220px; max-width: 100%; flex: 1; }
+.repricing-table-scroll { position: relative; min-width: 0; max-width: 100%; overflow-x: auto; }
+.repricing-table-scroll .is-selected { background: #f8fafc; }
+.repricing-row-detail { display: grid; grid-template-columns: minmax(0, 1fr) minmax(160px, .35fr); gap: 24px; padding: 20px; background: #f8fafc; border-block: 1px solid #e2e8f0; }
+.repricing-row-detail > div:last-child { display: flex; flex-direction: column; align-items: start; }
+.repricing-detail-back { display: none; }
+.repricing-table-scroll .table-cell { vertical-align: middle; font-size: 14px; }
+@media (max-width: 639px) {
+  .repricing-scope { align-items: stretch; flex-direction: column; padding: 16px; }
+  .repricing-scope label { min-width: 0; }
+  .repricing-row-detail { grid-template-columns: 1fr; gap: 16px; padding: 16px; }
+  .repricing-detail-back { display: inline-flex; }
+  .repricing-table-scroll table:has(.repricing-detail-row),
+  .repricing-table-scroll table:has(.repricing-detail-row) tbody,
+  .repricing-detail-row, .repricing-detail-row > td { display: block; width: 100%; min-width: 0; }
+  .repricing-table-scroll table:has(.repricing-detail-row) thead,
+  .repricing-table-scroll table:has(.repricing-detail-row) tbody > tr:not(.repricing-detail-row) { display: none; }
+}

@@ -148,7 +148,7 @@ async function enqueue(config, input, options) {
       if (nameResult.action === 'accept_external') plan.fail('MAGENTO_SYNC_AMBER_CHANGED');
     }
     if (options.automatic) await require('./sync-problems').saveDiagnostics(options.databasePool,
-      options.automatic, report.blockers);
+      options.automatic, require('./sync-problems').recordedDiagnostics(report.blockers, report, input.bindingRevisionId));
     if (options.automatic && (observation.categoryFailures?.length || observation.domainEvidence.failures?.length)) {
       plan.fail('MAGENTO_SYNC_READ_FAILED');
     }

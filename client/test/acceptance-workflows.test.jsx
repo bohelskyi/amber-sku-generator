@@ -14,7 +14,14 @@ vi.mock('../src/lib/api.js', () => ({ api: { get: vi.fn(), post: vi.fn() } }));
 beforeEach(() => { vi.resetAllMocks(); api.get.mockResolvedValue({ data: { enabled: true, problemCount: 3 } }); });
 afterEach(cleanup);
 const auth = { identity: { name: 'Богдан' }, logout: vi.fn(), permissions: ['products.view', 'products.decode', 'products.recount', 'exports.create', 'exports.view', 'export_templates.view', 'corrections.create', 'corrections.view', 'repricing.view', 'catalog.view'] };
-const shell = (element, value = auth) => render(<AuthContext.Provider value={value}><MemoryRouter>{element}</MemoryRouter></AuthContext.Provider>);
+const shell = (element, value = auth, selectedId = 1368) => {
+  const implementation = api.get.getMockImplementation();
+  api.get.mockImplementation(async (url, ...args) => {
+    const result = await implementation(url, ...args);
+    return url === `/magento/problems/${selectedId}` && result?.data?.items ? { data: result.data.items.find(item => item.productId === selectedId) } : result;
+  });
+  return render(<AuthContext.Provider value={value}><MemoryRouter initialEntries={[`/attention?problem=${selectedId}`]}>{element}</MemoryRouter></AuthContext.Provider>);
+};
 
 it('daily navigation exposes the task-oriented destinations without reading global counts', () => {
   shell(<WorkspaceNav />);
@@ -68,7 +75,7 @@ it('uncertain write is a resolution queue entry without a retry action', async (
     items: [{ productId: 7, article: 'AG-000002', problems: [{ message: 'Amber надіслав зміну, але кінцевий стан не підтверджено.', resolution: 'administrator' }] }],
     pageInfo: { limit: 20, offset: 0, total: 1, hasPrevious: false, hasNext: false },
   } });
-  shell(<SyncProblemsPage />);
+  shell(<SyncProblemsPage />, auth, 7);
   await screen.findAllByText(/кінцевий стан не підтверджено/);
   expect(screen.queryByRole('button', { name: /Повтор|Retry/ })).toBeNull();
   expect(screen.getByRole('link', { name: 'Відкрити товар' }).getAttribute('href')).toBe('/products/open?article=AG-000002');

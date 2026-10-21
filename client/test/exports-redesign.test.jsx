@@ -50,17 +50,16 @@ it('keeps price and product status failures independent and unknown counts disti
   fireEvent.click(screen.getByText('Стан сумісного потоку цін'));
   expect(screen.getByText('Дані про чергу недоступні')).toBeTruthy();
   expect(screen.queryByText('0 змін очікують експорту')).toBeNull();
-  expect(screen.getByRole('link', { name: /Історія створених файлів/ })).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'Мої експорти' })).toBeTruthy();
 });
 
 it('keeps retired product artifacts discoverable and a pending original operation mounted', () => {
   const workflow = { exportStatus: { delivery: { legacyProductCsvEnabled: false } }, priceExportStatus: { pendingCount: 0 } };
-  const view = render(<MemoryRouter><ExportLanding workflow={workflow} productTools={<p>Original operation</p>} /></MemoryRouter>);
-  expect(screen.getByText('CSV товарів вимкнено')).toBeTruthy();
+  const view = render(<MemoryRouter><ExportLanding workflow={workflow} historyContent={<p>Saved files</p>} productTools={<p>Original operation</p>} /></MemoryRouter>);
+  expect(screen.getByText('Saved files')).toBeTruthy();
+  expect(screen.queryByText('CSV товарів вимкнено')).toBeNull();
   expect(screen.queryByText('Original operation')).toBeNull();
-  expect(document.querySelector('.export-destination-list a').getAttribute('href')).toBe('/exports/history');
-  expect(screen.getByRole('link', { name: /Експорт цін \(сумісність\)/ }).classList.contains('btn-primary')).toBe(false);
-  expect(screen.getByRole('link', { name: /Історія створених файлів/ })).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'Мої експорти' }).getAttribute('href')).toBe('/exports/sessions');
   view.rerender(<MemoryRouter><ExportLanding workflow={{ ...workflow, pendingCreate: { key: 'original' } }} productTools={<p>Original operation</p>} /></MemoryRouter>);
   expect(screen.getByText('Original operation')).toBeTruthy();
 });

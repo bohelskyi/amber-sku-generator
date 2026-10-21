@@ -1,7 +1,6 @@
 import { Link } from 'react-router-dom';
-import { useState } from 'react';
-import { useAuth } from '../../auth/auth-context.js';
-import { EmptyState, SectionHeader, StatusBadge } from '../ui/index.js';
+import { Button, Notice, StatusBadge, TechnicalDisclosure } from '../ui/index.js';
+import MagentoStructureResult from './MagentoStructureResult.jsx';
 
 export function CategoryCard({ category }) {
   const operational = category.operational;
@@ -20,31 +19,35 @@ export function CategoryCard({ category }) {
   </article>;
 }
 
-export default function MagentoOverview({ categories, all = false, canManage }) {
-  const { permissions } = useAuth(); const [query, setQuery] = useState(''); const [filter, setFilter] = useState('all');
-  const operational = categories.filter((category) => category.operational.count > 0);
-  const preparation = categories.filter((category) => category.preparation.needed && !category.operational.count);
-  const found = categories.filter((category) => `${category.name} ${category.code}`.toLocaleLowerCase('uk').includes(query.toLocaleLowerCase('uk'))
-    && (filter === 'all' || filter === 'attention' && category.operational.count > 0 || filter === 'preparation' && category.preparation.needed));
-  return <div className="space-y-5">
-    <SectionHeader title={all ? 'Категорії' : 'Потребують уваги'}
-      actions={<Link className="btn btn-outline btn-compact-md" to={all ? '/admin/magento' : '/admin/magento/categories'}>{all ? 'До огляду' : 'Усі категорії'}</Link>} />
-    {all ? <>
-      <p className="text-sm text-slate-600">Розміщення в магазині, характеристики та стан товарів кожної категорії.</p>
-      <div className="magento-category-actions"><label>Пошук категорії<input type="search" className="input" value={query} onChange={(event) => setQuery(event.target.value)} /></label><label>Показати<select className="input" value={filter} onChange={(event) => setFilter(event.target.value)}><option value="all">Усі категорії</option><option value="attention">З проблемами доставки</option><option value="preparation">Потребують підготовки</option></select></label>{permissions.includes('catalog.manage') && <Link className="btn btn-outline" to="/admin/magento/categories/new">Додати категорію</Link>}<Link className="text-sm underline" to="/admin/magento/rules">Усі набори правил і версії</Link></div>
-      <div className="magento-category-list">{found.map((category) => <div className="magento-category-row" key={category.code}><div><Link className="font-semibold underline" to={`/admin/magento/categories/${encodeURIComponent(category.code)}`}>{category.name}</Link><p className="text-sm text-slate-600">{category.code}</p></div><div><p>{category.operational.state !== 'known' ? 'Дані доставки недоступні' : category.operational.count ? `Потребують уваги: ${category.operational.count} товарів` : 'Зафіксованих проблем немає'}</p><small>{category.preparation.needed ? category.preparation.reasons[0]?.message || 'Потрібна підготовка' : 'Невирішених структурних питань немає'}</small></div><Link className="btn btn-outline" to={`/admin/magento/categories/${encodeURIComponent(category.code)}`}>Відкрити категорію</Link></div>)}</div>
-      {!found.length && <EmptyState>Категорій за цим фільтром немає.</EmptyState>}
-    </> : <>
-      {operational.length > 0 && <section aria-labelledby="magento-operational-title"><h3 id="magento-operational-title" className="mb-3 font-semibold">Проблеми поточної доставки</h3>
-        <div className="magento-category-grid">{operational.map((category) => <CategoryCard key={category.code} category={category} />)}</div>
-      </section>}
-      {canManage && <section className="magento-start-guide" aria-label="Робота з інтеграцією"><h3 className="font-semibold">Що потрібно зробити?</h3><div>{permissions.includes('catalog.manage') && <Link to="/admin/magento/categories/new">Додати категорію товарів</Link>}<Link to="/admin/magento/categories">Змінити розміщення або характеристики</Link><Link to="/admin/magento/changes">Продовжити підготовлені зміни</Link></div></section>}
-      {preparation.length > 0 && <section aria-labelledby="magento-preparation-title"><h3 id="magento-preparation-title" className="mb-2 font-semibold">Підготовка перед використанням</h3>
-        <p className="mb-3 text-sm text-slate-600">Ці питання стосуються майбутніх змін відповідностей і самі по собі не означають збій поточної доставки.</p>
-        <div className="magento-category-grid">{preparation.map((category) => <CategoryCard key={category.code} category={category} />)}</div>
-      </section>}
-      {!operational.length && !preparation.length && <EmptyState>{categories.some((category) => category.operational.state !== 'known') ? 'Питань підготовки немає. Дані про поточні проблеми недоступні.' : 'Додаткових дій зараз не потрібно.'}</EmptyState>}
-      {canManage && preparation.length > 0 && <Link className="btn btn-primary" to="/admin/magento/prepare">Підготувати зміни інтеграції</Link>}
-    </>}
-  </div>;
+export default function MagentoOverview({ integration, observation, checking, checkError, onCheck, canManage }) {
+  if (!integration) return null;
+  const operational = integration.operational;
+  const published = integration.activePublication;
+  const date = value => value ? new Date(value).toLocaleString('uk-UA', { dateStyle: 'short', timeStyle: 'short' }) : 'Ще не перевірено';
+  return <section className="store-connection" aria-label="Стан підключення магазину">
+    <dl className="store-connection-facts">
+      <div><dt>Магазин</dt><dd>{integration.storeHost || 'Magento'}</dd></div>
+      <div><dt>Підключення</dt><dd>{integration.configured ? 'Налаштовано' : 'Не налаштовано'}</dd></div>
+      <div><dt>Автоматичне передавання</dt><dd>{integration.delivery.state === 'enabled' ? 'Увімкнено' : integration.delivery.state === 'disabled' ? 'Вимкнено' : 'Стан невідомий'}</dd></div>
+      <div><dt>Перевірка в цьому сеансі</dt><dd>{date(observation?.observedAt)}</dd></div>
+    </dl>
+    <div className="store-connection-check"><Button variant="primary" busy={checking} disabled={!integration.configured} onClick={onCheck}>Перевірити підключення</Button>
+      <p>Перевіряє доступ до Magento та структуру магазину. Доставку товарів показано окремо.</p></div>
+    {checkError && <Notice tone="error">{checkError}{observation && ' Остання успішна перевірка показана вище.'}</Notice>}
+    {observation && !checkError && <Notice tone="success">Magento відповів · {date(observation.observedAt)}.</Notice>}
+    <div className="store-connection-work">
+      {operational.state === 'known' ? operational.count > 0
+        ? <Link className="btn btn-outline btn-compact-md" to="/attention">Потребують уваги: {operational.count} товарів</Link>
+        : <p>Зафіксованих проблем товарів немає.</p> : <p>Дані про проблеми товарів недоступні.</p>}
+      <Link className="btn btn-outline btn-compact-md" to="/admin/catalog">Відкрити Каталог</Link>
+      {canManage && integration.draftCount > 0 && <Link className="btn btn-outline btn-compact-md" to="/admin/magento/changes">Продовжити зміни ({integration.draftCount})</Link>}
+    </div>
+    {observation?.comparison && !checkError && <TechnicalDisclosure summary="Результат перевірки структури">{() => <MagentoStructureResult comparison={observation.comparison} activeId={published?.id} />}</TechnicalDisclosure>}
+    <TechnicalDisclosure summary="Технічні дані підключення">{() => <dl className="store-connection-facts">
+      <div><dt>Чинні правила</dt><dd>{published ? `Версія ${published.versionNumber} · ${date(published.publishedAt)}` : 'Ще не опубліковано'}</dd></div>
+      <div><dt>Збережене спостереження структури</dt><dd>{date(integration.structureObservation?.observedAt)}</dd></div>
+      <div><dt>Локальні дані оновлено</dt><dd>{date(integration.asOf)}</dd></div>
+      <div><dt>Ідентифікатор правил</dt><dd>{published?.id || '—'}</dd></div>
+    </dl>}</TechnicalDisclosure>
+  </section>;
 }

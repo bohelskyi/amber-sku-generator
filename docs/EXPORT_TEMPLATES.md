@@ -310,8 +310,15 @@ Unrelated blockers are returned as `globalSourceDiagnostics`, with
 `publicationReady: false` and authoritative `sampleProducts` identities. The UI
 keeps these separate from full-template validation and product readiness, and
 marks changed-selection/revision results stale. This scoped behavior applies
-only to draft test-preview: full validation, publication and published export
+to draft test-preview and stateless unsaved examples: full validation, publication and published export
 continue requiring all source evidence. A sample yields no export token.
+
+`POST /admin/export-templates/evaluate-example` accepts `definition` and the same
+explicit `productIds` sample, with template manage + exports.view and CSRF.
+It uses the same compiler, source checks and evaluator in a read-only transaction;
+no family, draft, version, audit mutation or publication token is created.
+The definition is browser-local until the separate save workflow succeeds. Existing
+example families are retained. This preview cannot authorize publication or delivery.
 The ordinary editor exposes standard question-based attribute mappings directly,
 preserving frozen contracts/guards and coordinating each field's readiness refs.
 Read-only `/admin/export-templates/source-details` (template view) supplies

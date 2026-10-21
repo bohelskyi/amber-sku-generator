@@ -43,6 +43,14 @@ router.get('/magento/problems', requirePermission('products.view'), async (req, 
   try { res.json(await require('../../services/magento/sync-problems').problems(require('../../config/env').magento)); }
   catch (error) { next(error); }
 });
+router.get('/magento/problem-groups/page', requirePermission('products.view'), async (req, res, next) => {
+  try { res.json(await require('../../services/magento/problem-groups').groupPage(require('../../config/env').magento, req.query || {})); }
+  catch (error) { next(error); }
+});
+router.get('/magento/problem-groups/:groupId/products', requirePermission('products.view'), async (req, res, next) => {
+  try { res.json(await require('../../services/magento/problem-groups').groupProducts(require('../../config/env').magento, req.params.groupId, req.query || {})); }
+  catch (error) { next(error); }
+});
 router.get('/magento/problems/page', requirePermission('products.view'), async (req, res, next) => {
   try { res.json(await require('../../services/magento/sync-problems').problemPage(require('../../config/env').magento, req.query || {})); }
   catch (error) { next(error); }

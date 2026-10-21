@@ -98,7 +98,7 @@ it.each([false, true])('publication impact keeps restored coverage distinct from
   await screen.findByText(/Перевірено вплив правил на поточні товари: 3339\. Для перевірки й синхронізації: 244\./);
   expect(screen.getByText('NM-1 · Змінились дані для синхронізації')).toBeTruthy();
   expect(screen.getByText('NM-2 · Правила тепер охоплюють товар')).toBeTruthy();
-  expect(screen.getByText(/Готовність кожного товару до надсилання перевіряється окремо, зокрема історія та поля першої синхронізації/)).toBeTruthy();
+  expect(screen.getByText(compact ? /Результат Magento перевіряється окремо/ : /Готовність кожного товару до надсилання перевіряється окремо, зокрема історія та поля першої синхронізації/)).toBeTruthy();
   expect(screen.queryByText(/Готовність відновлено|До доставки:|До синхронізації буде передано/)).toBeNull();
   expect(screen.getByRole('button', { name: 'Застосувати правила' }).disabled).toBe(false);
   expect(api.post.mock.calls).toEqual([['/admin/magento-integration/publication/preview', {

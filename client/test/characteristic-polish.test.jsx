@@ -27,7 +27,8 @@ it('omits absent optional/dependent rows while retaining selected, zero and hist
   expect(rows.join('\n')).toContain('Історичний нуль0');
   expect(rows.join('\n')).toContain('Історично невідомеНевідомо (збережено: 90)');
   expect(rows.join('\n')).toContain('Архівний вибірІсторичний архівний варіант');
-  expect(screen.getByText('AG-000020')).toBeTruthy();
+  // AppPage owns the product identity; the detail does not repeat it.
+  expect(screen.queryByText('AG-000020')).toBeNull();
 });
 
 it('retains placeholder rows in the existing non-stored SKU decoding view', () => {
@@ -44,7 +45,7 @@ it.each([false, true])('keeps only the parent business change in comparison (acc
   expect(rows[0].textContent).toBe('Тип сувеніраПисьмовий набір → Годинник');
   expect(container.querySelectorAll('.recount-inline-change')).toHaveLength(1);
   expect(screen.getByRole('textbox', { name: 'Числове поле' }).value).toBe('0');
-  expect(container.textContent).toContain('AG-000020');
+  expect(container.textContent).not.toContain('AG-000020');
 });
 
 it('keeps visible clears and genuine historical unknown/zero removal in comparison', () => {

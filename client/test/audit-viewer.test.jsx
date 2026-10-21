@@ -1,5 +1,5 @@
 import AdministrationPage from '../src/pages/AdministrationPage.jsx';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AuthContext } from '../src/auth/auth-context.js';
@@ -54,15 +54,15 @@ describe('global audit viewer', () => {
     render(<AuthContext.Provider value={authValue()}><AuditPage /></AuthContext.Provider>);
     expect(await screen.findByText('Роль користувача змінено')).toBeTruthy();
     expect(screen.getByText('Історичне ім’я')).toBeTruthy();
-    expect(screen.getByText('Невідома подія')).toBeTruthy();
+    expect(screen.getByText('Подія: future_domain.new_action')).toBeTruthy();
     expect(screen.getByText('Виконавець не записаний')).toBeTruthy();
     expect(screen.queryByText('future_domain.new_action')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Відкрити деталі: Невідома подія' }));
-    fireEvent.click(screen.getByText('Технічні деталі'));
+    fireEvent.click(screen.getByRole('button', { name: 'Відкрити деталі: Подія: future_domain.new_action' }));
+    fireEvent.click(screen.getByText('Повний запис події'));
     expect(screen.getByText('future_domain.new_action')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Закрити' }));
     fireEvent.click(screen.getByRole('button', { name: 'Відкрити деталі: Роль користувача змінено' }));
-    expect(screen.getByText(/Manager/)).toBeTruthy();
+    expect(within(screen.getByRole('dialog')).getByText(/Manager/)).toBeTruthy();
   });
 
   it('applies and clears filters while replacing cursor pages', async () => {
@@ -82,7 +82,7 @@ describe('global audit viewer', () => {
     await waitFor(() => expect(get).toHaveBeenCalledWith('/admin/audit-events', { params: {} }));
     expect(await screen.findByText('Роль користувача змінено')).toBeTruthy();
 
-    fireEvent.change(screen.getByLabelText('Домен'), { target: { value: 'product' } });
+    fireEvent.change(screen.getByLabelText('Розділ'), { target: { value: 'product' } });
     fireEvent.click(screen.getByText('Розширені фільтри'));
     fireEvent.change(screen.getByLabelText('ID виконавця'), { target: { value: '7' } });
     fireEvent.click(screen.getByRole('button', { name: 'Застосувати' }));

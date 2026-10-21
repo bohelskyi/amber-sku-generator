@@ -61,6 +61,8 @@ export function CatalogCharacteristicEditor({ categoryCode, questionKey = null,
   const [mode, setMode] = useState(questionKey ? initialAction : 'new-question');
   const [receipt, setReceipt] = useState(null);
   const [handoffError, setHandoffError] = useState('');
+  const [optionSearch, setOptionSearch] = useState('');
+  const [optionPage, setOptionPage] = useState(0);
   const activeKey = receipt?.questionKey || questionKey;
   const category = admin.config?.categories?.[categoryCode];
   const questions = admin.config?.questions?.[categoryCode] || [];
@@ -68,6 +70,9 @@ export function CatalogCharacteristicEditor({ categoryCode, questionKey = null,
   const requestedOptions = (question?.options || []).filter((item) => String(item.id) === String(optionValue)
     && (optionId == null || String(item.db_id) === String(optionId)));
   const requestedOption = requestedOptions.length === 1 ? requestedOptions[0] : null;
+  const orderedOptions = requestedOption ? [requestedOption, ...(question.options || []).filter((option) => option.db_id !== requestedOption.db_id)] : question?.options || [];
+  const filteredOptions = orderedOptions.filter((option) => `${option.label} ${option.label_en || ''}`.toLocaleLowerCase('uk').includes(optionSearch.trim().toLocaleLowerCase('uk')));
+  const currentOptionPage = Math.min(optionPage, Math.max(0, Math.ceil(filteredOptions.length / 25) - 1));
 
   const initialize = useEffectEvent(() => {
     if (initialized.current || !admin.config || !category) return;
@@ -144,21 +149,29 @@ export function CatalogCharacteristicEditor({ categoryCode, questionKey = null,
             {admin.canManageCatalog && <Button disabled={boundary.busy || enabled(question.archived)} onClick={newOption}>Додати значення</Button>}
           </div>
           {!question.options?.length && <p>Додайте перше значення для цієї характеристики.</p>}
-          <ul className="catalog-embedded-options">{(question.options || []).map((option) => <li key={option.db_id}>
-            <div><strong>{option.label}</strong>{option.label_en && <span>{option.label_en}</span>}{enabled(option.archived) && <StatusBadge>В архіві</StatusBadge>}</div>
-            <div className="catalog-embedded-actions">
-              {admin.canManageCatalog && <><Button disabled={boundary.busy} onClick={() => openOption(option)}>Редагувати {option.label}</Button>
-                <Button disabled={boundary.busy} onClick={() => run(() => admin.archiveOption(option, !enabled(option.archived)))}>{enabled(option.archived) ? 'Відновити' : 'Архівувати'} {option.label}</Button></>}
-              {onConnect && !enabled(question.archived) && !enabled(option.archived) && <Button disabled={boundary.busy} onClick={() => connect(option.id)}>Зіставити {option.label}</Button>}
-            </div>
-          </li>)}</ul>
+          {question.options?.length > 0 && <>
+            <label className="catalog-option-search">Пошук значення<input type="search" className="input" value={optionSearch} onChange={(event) => { setOptionSearch(event.target.value); setOptionPage(0); }} /></label>
+            <div className="catalog-options-scroll"><table className="catalog-options-table"><thead><tr><th>Українською</th><th>Англійською</th><th>Дії</th></tr></thead><tbody>
+              {filteredOptions.slice(currentOptionPage * 25, (currentOptionPage + 1) * 25).map((option) => <tr key={option.db_id}>
+                <th scope="row">{option.label}{enabled(option.archived) && <StatusBadge>В архіві</StatusBadge>}</th><td>{option.label_en || '—'}</td>
+                <td><div className="catalog-embedded-actions">{admin.canManageCatalog && <Button aria-label={`Редагувати ${option.label}`} disabled={boundary.busy} onClick={() => openOption(option)}>Редагувати</Button>}
+                  {(admin.canManageCatalog || onConnect && !enabled(question.archived) && !enabled(option.archived)) && <details className="catalog-option-actions"><summary aria-label={`Інші дії: ${option.label}`}>Інші дії</summary>
+                    {onConnect && !enabled(question.archived) && !enabled(option.archived) && <Button disabled={boundary.busy} onClick={() => connect(option.id)}>Зіставити {option.label}</Button>}
+                    {admin.canManageCatalog && <Button disabled={boundary.busy} onClick={() => run(() => admin.archiveOption(option, !enabled(option.archived)))}>{enabled(option.archived) ? 'Відновити' : 'Архівувати'} {option.label}</Button>}
+                  </details>}
+                </div></td>
+              </tr>)}
+            </tbody></table></div>
+            {!filteredOptions.length && <p>Значень за цим пошуком немає.</p>}
+            {filteredOptions.length > 25 && <nav className="catalog-embedded-actions" aria-label="Сторінки значень характеристики"><Button disabled={!currentOptionPage} onClick={() => setOptionPage(currentOptionPage - 1)}>Назад</Button><span>{currentOptionPage + 1} / {Math.ceil(filteredOptions.length / 25)}</span><Button disabled={(currentOptionPage + 1) * 25 >= filteredOptions.length} onClick={() => setOptionPage(currentOptionPage + 1)}>Далі</Button></nav>}
+          </>}
         </section>}
       </>}
       {!question && <Notice title="Оновіть дані каталогу" actions={<Button onClick={admin.retryConfig}>Оновити каталог</Button>}>Збереження завершено. Для наступного редагування потрібні актуальні дані.</Notice>}
     </section>}
     <section className="catalog-embedded-delivery" aria-label="Передавання в магазин">
       <h3>Передавання в магазин</h3>
-      <p>Збереження змінює каталог додатку. Характеристика може використовуватися лише тут. Передавання в магазин налаштовується окремо.</p>
+      <p>Характеристика доступна в Менеджері. За потреби підключіть її до магазину.</p>
       {onConnect && activeKey && !enabled(question?.archived) && <Button disabled={boundary.busy}
         onClick={() => connect(receipt?.kind === 'option' && !['archived', 'restored'].includes(receipt.action) ? receipt.valueId : undefined)}>Налаштувати передавання</Button>}
       {!activeKey && <p>Спочатку збережіть характеристику.</p>}

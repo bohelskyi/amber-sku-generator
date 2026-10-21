@@ -26,6 +26,7 @@ function HistoryWorkspace() {
     if (snapshotId) return;
     const generation = ++ticket.current; let live = true;
     exportsApi.getHistory({ stream, scope, status, limit: 20, ...(after ? { after } : {}) }).then((response) => {
+      if (!Array.isArray(response.data?.items)) throw new Error('Не вдалося прочитати список файлів. Оновіть список.');
       if (live && principalLifetime?.valid !== false && generation === ticket.current) { setData({ ...response.data, filterKey }); setError(''); }
     }).catch((e) => { if (live && principalLifetime?.valid !== false) { setData(null); setError(getApiError(e)); } });
     return () => { live = false; };
@@ -39,7 +40,7 @@ function HistoryWorkspace() {
     setData(null); setError(''); setParams(next, { state: { exportHistoryBack: previous } });
   };
   const visible = data?.filterKey === filterKey ? data : null;
-  return <section className="space-y-4"><SectionHeader title="Історія файлів" description="Збережені файли товарів і цін. Підтвердження в Amber не є результатом імпорту в Magento."
+  return <section className="space-y-4"><SectionHeader title="Історія файлів"
     actions={<Button onClick={() => { setData(null); setError(''); setRefresh((n) => n + 1); }}>Оновити список</Button>} />
     <div className="flex flex-wrap gap-3">
       <label>Потік<select className="input" value={stream} onChange={(e) => filter('stream', e.target.value)}><option value="all">Усі потоки</option><option value="product">Товари</option><option value="price">Ціни</option></select></label>

@@ -62,6 +62,10 @@ const attributeActions = [];
 let attributeMember = false;
 let attributeProfile = null;
 let createdCategory = null;
+let attentionMode = false;
+const attentionGroupId = 'a'.repeat(32);
+const attentionProblem = { code: 'FIRST_SYNC_FIELD_CONFLICT', resolution: 'first_sync_fields', target: 'weight', scope: 'all', message: 'Виберіть значення ваги для товару.' };
+const attentionProduct = { productId: 7, article: 'AG-000007', category: 'SV', categoryName: 'Сувеніри', state: 'needs_attention', problems: [attentionProblem] };
 const server = http.createServer(async (request, response) => {
   const url = new URL(request.url, 'http://fixture');
   if (url.pathname.startsWith('/api/')) {
@@ -127,6 +131,15 @@ const server = http.createServer(async (request, response) => {
       case 'GET /api/export/status': data = { delivery: { legacyProductCsvEnabled: false, automaticSyncEnabled: true } }; break;
       case 'GET /api/price-export/status': data = { pendingCount: 0, excludedPendingCount: 0 }; break;
       case 'GET /api/magento/summary': data = { enabled: true, problemCount: 1 }; break;
+      case 'GET /api/magento/problem-groups/page': data = { items: [{ id: attentionGroupId, problem: attentionProblem, productCount: 32, sharedConfiguration: false, exampleProduct: attentionProduct }],
+        summary: { productCount: 32, diagnosticCount: 33 }, pageInfo: { total: 1, hasNext: false, hasPrevious: false }, categories: [{ code: 'SV', name: 'Сувеніри' }] }; break;
+      case `GET /api/magento/problem-groups/${attentionGroupId}/products`: data = { items: [{ ...attentionProduct, groupProblem: attentionProblem }], pageInfo: { total: 1 } }; break;
+      case 'GET /api/magento/problems/7': data = attentionProduct; break;
+      case 'POST /api/admin/magento-integration/first-sync/preview': data = { mode: 'first', sku: attentionProduct.article, previewToken: 'a'.repeat(64), complete: false, readyForOutbound: false, blockers: [],
+        fields: ['weight', 'price', ...Array.from({ length: 50 }, (_, index) => `field_${index}`)].map((target, index) => ({ target, scope: 'all',
+          status: index < 2 ? 'conflict' : 'equal', reason: index < 2 ? 'POPULATED_VALUES_DIFFER' : 'NORMALIZED_VALUES_EQUAL', received: index >= 2,
+          local: { known: true, present: true, value: index ? '4600' : '132.300' }, remote: { known: true, present: true, value: index ? '10000' : '140' },
+          canAcceptRemote: index < 2, canKeepLocal: index < 2 })) }; break;
       case 'GET /api/admin/magento-integration/overview': data = overview; break;
       case 'GET /api/admin/export-templates': data = { templates: [template] }; break;
       case 'GET /api/admin/export-templates/template': data = template; break;
@@ -135,7 +148,7 @@ const server = http.createServer(async (request, response) => {
       ], schemas: [{category_code:'SV',questions:[{key:'stone_processing'}]}] } }; break;
       case 'GET /api/admin/export-templates/source-details': data = {current:[{options:url.searchParams.get('key')==='stone_processing'?[{value_id:'0',label:'Не оброблений камінь'}]:[]}]}; break;
       case 'GET /api/admin/magento-integration': data = { revision: url.searchParams.get('bindingRevisionId') === 'draft' ? draft : binding,
-        currentPublishedId: binding.id, categories:createdCategory?[...categories,createdCategory]:categories, revisions: [{ id: 'draft', state: 'draft', revision: '7', observed_at: draft.observedAt }],
+        currentPublishedId: attentionMode ? '11111111-1111-4111-8111-111111111111' : binding.id, categories:createdCategory?[...categories,createdCategory]:categories, revisions: [{ id: 'draft', state: 'draft', revision: '7', observed_at: draft.observedAt }],
         templateVersions: [{ id: 'template-version', display_name: 'Шаблон', version_number: 3 }], configured: true, limitations: [], products: [],
         catalog:createdCategory?{...config,questions:{...config.questions,[createdCategory.code]:[]}}:config }; break;
       case 'GET /api/admin/magento-integration/bindings/published': case 'GET /api/admin/magento-integration/bindings/draft':
@@ -216,6 +229,39 @@ try {
   await command('Page.addScriptToEvaluateOnNewDocument', { source: "window.fixtureCopies=[];Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>{window.fixtureCopies.push(text)}}});" });
   await command('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
   const checks = [];
+  if (resourcesOnly) {
+    administrator = true;
+    for (const width of [1440, 380]) {
+      await command('Emulation.setDeviceMetricsOverride', { width, height:1000, deviceScaleFactor:1, mobile:false });
+      await navigate('/admin/magento/overview');
+      await wait("document.body.textContent.includes('Перевірка в цьому сеансі')");
+      assert.equal(await evaluate("document.body.textContent.includes('Налаштовано') && document.body.textContent.includes('Ще не перевірено')"), true);
+      assert.equal(await evaluate("document.querySelectorAll('.magento-category-card').length"), 0);
+      await noOverflow(`Store connection at ${width}px`); await screenshot(`store-connection-${width}`);
+    }
+    await click('Перевірити підключення'); await wait("document.body.textContent.includes('Magento відповів')");
+    attentionMode = true;
+    await navigate('/attention'); await wait("!!document.querySelector('.attention-groups')");
+    assert.equal(await evaluate("!!document.querySelector('[aria-label=\"З чого почати\"]')"), false);
+    await noOverflow('Attention cause table at 380px'); await screenshot('attention-causes-380');
+    await click('Переглянути товари'); await wait("!!document.querySelector('[data-product-id=\"7\"]')");
+    assert.equal(await evaluate("!!document.querySelector('[aria-label=\"З чого почати\"]')"), false);
+    await evaluate("document.querySelector('[data-product-id=\"7\"]').click()");
+    await wait("[...document.querySelectorAll('button')].some(button=>button.textContent.trim()==='Перевірити актуальні поля')");
+    assert.equal(requests.some(request=>request.path.endsWith('/first-sync/preview')), false, 'Opening the problem cannot read Magento');
+    await click('Перевірити актуальні поля'); await wait("!!document.querySelector('.first-sync-table')");
+    assert.equal(await evaluate("document.querySelectorAll('.first-sync-table tbody tr').length"), 2);
+    assert.equal(await evaluate("document.querySelectorAll('.first-sync-field-decision').length"), 0);
+    await evaluate("document.querySelector('button[aria-label=\"Розглянути: Вага · UA / основний магазин\"]').click()");
+    assert.equal(await evaluate("document.querySelectorAll('.first-sync-field-decision').length"), 1);
+    await noOverflow('First-sync selected field at 380px'); await screenshot('attention-field-380');
+    await click('Усі поля (52)');
+    assert.equal(await evaluate("document.querySelectorAll('.first-sync-table tbody tr').length"), 20);
+    assert.equal(await evaluate("document.querySelectorAll('.first-sync-field-decision').length"), 0);
+    await noOverflow('All first-sync fields at 380px');
+    attentionMode = false;
+    checks.push({storeConnection:'configured and explicitly observed kept distinct',attention:'cause groups, explicit product, one selected field',firstSync:'2 unresolved; all 52 fields paged at 20',width:380,noOverflow:true});
+  }
   if (!resourcesOnly) {
   for (const width of [1440, 390, 360]) {
     await command('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: 1, mobile: false });
@@ -442,7 +488,7 @@ try {
   assert.deepEqual(unexpected, [], 'All API requests must have explicit local fixtures');
   assert.deepEqual(blockedExternal, [], 'Application attempted external network access');
   assert.deepEqual(browserErrors, [], 'Browser runtime errors');
-  const allowedPosts = ['/api/admin/category', '/api/admin/magento-integration/discovery', '/api/admin/magento-integration/structure-check', '/api/admin/magento-integration/option-labels/inspect', '/api/preview', '/api/price-preview', '/api/save',
+  const allowedPosts = ['/api/admin/category', '/api/admin/magento-integration/discovery', '/api/admin/magento-integration/structure-check', '/api/admin/magento-integration/first-sync/preview', '/api/admin/magento-integration/option-labels/inspect', '/api/preview', '/api/price-preview', '/api/save',
     ...['preview','apply','assignment-preview','assignment-apply','reconcile'].map((action)=>`/api/admin/magento-integration/attributes/${action}`),
     ...['inspect','attest','preview','apply','reconcile'].map(action=>`/api/admin/magento-integration/options/${action}`)];
   const unexpectedWrites = requests.filter((request) => request.method !== 'GET'

@@ -328,27 +328,41 @@ async function testPreview(templateId, input, options = {}) {
   command(input, ['expectedRevision', 'expectedDefinitionHash', 'productIds']);
   const revision = counter(input.expectedRevision);
   const hash = expectedHash(input.expectedDefinitionHash);
-  if (!Array.isArray(input.productIds) || !input.productIds.length || input.productIds.length > 100
-    || input.productIds.some((id) => !Number.isInteger(id) || id <= 0 || id > 2147483647)
-    || new Set(input.productIds).size !== input.productIds.length) {
-    throw error(400, 'TEMPLATE_COMMAND_INVALID', 'Provide 1–100 unique positive product IDs');
-  }
+  validateProductIds(input.productIds);
   return readTransaction(options, async (client) => {
     const row = await loadDraft(client, templateId);
     assertDraft(row, revision, hash);
-    const compiled = pureCall(() => compileDefinition(row.definition));
-    const { products, missingProductIds } = await loadDraftPreviewProducts(client, input.productIds);
-    if (missingProductIds.length) throw error(422, 'TEMPLATE_PRODUCTS_MISSING', 'Requested products not found', { missingProductIds });
-    const evidence = await loadSourceEvidence(client, compiled.definition);
-    const { diagnostics, globalSourceDiagnostics } = pureCall(() => validateDraftSampleSources(compiled, evidence, products));
-    if (diagnostics.length) throw error(422, 'TEMPLATE_SOURCE_INVALID', 'Unresolved or unsupported sample source references',
-      { diagnostics, globalSourceDiagnostics });
-    const supported = await loadSupportInputs(client, compiled.definition, products);
-    return { revision, definitionHash: compiled.hash, draftOnly: true, publicationReady: false, globalSourceDiagnostics,
-      sampleProducts: products.map((product) => ({ productId: Number(product.id), sku: product.full_sku,
-        internalSku: product.full_sku, publicSku: product.public_sku, category: product.category })),
-      result: pureCall(() => evaluateBatch(compiled, supported.products)) };
+    return { revision, ...await evaluateSample(client, row.definition, input.productIds) };
   });
+}
+function validateProductIds(productIds) {
+  if (!Array.isArray(productIds) || !productIds.length || productIds.length > 100
+    || productIds.some((id) => !Number.isInteger(id) || id <= 0 || id > 2147483647)
+    || new Set(productIds).size !== productIds.length) {
+    throw error(400, 'TEMPLATE_COMMAND_INVALID', 'Provide 1–100 unique positive product IDs');
+  }
+}
+// Evaluate unsaved input without allocating a family, revision, audit or publication.
+// Product data and source evidence always come from the same read-only snapshot.
+async function evaluateExample(input, options = {}) {
+  command(input, ['definition', 'productIds']);
+  validateProductIds(input.productIds);
+  const { definition } = prepareDraft(input.definition);
+  return readTransaction(options, (client) => evaluateSample(client, definition, input.productIds));
+}
+async function evaluateSample(client, definition, productIds) {
+  const compiled = pureCall(() => compileDefinition(definition));
+  const { products, missingProductIds } = await loadDraftPreviewProducts(client, productIds);
+  if (missingProductIds.length) throw error(422, 'TEMPLATE_PRODUCTS_MISSING', 'Requested products not found', { missingProductIds });
+  const evidence = await loadSourceEvidence(client, compiled.definition);
+  const { diagnostics, globalSourceDiagnostics } = pureCall(() => validateDraftSampleSources(compiled, evidence, products));
+  if (diagnostics.length) throw error(422, 'TEMPLATE_SOURCE_INVALID', 'Unresolved or unsupported sample source references',
+    { diagnostics, globalSourceDiagnostics });
+  const supported = await loadSupportInputs(client, compiled.definition, products);
+  return { definitionHash: compiled.hash, draftOnly: true, publicationReady: false, globalSourceDiagnostics,
+    sampleProducts: products.map((product) => ({ productId: Number(product.id), sku: product.full_sku,
+      internalSku: product.full_sku, publicSku: product.public_sku, category: product.category })),
+    result: pureCall(() => evaluateBatch(compiled, supported.products)) };
 }
 async function publishTemplate(templateId, input, options = {}) {
   return mutation('publish', options, (client, context) => publishTemplateOnClient(client, context, templateId, input));
@@ -462,7 +476,7 @@ async function getExportTemplateOptions({ includeNonActive = false, ...options }
 }
 
 module.exports = { publishTemplateOnClient, createTemplateOnClient, prepareSourceSupport, applySourceSupport, upgradeDraft, systemProfile, prepareDraft, counter, listTemplates, getTemplate, createTemplate, saveDraft, cloneDraft,
-  validateDraft, testPreview, publishTemplate, getActivation, updateActivation, listSources,
+  validateDraft, testPreview, evaluateExample, publishTemplate, getActivation, updateActivation, listSources,
   loadVersion, verifyVersion, pureCall, prepareMagentoCandidate, getExportTemplateOptions,
   searchSampleProducts: (input, options = {}) => readTransaction(options, (client) => displayReads.searchSampleProducts(client, input)),
   sourceDetails: (input, options = {}) => readTransaction(options, (client) => displayReads.sourceDetails(client, input)) };

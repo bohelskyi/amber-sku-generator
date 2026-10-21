@@ -498,7 +498,6 @@ export default function CorrectionRequestsPage() {
     <PageHeader
       breadcrumbs={[{ label: 'Історичні запити' }]}
       title="Історичні запити"
-      description="Раніше створені запити та завершення розпочатої роботи. Поточні зміни виконуються безпосередньо в картці товару за відповідними дозволами."
       actions={isAdminView && canViewCatalogOrPricing ? <Link to="/admin" className="btn btn-outline">Налаштування</Link> : undefined}
     />
     {error && <Notice tone="error">{error}</Notice>}
@@ -546,8 +545,8 @@ export default function CorrectionRequestsPage() {
           {selectedRequest && <>
             <header className="correction-detail-header">
               <div><div className="correction-detail-badges"><CorrectionStatusBadge status={selectedRequest.status} /><RequestTypeBadge requestType={selectedRequest.requestType} /></div>
-                <h2>Запит #{selectedRequest.id}</h2>
-                <p>Створено {formatDateTime(selectedRequest.createdAt)} · Автор: {getEmployeeLabel(selectedRequest.createdByUser) || 'не вказано'}</p></div>
+                <h2>{selectedRequest.sourceArticle || 'Артикул недоступний'}</h2>
+                <p>Запит #{selectedRequest.id} · {formatDateTime(selectedRequest.createdAt)} · {getEmployeeLabel(selectedRequest.createdByUser) || 'Автор не вказаний'}</p></div>
               {historyIdentity && <Link to={`/products/history?sku=${encodeURIComponent(historyIdentity)}`} className="btn btn-outline btn-compact-md">Історія товару</Link>}
             </header>
 
@@ -557,31 +556,24 @@ export default function CorrectionRequestsPage() {
                 : 'Успадкований запит у роботі без визначеного працівника.'}
             </Notice>}
 
-            <div className="correction-identity-comparison">
-              <section><span>Зараз</span><div><strong>{selectedRequest.sourceArticle || 'Артикул недоступний'}</strong>
-                <CopyAction compact value={selectedRequest.sourceArticle || ''} disabled={!selectedRequest.sourceArticle} buttonLabel="Скопіювати поточний артикул" /></div>
-                <p>{formatUah(selectedRequest.oldPayload?.totalPriceUah)}</p></section>
+            <div className="correction-identity-comparison" aria-label="Зміна ціни">
+              <section><span>Зараз</span><p>{formatUah(selectedRequest.oldPayload?.totalPriceUah)}</p></section>
               <ArrowRight size={18} aria-hidden="true" />
-              <section><span>Після застосування</span><div><strong>{selectedRequest.proposedArticle || selectedRequest.sourceArticle || 'Артикул недоступний'}</strong>
-                <CopyAction compact value={selectedRequest.proposedArticle || selectedRequest.sourceArticle || ''}
-                  disabled={!selectedRequest.proposedArticle && !selectedRequest.sourceArticle} buttonLabel="Скопіювати результуючий артикул" /></div>
+              <section><span>Після застосування</span>
                 <div><p>{formatUah(proposedPrice)}</p><CopyAction compact value={proposedPrice === null || proposedPrice === undefined ? '' : String(proposedPrice)}
                   disabled={proposedPrice === null || proposedPrice === undefined} buttonLabel="Скопіювати точну нову ціну" /></div></section>
             </div>
+            {selectedRequest.proposedArticle && selectedRequest.proposedArticle !== selectedRequest.sourceArticle && <p>Новий артикул: <strong>{selectedRequest.proposedArticle}</strong></p>}
 
             <section className="correction-detail-section">
-              <h3>{selectedRequest.requestType === 'price_change' ? 'Зміна ціни' : 'Зміни характеристик'}</h3>
-              {selectedRequest.requestType === 'price_change'
-                ? <dl className="correction-price-change"><div><dt>Поточна ціна</dt><dd>{formatUah(selectedRequest.oldPayload?.totalPriceUah)}</dd></div><div><dt>Запитана ціна</dt><dd>{formatUah(proposedPrice)}</dd></div></dl>
-                : <RequestChanges config={config} request={selectedRequest} />}
+              {selectedRequest.requestType !== 'price_change' && <><h3>Зміни характеристик</h3><RequestChanges config={config} request={selectedRequest} /></>}
               <p className="correction-pricing-line"><PricingDecision request={selectedRequest} /></p>
               {selectedRequest.comment && <blockquote>{selectedRequest.comment}</blockquote>}
             </section>
 
             {selectedRequest.refreshRequired && <Notice tone="warning">Розрахунок застарів. Оновіть його і повторно перевірте дані перед виконанням.</Notice>}
-            {selectedRequest.delivery && <Notice tone={selectedRequest.delivery.route === 'normal' ? 'info' : 'warning'}>
-              {selectedRequest.delivery.route === 'normal' ? 'Після зміни буде створено окреме зобов’язання першої доставки до Magento.'
-                : ({ prior_exposure: 'Доставка наступника потребує узгодження попереднього експорту.', historical_ambiguity: 'Доставка очікуватиме перевірки історії експорту.', intentional_exclusion: 'Наступник успадкує виключення з доставки.', invalid_lineage: 'Доставка очікуватиме перевірки історії виправлень.' })[selectedRequest.delivery.holdReason] || 'Доставка потребує окремої перевірки.'}
+            {selectedRequest.delivery && (selectedRequest.delivery.route !== 'normal' || selectedRequest.delivery.nameReviewRequired) && <Notice tone="warning">
+              {selectedRequest.delivery.route !== 'normal' && (({ prior_exposure: 'Передавання в магазин потребує перевірки попереднього експорту.', historical_ambiguity: 'Передавання очікуватиме перевірки історії.', intentional_exclusion: 'Товар залишиться виключеним із передавання.', invalid_lineage: 'Передавання очікуватиме перевірки історії виправлень.' })[selectedRequest.delivery.holdReason] || 'Передавання в магазин потребує окремої перевірки.')}
               {selectedRequest.delivery.nameReviewRequired && ' Успадковані назви також потребують перевірки.'}
             </Notice>}
 
@@ -593,7 +585,7 @@ export default function CorrectionRequestsPage() {
 
             <footer className="correction-detail-actions">
               {(selectedRequest.status === 'pending' || (selectedRequest.hasUnownedLegacyClaim && !selectedRequest.claimFingerprint)) && canClaim &&
-                <Button onClick={() => claimRequest(selectedRequest)} busy={requestBusy}><Play size={15} aria-hidden="true" />Взяти в роботу</Button>}
+                <Button variant="primary" onClick={() => claimRequest(selectedRequest)} busy={requestBusy}><Play size={15} aria-hidden="true" />Взяти в роботу</Button>}
               {selectedRequest.status === 'pending' && canReject && <Button variant="danger" onClick={() => updateStatus(selectedRequest, 'rejected')} busy={requestBusy}><XCircle size={15} aria-hidden="true" />Відхилити</Button>}
               {selectedRequest.status === 'in_progress' && isOwnedClaim && <>
                 {canComplete && <Button onClick={() => refreshRequest(selectedRequest)} busy={requestBusy}><RefreshCw size={15} aria-hidden="true" />Оновити розрахунок</Button>}

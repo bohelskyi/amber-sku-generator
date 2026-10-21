@@ -161,8 +161,8 @@ it('admin opens only a local exact-product retry review and unresolved dispatch 
 
 it('saved diagnostics are historical while current delivery is pending, without suggesting another resend', async () => {
   const item = { productId: 1, article: 'SV1', category: 'SV', state: 'pending', problems: [{ code: 'unexpected_failure', resolution: 'administrator' }] };
-  api.get.mockResolvedValue({ data: { items: [item], pageInfo: { total: 1 }, categories: [] } });
-  render(shell(<SyncProblemsPage />, { ...auth, permissions: ['products.view'], roles: [] }));
+  api.get.mockImplementation(async url => ({ data: url === '/magento/problems/1' ? item : { items: [item], pageInfo: { total: 1 }, categories: [] } }));
+  render(<AuthContext.Provider value={{ ...auth, permissions: ['products.view'], roles: [] }}><MemoryRouter initialEntries={['/attention?problem=1']}><SyncProblemsPage /></MemoryRouter></AuthContext.Provider>);
   await screen.findByText('Magento: Очікує синхронізації');
   expect(screen.getByText('Попередні причини цього товару (1)')).toBeTruthy();
   expect(screen.queryByRole('region', { name: 'З чого почати' })).toBeNull();

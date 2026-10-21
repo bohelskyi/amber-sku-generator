@@ -208,6 +208,7 @@ test('product create, direct recount, and archive share local actor attribution 
 });
 
 test('product register keeps history authorization and bounded filter-bound paging', async () => {
+  if (!suite.authenticatedSession) suite.authenticatedSession = await authenticateApplicationSession('/');
   const userId = suite.authenticatedSession.applicationUser.id;
   const role = await pool.query(
     `INSERT INTO roles(role_key, display_name, description, is_system)
@@ -270,7 +271,8 @@ test('product register keeps history authorization and bounded filter-bound pagi
     assert.equal(literalWildcard.data.items.length, 0, literalWildcard.text);
 
     nullTimestampProduct = (await pool.query(
-      `SELECT p.id, p.created_at, identity.public_sku
+      `SELECT p.id, p.created_at, p.magento_name_subject_ua, p.magento_name_subject_en,
+              p.magento_name_override, identity.public_sku
        FROM products p
        JOIN public_product_identities identity ON identity.id = p.public_product_identity_id
        WHERE COALESCE(p.status, 'active') <> 'voided'
@@ -284,11 +286,41 @@ test('product register keeps history authorization and bounded filter-bound pagi
     assert.equal(nullTimestamp.response.status, 200, nullTimestamp.text);
     assert.equal(nullTimestamp.data.items.length, 1);
     assert.equal(nullTimestamp.data.items[0].createdAt, null);
+    const ua = `Реєстр UA 100%_${nullTimestampProduct.id}`;
+    const en = `Register English ${nullTimestampProduct.id}`;
+    await pool.query(`UPDATE products SET magento_name_subject_ua=$1, magento_name_subject_en=$2,
+      magento_name_override=NULL WHERE id=$3`, [ua, en, nullTimestampProduct.id]);
+    for (const search of [ua, en.toLowerCase()]) {
+      const named = await request(`/api/products/register?lifecycle=all&search=${encodeURIComponent(search)}`);
+      assert.equal(named.response.status, 200, named.text);
+      assert.equal(named.data.items.length, 1);
+      assert.equal(named.data.items[0].id, Number(nullTimestampProduct.id));
+      assert.equal(named.data.items[0].nameUa, ua);
+      assert.equal(named.data.items[0].nameEn, en);
+      assert.equal(named.data.items[0].nameKind, 'subject');
+    }
+    const override = { generated: { all: ua, en }, values: {
+      all: `Повна збережена назва ${nullTimestampProduct.id}`, en: `Exact full name ${nullTimestampProduct.id}`,
+    } };
+    // Subjects must be populated or absent as a pair; exact names are a separate pair.
+    await pool.query(`UPDATE products SET magento_name_subject_ua=NULL, magento_name_subject_en=NULL,
+      magento_name_override=$1::jsonb WHERE id=$2`, [JSON.stringify(override), nullTimestampProduct.id]);
+    for (const search of [override.values.all, override.values.en.toLowerCase()]) {
+      const exactName = await request(`/api/products/register?lifecycle=all&search=${encodeURIComponent(search)}`);
+      assert.equal(exactName.response.status, 200, exactName.text);
+      assert.equal(exactName.data.items.length, 1);
+      assert.equal(exactName.data.items[0].id, Number(nullTimestampProduct.id));
+      assert.equal(exactName.data.items[0].nameUa, override.values.all);
+      assert.equal(exactName.data.items[0].nameEn, override.values.en);
+      assert.equal(exactName.data.items[0].nameKind, 'saved_full_name');
+    }
   } finally {
     if (nullTimestampProduct) {
       await pool.query(
-        'UPDATE products SET created_at = $1 WHERE id = $2',
-        [nullTimestampProduct.created_at, nullTimestampProduct.id]
+        `UPDATE products SET created_at=$1, magento_name_subject_ua=$3, magento_name_subject_en=$4,
+          magento_name_override=$5::jsonb WHERE id=$2`,
+        [nullTimestampProduct.created_at, nullTimestampProduct.id, nullTimestampProduct.magento_name_subject_ua,
+          nullTimestampProduct.magento_name_subject_en, nullTimestampProduct.magento_name_override && JSON.stringify(nullTimestampProduct.magento_name_override)]
       );
     }
     await suite.replaceActiveRoleForTest(userId, 'administrator');

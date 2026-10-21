@@ -312,6 +312,22 @@ test('PR2 validation and test-preview read only authoritative stored inputs and 
   assert.equal(preview.data.result.status, 'ready');
   assert.match(preview.data.result.artifacts[0].csvContent, /1234\.56/);
   assert.equal(preview.data.previewToken, undefined);
+  const templateState = async () => (await pool.query(`SELECT
+    (SELECT jsonb_agg(t ORDER BY id) FROM export_templates t) AS families,
+    (SELECT jsonb_agg(t ORDER BY template_id) FROM export_template_drafts t) AS drafts,
+    (SELECT jsonb_agg(t ORDER BY id) FROM export_template_versions t) AS versions`)).rows[0];
+  const beforeExamples = await templateState();
+  const exampleDefinition = structuredClone(f.draft.definition);
+  exampleDefinition.groups[0].rows[0].cells.name = literal('Приклад українською');
+  exampleDefinition.groups[0].rows[1].cells.name = literal('Example in English');
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const example = await request(`${root}/evaluate-example`, { authentication: admin, method: 'POST', body: { definition: exampleDefinition, productIds: [stored.id] } });
+    assert.equal(example.response.status, 200, example.text);
+    assert.match(example.data.result.artifacts[0].csvContent, /Приклад українською/);
+    assert.match(example.data.result.artifacts[0].csvContent, /Example in English/);
+    assert.equal(example.data.previewToken, undefined); assert.equal(example.data.publicationReady, false);
+  }
+  assert.deepEqual(await templateState(), beforeExamples);
   for (const extra of [{ products: [{ id: stored.id, total_price_uah: 1 }] }, { total_price_uah: 1 }]) {
     const attempt = await request(`${root}/${f.id}/test-preview`, { authentication: admin, method: 'POST', body: { ...body, productIds: [stored.id], ...extra } });
     assert.equal(attempt.response.status, 400, attempt.text);
@@ -416,6 +432,7 @@ test('PR2 HTTP auth, active-state, CSRF and individually delegated capabilities'
     [`${root}/${f.id}/draft/from-version`, 'POST', { expectedRevision: '1', versionId: crypto.randomUUID() }, 'manage'],
     [`${root}/${f.id}/validate`, 'POST', precondition(f.draft), 'manage'],
     [`${root}/${f.id}/test-preview`, 'POST', { ...precondition(f.draft), productIds: [1] }, 'manage'],
+    [`${root}/evaluate-example`, 'POST', { definition: f.draft.definition, productIds: [1] }, 'manage'],
     [`${root}/${f.id}/publish`, 'POST', precondition(f.draft), 'publish'],
     [`${root}/activation`, 'PUT', { expectedGeneration: '1', implementation: 'legacy', templateVersionId: null }, 'activate'],
   ];
@@ -451,6 +468,8 @@ test('PR2 HTTP auth, active-state, CSRF and individually delegated capabilities'
   assert.equal((await request(`${root}/${made.data.id}/validate`, { authentication: pending, method: 'POST', body: precondition(made.data.draft) })).response.status, 200);
   const noExports = await request(`${root}/${made.data.id}/test-preview`, { authentication: pending, method: 'POST', body: { ...precondition(made.data.draft), productIds: [1] } });
   assert.equal(noExports.response.status, 403); assert.equal(noExports.data.requiredPermission, 'exports.view');
+  const noExampleAccess = await request(`${root}/evaluate-example`, { authentication: pending, method: 'POST', body: { definition: f.draft.definition, productIds: [1] } });
+  assert.equal(noExampleAccess.response.status, 403); assert.equal(noExampleAccess.data.requiredPermission, 'exports.view');
   await grant(['export_templates.manage', 'exports.view']);
   assert.equal((await request(`${root}/sample-products?q=BR`, { authentication: pending })).response.status, 200);
   const previewProduct = (await pool.query("SELECT id FROM products WHERE category = 'BR' ORDER BY id DESC LIMIT 1")).rows[0];

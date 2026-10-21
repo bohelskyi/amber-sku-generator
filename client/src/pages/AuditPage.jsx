@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ListFilter, RotateCcw } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../auth/auth-context.js';
 import { AppPageHeader, EmptyState, LoadingState, Notice, StatusBadge } from '../components/app/UiPrimitives.jsx';
 import { Drawer, Pagination, TechnicalDisclosure } from '../components/ui/index.js';
+import { AuditActorFilter } from '../components/admin/AuditActorFilter.jsx';
 import { api } from '../lib/api.js';
 import {
   AUDIT_DOMAINS,
@@ -11,11 +13,12 @@ import {
   getAuditDetailLabel,
   getAuditEventLabel,
   getAuditSubjectLabel,
+  getAuditChangeSummary,
 } from '../lib/audit-viewer.js';
 import { formatDateTime } from '../lib/formatters.js';
 
 const EMPTY_FILTERS = Object.freeze({
-  from: '', to: '', domain: '', eventKey: '', actorId: '', subjectType: '', subjectId: '',
+  from: '', to: '', domain: '', eventKey: '', actorId: '', subjectType: '', subjectId: '', article: '',
 });
 
 function toIso(value) {
@@ -33,6 +36,7 @@ function requestParams(filters, cursor) {
     actorId: filters.actorId || undefined,
     subjectType: filters.subjectType.trim() || undefined,
     subjectId: filters.subjectId.trim() || undefined,
+    article: filters.article.trim() || undefined,
     cursor: cursor || undefined,
   }).filter(([, value]) => value !== undefined));
 }
@@ -42,8 +46,7 @@ function getErrorMessage(error) {
 }
 
 function getAuditActionLabel(eventKey) {
-  const label = getAuditEventLabel(eventKey);
-  return label === `Подія: ${eventKey}` ? 'Невідома подія' : label;
+  return getAuditEventLabel(eventKey);
 }
 
 function AuditDetails({ details }) {
@@ -77,6 +80,7 @@ export default function AuditPage() {
   const [pageIndex, setPageIndex] = useState(0);
   const requestId = useRef(0);
   const [selectedEvent, setSelectedEvent] = useState(null);
+  const [actorFilterEpoch, setActorFilterEpoch] = useState(0);
 
   const load = useCallback(async (cursor = null) => {
     const currentRequestId = ++requestId.current;
@@ -128,6 +132,7 @@ export default function AuditPage() {
     setFilters({ ...draftFilters });
   };
   const clearFilters = () => {
+    setActorFilterEpoch((value) => value + 1);
     setDraftFilters(EMPTY_FILTERS);
     setPage({ hasMore: false, nextCursor: null });
     setCursorHistory([null]);
@@ -157,11 +162,10 @@ export default function AuditPage() {
       <div className="mx-auto w-full max-w-6xl space-y-5 px-4 py-5 pb-20 sm:px-6">
         <AppPageHeader
           eyebrow="Адміністрування"
-          title="Глобальний аудит"
-          description="Незмінний журнал безпеки та бізнес-дій з точним виконавцем і об’єктом."
+          title="Журнал дій"
         />
 
-        <form className="card space-y-4 p-4 sm:p-5" onSubmit={applyFilters}>
+        <form className="space-y-3" onSubmit={applyFilters}>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2 text-sm font-semibold text-slate-700"><ListFilter size={16} aria-hidden="true" />Фільтри</div>
             {activeFilterCount > 0 && <StatusBadge tone="info">Активних: {activeFilterCount}</StatusBadge>}
@@ -169,7 +173,9 @@ export default function AuditPage() {
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <label className="text-xs font-medium text-slate-600">Від<input aria-label="Від" className="input-sm mt-1" type="datetime-local" value={draftFilters.from} onChange={updateDraft('from')} /></label>
             <label className="text-xs font-medium text-slate-600">До<input aria-label="До" className="input-sm mt-1" type="datetime-local" value={draftFilters.to} onChange={updateDraft('to')} /></label>
-            <label className="text-xs font-medium text-slate-600">Домен<select aria-label="Домен" className="input-sm mt-1" value={draftFilters.domain} onChange={updateDraft('domain')}><option value="">Усі домени</option>{AUDIT_DOMAINS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+            <label className="text-sm font-medium text-slate-600">Розділ<select aria-label="Розділ" className="input-sm mt-1" value={draftFilters.domain} onChange={updateDraft('domain')}><option value="">Усі розділи</option>{AUDIT_DOMAINS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+            <label className="text-sm font-medium text-slate-600">Артикул товару<input className="input-sm mt-1" type="search" value={draftFilters.article} onChange={updateDraft('article')} placeholder="AG-…" /></label>
+            <AuditActorFilter key={actorFilterEpoch} actorId={draftFilters.actorId} onChange={(actorId) => setDraftFilters((current) => ({ ...current, actorId }))} />
           </div>
           <details className="rounded-lg border border-slate-200 p-3">
             <summary className="cursor-pointer text-sm font-semibold text-slate-700">Розширені фільтри</summary>
@@ -196,9 +202,11 @@ export default function AuditPage() {
             <thead><tr className="table-head border-b border-slate-200"><th className="table-cell">Час</th><th className="table-cell">Дія</th><th className="table-cell">Виконавець</th><th className="table-cell">Об’єкт</th><th className="table-cell"><span className="sr-only">Деталі</span></th></tr></thead>
             <tbody>{items.map((event, index) => <tr key={`${event.occurredAt}:${event.eventKey}:${event.subject?.type}:${event.subject?.id}:${index}`} className="border-b border-slate-100 last:border-0">
               <td className="table-cell whitespace-nowrap text-xs text-slate-600"><time dateTime={event.occurredAt || undefined}>{event.occurredAt ? formatDateTime(event.occurredAt) : 'Час не записано'}</time></td>
-              <td className="table-cell"><span className="font-medium text-slate-900">{getAuditActionLabel(event.eventKey)}</span><span className="mt-1 block"><StatusBadge>{AUDIT_DOMAINS.find(([value]) => value === event.domain)?.[1] || 'Інший домен'}</StatusBadge></span></td>
+              <td className="table-cell"><span className="font-medium text-slate-900">{getAuditActionLabel(event.eventKey)}</span>{getAuditChangeSummary(event) && <span className="mt-1 block text-sm text-slate-600">{getAuditChangeSummary(event)}</span>}</td>
               <td className="table-cell text-sm text-slate-700">{getAuditActorLabel(event.actor)}</td>
-              <td className="table-cell text-sm text-slate-700">{getAuditSubjectLabel(event.subject)}</td>
+              <td className="table-cell text-sm text-slate-700">{event.subject?.productArticle && auth.permissions.includes('products.decode')
+                ? <Link className="underline" to={`/products/open?article=${encodeURIComponent(event.subject.productArticle)}`}>{getAuditSubjectLabel(event.subject)}</Link>
+                : getAuditSubjectLabel(event.subject)}</td>
               <td className="table-cell text-right"><button type="button" className="btn btn-outline btn-compact-md" aria-label={`Відкрити деталі: ${getAuditActionLabel(event.eventKey)}`} onClick={() => setSelectedEvent(event)}>Відкрити</button></td>
             </tr>)}</tbody>
           </table></div>
@@ -221,8 +229,8 @@ export default function AuditPage() {
             <div><dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Виконавець</dt><dd className="mt-1 text-slate-800">{getAuditActorLabel(selectedEvent.actor)}</dd></div>
             <div><dt className="text-xs font-medium uppercase tracking-wide text-slate-500">Об’єкт</dt><dd className="mt-1 text-slate-800">{getAuditSubjectLabel(selectedEvent.subject)}</dd></div>
           </dl>
-          <AuditDetails details={selectedEvent.details} />
-          <TechnicalDisclosure summary="Технічні деталі"><dl className="text-sm"><div className="audit-detail-row"><dt>Ключ події</dt><dd className="break-all font-mono">{selectedEvent.eventKey}</dd></div><div className="audit-detail-row"><dt>Ключ домену</dt><dd className="break-all font-mono">{selectedEvent.domain}</dd></div></dl></TechnicalDisclosure>
+          {getAuditChangeSummary(selectedEvent) && <p className="text-base font-medium">{getAuditChangeSummary(selectedEvent)}</p>}
+          <TechnicalDisclosure summary="Повний запис події"><AuditDetails details={selectedEvent.details} /><dl className="text-sm"><div className="audit-detail-row"><dt>Ключ події</dt><dd className="break-all font-mono">{selectedEvent.eventKey}</dd></div><div className="audit-detail-row"><dt>Ключ домену</dt><dd className="break-all font-mono">{selectedEvent.domain}</dd></div><div className="audit-detail-row"><dt>ID об’єкта</dt><dd>{selectedEvent.subject?.id}</dd></div></dl></TechnicalDisclosure>
         </div>}
       </Drawer>
     </main>

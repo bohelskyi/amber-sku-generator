@@ -132,6 +132,8 @@ it('identifies a missing historical local value instead of rendering a naked num
 it('restores the applied result and reads persistent delivery evidence without implying remote confirmation', async () => {
   mount('/admin/catalog?category=BR&binding=current&source=current');
   await screen.findByText('Застосовано в Amber. Доставку Magento перевіряємо окремо.');
+  expect(api.get.mock.calls.some(([url]) => url.endsWith('/handoffs'))).toBe(false);
+  fireEvent.click(screen.getByText('Результат застосування'));
   await waitFor(() => expect(api.get).toHaveBeenCalledWith('/admin/magento-integration/bindings/current/handoffs', expect.any(Object)));
   expect(api.post).not.toHaveBeenCalled();
 });
@@ -260,7 +262,7 @@ it('checks the originating product, confirms its new path and requires a separat
   await screen.findByText('Default › Браслети');
   const check = screen.getByRole('button', { name: 'Перевірити відповідність розділів' });
   expect(check.compareDocumentPosition(screen.getByText('Default › Браслети')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(screen.getByText(/Перевірка врахує товар, з якого ви перейшли/)).toBeTruthy();
+  expect(screen.getByRole('region', { name: 'Задача цього товару' })).toBeTruthy();
   expect(api.post).not.toHaveBeenCalled();
   fireEvent.click(check);
   await screen.findByRole('heading', { name: 'Підтвердьте розділи магазину' });
@@ -276,7 +278,7 @@ it('checks the originating product, confirms its new path and requires a separat
   expect(api.post.mock.calls.some(([url]) => url.endsWith('/publication/apply'))).toBe(false);
   fireEvent.click(apply);
   await screen.findByText(/Поверніться до проблеми товару й натисніть «Перевірити товар у Magento»/);
-  expect(screen.getByText(/Розділи збережено. Наступний крок — «Повернутися до проблеми товару»/)).toBeTruthy();
+  expect(screen.getByText('Розділи збережено. Поверніться до товару й перевірте результат.')).toBeTruthy();
   expect(screen.queryByText(/^Наступний крок — «Перевірити відповідність розділів»/)).toBeNull();
   expect(api.post).toHaveBeenCalledWith('/admin/magento-integration/publication/apply', expect.objectContaining({ bindingRevisionId: 'isolated', expectedRevision: '2', expectedCurrentId: 'current', previewToken: 'impact-proof' }));
   expect(screen.getByRole('link', { name: 'Повернутися до проблеми товару' }).getAttribute('href')).toBe('/attention?problem=5080');
@@ -518,7 +520,7 @@ it('uses a modal for the whole field on a narrow screen and preserves literal En
 });
 
 it('scopes the separate Administrator rename chooser on the server and hides it for permission-only roles', async () => {
-  const view = mount(undefined, permissions, [{ key: 'administrator' }]);
+  const view = mount(undefined, permissions, [{ key: 'administrator' }]); await textFields();
   fireEvent.click(await screen.findByRole('button', { name: 'Застосувати назви до чинних товарів' }));
   api.get.mockResolvedValueOnce({ data: { products: [], nextCursor: null } });
   fireEvent.click(screen.getByRole('button', { name: 'Перевірити товари для контрольованої дії' }));
@@ -582,6 +584,29 @@ it('checks product impact after the single explicit check and waits for a separa
   expect(api.post.mock.calls.filter(([url]) => url.endsWith('/publication/preview'))).toHaveLength(1);
   expect(api.post.mock.calls.some(([url]) => url.endsWith('/publication/apply'))).toBe(false);
   expect(screen.queryByRole('button', { name: 'Перевірити вплив на товари' })).toBeNull();
+});
+
+it('keeps the focused review task open while publication checking is in flight', async () => {
+  const get = api.get.getMockImplementation();
+  api.get.mockImplementation(async (url, config) => {
+    const result = await get(url, config);
+    if (url.endsWith('/bindings/isolated')) result.data.entries = [{ ...entry, reviewState: 'approved' }];
+    return result;
+  });
+  let resolvePreview;
+  const post = api.post.getMockImplementation();
+  api.post.mockImplementation((url, body) => url.endsWith('/publication/preview')
+    ? new Promise((resolve) => { resolvePreview = resolve; }) : post(url, body));
+  mount(); await textFields(); fireEvent.click(await screen.findByRole('button', { name: 'Опис' }));
+  fireEvent.change(await screen.findByLabelText('Текст для магазину'), { target: { value: 'Новий текст' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Готово' })); fireEvent.click(screen.getByRole('button', { name: 'Перевірити зміни' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Перевірка та застосування' });
+  await waitFor(() => expect(within(dialog).getByRole('button', { name: 'До редагування' }).disabled).toBe(true));
+  fireEvent.keyDown(dialog, { key: 'Escape' }); expect(screen.getByRole('dialog', { name: 'Перевірка та застосування' })).toBe(dialog);
+  await act(async () => resolvePreview({ data: { previewToken: 'impact', blockers: [], affected: [], preservedNames: [], lostProducts: [], lostRoutes: [], totalProducts: 1 } }));
+  await waitFor(() => expect(within(dialog).getByRole('button', { name: 'До редагування' }).disabled).toBe(false));
+  expect(within(dialog).getByRole('button', { name: 'Застосувати правила' })).toBeTruthy();
+  expect(api.post.mock.calls.some(([url]) => url.endsWith('/publication/apply'))).toBe(false);
 });
 
 it('restores prepared work without starting an automatic product or Magento check', async () => {
@@ -665,7 +690,7 @@ it('keeps an exact repair edit and its explicit review action before the long fi
   const action = await screen.findByRole('button', { name: 'Перевірити зміни' });
   const table = within(screen.getByRole('region', { name: 'Характеристики Менеджера' })).getByRole('table');
   expect(action.closest('.mc-change-bar').compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(screen.getByRole('region', { name: 'Підготовлені зміни' }).textContent).toContain('вибрані відповідності');
+  expect(screen.getByRole('region', { name: 'Підготовлені зміни' }).textContent).toContain('є відповідності');
   expect(api.post).not.toHaveBeenCalled();
   expect(screen.getByRole('link', { name: 'Повернутися до проблеми товару' }).getAttribute('href')).toBe('/attention?problem=7');
 });

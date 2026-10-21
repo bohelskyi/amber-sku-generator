@@ -156,29 +156,27 @@ export default function UsersPage() {
       <div className="mx-auto max-w-7xl space-y-5 px-4 py-5 pb-20 sm:px-6">
         <AppPageHeader
           eyebrow="Доступ"
-          title="Користувачі застосунку"
-          description="Підтверджуйте доступ, призначайте роль і контролюйте стан облікових записів."
+          title="Користувачі"
         />
 
         {!selectedUser && error && <Notice>{error}</Notice>}
         {!selectedUser && feedback && <Notice tone={feedback.tone} title={feedback.title}>{feedback.message}</Notice>}
 
         {!loading && users.length > 0 && (
-          <section className="card metric-strip grid-cols-1 sm:grid-cols-3" aria-label="Стани користувачів">
+          <section className="user-status-filters" aria-label="Стани користувачів">
             {[
-              ['Очікують підтвердження', statusCounts.pending || 0, 'text-amber-700'],
-              ['Активні', statusCounts.active || 0, 'text-emerald-700'],
-              ['Вимкнені', statusCounts.disabled || 0, 'text-rose-700'],
-            ].map(([label, value, valueClass]) => (
-              <div className="metric-strip-item last:border-b-0 sm:border-b-0" key={label}>
-                <div className="metric-strip-label">{label}</div>
-                <div className={`metric-strip-value ${valueClass}`}>{value}</div>
-              </div>
+              ['all', 'Усі', users.length],
+              ['pending', 'Очікують підтвердження', statusCounts.pending || 0],
+              ['active', 'Активні', statusCounts.active || 0],
+              ['disabled', 'Вимкнені', statusCounts.disabled || 0],
+            ].map(([value, label, count]) => (
+              <button type="button" className="btn btn-outline" key={value} aria-pressed={statusFilter === value}
+                onClick={() => { setStatusFilter(value); setPageIndex(0); }}>{label} <span>{count}</span></button>
             ))}
           </section>
         )}
 
-        {!loading && users.length > 0 && <div className="card grid gap-3 p-4 sm:grid-cols-[minmax(0,1fr)_220px]">
+        {!loading && users.length > 0 && <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_220px]">
           <label className="relative text-sm font-medium text-slate-700">
             <span className="sr-only">Пошук користувача</span><Search size={16} aria-hidden="true" className="pointer-events-none absolute left-3 top-3 text-slate-400" />
             <input className="input-sm pl-9" type="search" value={query} placeholder="Ім’я, логін або роль"
@@ -247,6 +245,7 @@ export default function UsersPage() {
               </select>
               <span className="mt-1 block text-xs text-slate-500">{selectedUser.status === 'pending' ? 'Цю роль буде призначено після підтвердження доступу.' : 'Зміна ролі набуде чинності після підтвердження.'}</span>
             </label>
+            {selectedRole?.description && <p className="text-sm text-slate-600">{selectedRole.description}</p>}
             <div className="flex flex-wrap gap-2 border-t border-slate-200 pt-4">
               {selectedUser.status === 'pending' && <button type="button" className="btn btn-primary gap-2" aria-label={`Підтвердити ${name}`} disabled={busy || !selectedRoleId}
                 onClick={() => void runAction(selectedUser, () => api.post(`/admin/users/${selectedUser.id}/approve`, { roleId: Number(selectedRoleId) }), `Доступ для ${name} підтверджено.`)}><UserCheck size={15} aria-hidden="true" />Підтвердити доступ</button>}

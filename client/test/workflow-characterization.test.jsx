@@ -259,6 +259,25 @@ async function renderRepricing(permissions = [
   return view;
 }
 
+async function chooseScenarioScope() {
+  await act(async () => {
+    if (!screen.queryByRole('combobox', { name: 'Які товари переоцінити' })) fireEvent.click(screen.getByRole('link', { name: 'Підготовка' }));
+  });
+  fireEvent.change(screen.getByRole('combobox', { name: 'Які товари переоцінити' }), { target: { value: 'scenario' } });
+}
+async function prepareScenario() {
+  await chooseScenarioScope();
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Підготувати переоцінку' })); });
+}
+async function openPrice(article = 'BR1001') {
+  if (!screen.queryByRole('textbox', { name: `Нова ціна для ${article}` })) {
+    const query = { name: `Переглянути рішення для ${article}` };
+    const button = vi.isFakeTimers() ? screen.getByRole('button', query) : await screen.findByRole('button', query);
+    await act(async () => { fireEvent.click(button); });
+  }
+  return screen.getByRole('textbox', { name: `Нова ціна для ${article}` });
+}
+
 describe('Repricing workflow', () => {
   for (const hasGlobalDraft of [false, true]) it(`page header exposes only global repricing (saved draft: ${hasGlobalDraft})`, async () => {
     vi.spyOn(api, 'get').mockImplementation(async (url) => {
@@ -270,12 +289,13 @@ describe('Repricing workflow', () => {
       throw new Error(`Unexpected GET ${url}`);
     });
     await renderRepricing(['repricing.view', 'repricing.prepare', 'products.recount', 'corrections.create', 'corrections.view', 'catalog.view', 'pricing.view']);
-    const header = screen.getByRole('heading', { name: 'Масова переоцінка' }).closest('header');
-    expect(within(header).getAllByRole('button').map((button) => button.textContent.trim())).toEqual(['Підготувати переоцінку']);
+    const header = screen.getByRole('heading', { name: 'Переоцінка' }).closest('header');
+    expect(within(header).queryAllByRole('button')).toHaveLength(0);
+    expect(screen.getAllByRole('button', { name: hasGlobalDraft ? 'Продовжити чернетку' : 'Підготувати переоцінку' })).toHaveLength(1);
     expect(within(header).queryAllByRole('link')).toHaveLength(0);
     expect(within(header).queryByText('Декодер')).toBeNull(); expect(within(header).queryByText(/^Запити/)).toBeNull();
     expect(within(header).queryByText('До адмін-панелі')).toBeNull();
-    if (hasGlobalDraft) expect(within(header).getByRole('button').title).toBe('Продовжити збережену загальну чернетку');
+    expect(screen.getByRole('combobox', { name: 'Які товари переоцінити' }).value).toBe('global');
   });
 
   it('autosaves edited resolutions after the established debounce with the complete draft state', async () => {
@@ -303,8 +323,8 @@ describe('Repricing workflow', () => {
     });
 
     await renderRepricing();
-    fireEvent.click(await screen.findByRole('button', { name: 'Попередній перегляд' }));
-    const priceInput = await screen.findByRole('textbox', { name: 'Нова ціна для BR1001' });
+    await prepareScenario();
+    const priceInput = await openPrice();
     vi.useFakeTimers();
     fireEvent.change(priceInput, { target: { value: '1350' } });
     expect(post).not.toHaveBeenCalledWith('/admin/repricing/drafts', expect.anything());
@@ -371,6 +391,7 @@ describe('Repricing workflow', () => {
     });
 
     await renderRepricing();
+    await chooseScenarioScope();
     fireEvent.click(await screen.findByRole('button', { name: 'Продовжити чернетку' }));
     expect(await screen.findByText(/Дані або розрахунок змінилися після збереження чернетки/)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Прийняти оновлення' })).toBeTruthy();
@@ -400,12 +421,8 @@ describe('Repricing workflow', () => {
     });
 
     await renderRepricing();
-    fireEvent.click(await screen.findByRole('button', { name: 'Попередній перегляд' }));
-    const priceInput = await screen.findByRole(
-      'textbox',
-      { name: 'Нова ціна для BR1001' },
-      { timeout: 3000 }
-    );
+    await prepareScenario();
+    const priceInput = await openPrice();
     vi.useFakeTimers();
 
     fireEvent.change(priceInput, { target: { value: '1300' } });
@@ -500,20 +517,21 @@ describe('Repricing workflow', () => {
     const put = vi.spyOn(api, 'put');
 
     await renderRepricing();
-    fireEvent.click(await screen.findByRole('button', { name: 'Попередній перегляд' }));
-    const firstInput = await screen.findByRole('textbox', { name: 'Нова ціна для BR1001' });
+    await prepareScenario();
+    const firstInput = await openPrice();
     vi.useFakeTimers();
     fireEvent.change(firstInput, { target: { value: '1300' } });
     await act(async () => { await vi.advanceTimersByTimeAsync(800); });
     expect(draftSaveCount).toBe(1);
 
     fireEvent.click(screen.getByRole('link', { name: 'Підготовка' }));
+    await chooseScenarioScope();
     fireEvent.change(screen.getByRole('combobox', { name: 'Цінова матриця' }), {
       target: { value: '22' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Попередній перегляд' }));
+    await prepareScenario();
     await act(async () => { await Promise.resolve(); });
-    const secondInput = screen.getByRole('textbox', { name: 'Нова ціна для NM2002' });
+    const secondInput = await openPrice('NM2002');
     fireEvent.change(secondInput, { target: { value: '1500' } });
     await act(async () => { await vi.advanceTimersByTimeAsync(800); });
     expect(draftSaveCount).toBe(1);
@@ -584,11 +602,12 @@ describe('Repricing workflow', () => {
     });
 
     await renderRepricing();
-    fireEvent.click(await screen.findByRole('button', { name: 'Попередній перегляд' }));
+    await prepareScenario();
+    await chooseScenarioScope();
     fireEvent.change(screen.getByRole('combobox', { name: 'Цінова матриця' }), {
       target: { value: '22' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Попередній перегляд' }));
+    await prepareScenario();
 
     await act(async () => {
       secondPreview.resolve(response(newestPreview));
@@ -628,14 +647,14 @@ describe('Repricing workflow', () => {
     });
 
     const firstRender = await renderRepricing();
-    fireEvent.click(await screen.findByRole('button', { name: 'Попередній перегляд' }));
+    await prepareScenario();
     expect(await screen.findByText('Переоцінку тимчасово заблоковано')).toBeTruthy();
     expect((await screen.findByRole('button', { name: 'Застосувати переоцінку' })).disabled).toBe(true);
 
     firstRender.unmount();
     activeRequests = [];
     await renderRepricing();
-    fireEvent.click(await screen.findByRole('button', { name: 'Попередній перегляд' }));
+    await prepareScenario();
     fireEvent.click(await screen.findByRole('button', { name: 'Застосувати переоцінку' }));
     const confirmButton = within(screen.getByRole('dialog', { name: 'Застосувати переоцінку?' }))
       .getByRole('button', { name: 'Застосувати переоцінку' });
@@ -678,11 +697,12 @@ describe('Repricing workflow', () => {
     });
 
     await renderRepricing(['repricing.view', 'repricing.prepare']);
-    await screen.findByRole('button', { name: 'Попередній перегляд' });
+    await chooseScenarioScope();
+    await screen.findByRole('button', { name: 'Підготувати переоцінку' });
     fireEvent.click(screen.getByRole('link', { name: 'Історія' }));
     expect(screen.queryByRole('button', { name: 'Відкотити переоцінку 31' })).toBeNull();
     fireEvent.click(screen.getByRole('link', { name: 'Підготовка' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Попередній перегляд' }));
+    await prepareScenario();
     await screen.findByText('BR1001');
     expect(screen.queryByRole('button', { name: 'Застосувати переоцінку' })).toBeNull();
   });
@@ -723,6 +743,83 @@ describe('Repricing workflow', () => {
     expect(post).toHaveBeenCalledWith('/admin/repricing/31/rollback');
     expect(screen.queryByRole('dialog', { name: 'Відкотити переоцінку' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Відкотити переоцінку 31' })).toBeTruthy();
+  });
+
+  it('edits multiple manual resolutions inline, preserves validation, and sends every price to the draft preview', async () => {
+    const items = [
+      { ...repricingPreview.items[0], weight: 30, status: 'error', errorCode: 'price_missing', pricingState: 'missing' },
+      { ...repricingPreview.items[0], productId: 502, sku: 'BR1002', publicSku: 'BR1002', weight: 10,
+        status: 'error', errorCode: 'manual_price', pricingState: 'manual' },
+      { ...repricingPreview.items[0], productId: 503, sku: 'BR1003', publicSku: 'BR1003', weight: 20 },
+    ];
+    let savedDraft = null;
+    vi.spyOn(api, 'get').mockImplementation(async (url) => {
+      if (url === '/config') return response(repricingConfig);
+      if (url === '/admin/repricing/scenarios') return response([repricingScenario]);
+      if (url === '/admin/repricing/batches/page') return response([]);
+      if (url === '/admin/repricing/drafts') return response(savedDraft ? [savedDraft] : []);
+      if (url === '/admin/correction-requests/page') return response({ items: [] });
+      throw new Error(`Unexpected GET ${url}`);
+    });
+    const post = vi.spyOn(api, 'post').mockImplementation(async (url, body) => {
+      if (url === '/admin/repricing/preview') return response({ ...repricingPreview,
+        items, summary: { ...repricingPreview.summary, candidateCount: 3, errorCount: 2 } });
+      if (url === '/admin/repricing/drafts') {
+        savedDraft = { id: 77, ...body };
+        return response({ draft: savedDraft });
+      }
+      throw new Error(`Unexpected POST ${url}`);
+    });
+    await renderRepricing();
+    await prepareScenario();
+    fireEvent.click(screen.getByRole('button', { name: 'Усі' }));
+    expect(screen.getByText('Ціна відсутня')).toBeTruthy();
+    expect(screen.getByText('Ручна')).toBeTruthy();
+    expect(screen.getByText('Автоматична')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Вага, г' }));
+    expect(screen.getByRole('columnheader', { name: 'Вага, г' }).getAttribute('aria-sort')).toBe('ascending');
+    expect(screen.getAllByRole('rowheader').map((row) => row.querySelector('.font-mono').textContent))
+      .toEqual(['BR1002', 'BR1003', 'BR1001']);
+    fireEvent.click(screen.getByRole('button', { name: 'Вага, г' }));
+    expect(screen.getAllByRole('rowheader').map((row) => row.querySelector('.font-mono').textContent))
+      .toEqual(['BR1001', 'BR1003', 'BR1002']);
+    vi.useFakeTimers();
+    const first = screen.getByRole('textbox', { name: 'Нова ціна для BR1001' });
+    const second = screen.getByRole('textbox', { name: 'Нова ціна для BR1002' });
+    first.focus();
+    fireEvent.change(first, { target: { value: '0' } });
+    expect(first.getAttribute('aria-invalid')).toBe('true');
+    expect(document.getElementById(first.getAttribute('aria-describedby')).textContent).toBe('Вкажіть ціну більше нуля');
+    expect(screen.getByRole('button', { name: 'Застосувати переоцінку' }).disabled).toBe(true);
+    fireEvent.change(first, { target: { value: '1450,50' } });
+    expect(first.getAttribute('aria-invalid')).toBeNull();
+    act(() => second.focus());
+    expect(first.value).toBe('1450.5');
+    fireEvent.change(second, { target: { value: '1675' } });
+    fireEvent.blur(second);
+    expect(screen.queryByRole('heading', { name: /^Рішення для/ })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Застосувати переоцінку' }).disabled).toBe(false);
+    await act(async () => { await vi.advanceTimersByTimeAsync(800); });
+    expect(post).toHaveBeenCalledWith('/admin/repricing/drafts', expect.objectContaining({
+      manualOverrides: [{ productId: 501, newPriceUah: 1450.5 }, { productId: 502, newPriceUah: 1675 }],
+    }));
+    fireEvent.click(screen.getByRole('button', { name: 'Переглянути рішення для BR1001' }));
+    expect(screen.getByRole('heading', { name: 'Рішення для BR1001' })).toBeTruthy();
+    expect(screen.getAllByRole('textbox', { name: 'Нова ціна для BR1001' })).toHaveLength(1);
+    const detail = screen.getByRole('heading', { name: 'Рішення для BR1001' }).closest('.repricing-row-detail');
+    const detailInput = within(detail).getByRole('textbox', { name: 'Нова ціна для BR1001' });
+    expect(detailInput.value).toBe('1450.5');
+    detailInput.focus();
+    fireEvent.change(detailInput, { target: { value: '0' } });
+    expect(detailInput.getAttribute('aria-invalid')).toBe('true');
+    expect(within(detail).getByRole('alert').id).toBe(detailInput.getAttribute('aria-describedby'));
+    expect(document.querySelectorAll(`#${detailInput.getAttribute('aria-describedby')}`)).toHaveLength(1);
+    fireEvent.change(detailInput, { target: { value: '1550,75' } });
+    fireEvent.blur(detailInput);
+    expect(detailInput.value).toBe('1550.75');
+    fireEvent.click(screen.getByRole('button', { name: 'До списку цін' }));
+    expect(screen.getAllByRole('textbox', { name: 'Нова ціна для BR1001' })).toHaveLength(1);
+    expect(screen.getByRole('textbox', { name: 'Нова ціна для BR1001' }).value).toBe('1550.75');
   });
 
   it('keeps a manual-price editor focused until a complete resolution is entered', async () => {
@@ -769,7 +866,7 @@ describe('Repricing workflow', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Підготувати переоцінку' }));
     const errorFilter = await screen.findByRole('button', { name: 'Помилки' });
     const applyButton = screen.getByRole('button', { name: 'Застосувати переоцінку' });
-    const priceInput = screen.getByRole('textbox', { name: 'Нова ціна для BR1001' });
+    const priceInput = await openPrice();
     expect(errorFilter.className).toContain('border-amber-300');
     expect(applyButton.disabled).toBe(true);
 
@@ -783,7 +880,7 @@ describe('Repricing workflow', () => {
     }
 
     expect(priceInput.value).toBe('12345');
-    expect(screen.getByText('Ручну ціну підтверджено')).toBeTruthy();
+    expect(screen.getByText('Ручна підтверджена')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Переглянуті · 0' })).toBeTruthy();
     expect(applyButton.disabled).toBe(false);
 
@@ -864,6 +961,7 @@ describe('Repricing workflow', () => {
     expect(applyButton.disabled).toBe(true);
 
     fireEvent.click(screen.getByRole('button', { name: 'Усі' }));
+    await openPrice();
     fireEvent.click(screen.getByRole('button', { name: /Перейти на автоматичну ціну/ }));
     expect(screen.getByText('Автоматичну ціну підтверджено')).toBeTruthy();
     expect(screen.getByRole('textbox', { name: 'Нова ціна для BR1001' }).value).toBe('1200');
@@ -905,7 +1003,7 @@ describe('Repricing workflow', () => {
     });
 
     await renderRepricing();
-    fireEvent.click(await screen.findByRole('button', { name: 'Попередній перегляд' }));
+    await prepareScenario();
     await screen.findByText('AG-000001');
     expect(document.querySelectorAll('.repricing-workspace tbody tr')).toHaveLength(50);
     expect(screen.getByText(/Застосування охопить усі 1000 підготовлені зміни/)).toBeTruthy();
@@ -916,7 +1014,7 @@ describe('Repricing workflow', () => {
     expect(post.mock.calls.filter(([url]) => url === '/admin/repricing/apply')).toHaveLength(1);
   });
 
-  it('keeps a repricing viewer read-only without config or background draft writes', async () => {
+  for (const manualResolution of [false, true]) it(`keeps a repricing viewer read-only without config or background draft writes (inline: ${manualResolution})`, async () => {
     const draft = {
       id: 88,
       scope: 'scenario',
@@ -933,7 +1031,9 @@ describe('Repricing workflow', () => {
       if (url === '/admin/repricing/drafts') return response([draft]);
       if (url === '/admin/repricing/drafts/88') return response({
         draft,
-        preview: repricingPreview,
+        preview: manualResolution ? { ...repricingPreview,
+          summary: { ...repricingPreview.summary, changedCount: 0, errorCount: 1 }, items: [{ ...repricingPreview.items[0],
+          status: 'error', errorCode: 'price_missing', pricingState: 'missing' }] } : repricingPreview,
         conflicts: [],
         sync: { hasChanges: false, added: [], removed: [], changed: [] },
       });
@@ -943,9 +1043,12 @@ describe('Repricing workflow', () => {
     const put = vi.spyOn(api, 'put');
 
     await renderRepricing(['repricing.view']);
+    await chooseScenarioScope();
     fireEvent.click(await screen.findByRole('button', { name: 'Переглянути чернетку' }));
-    const input = await screen.findByRole('textbox', { name: 'Нова ціна для BR1001' });
+    const input = manualResolution
+      ? await screen.findByRole('textbox', { name: 'Нова ціна для BR1001' }) : await openPrice();
     expect(input.readOnly).toBe(true);
+    if (manualResolution) expect(screen.queryByRole('heading', { name: /^Рішення для/ })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Позначити' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Усі' }));
     fireEvent.change(screen.getByRole('textbox', { name: 'Пошук товарів за SKU' }), {
@@ -1108,7 +1211,7 @@ describe('Correction queue polling', () => {
     render(<AuthContext.Provider value={authValue(['corrections.view', 'corrections.complete'])}>
       <MemoryRouter><CorrectionRequestsPage /></MemoryRouter></AuthContext.Provider>);
     await screen.findByText('Розрахунок застарів. Оновіть його і повторно перевірте дані перед виконанням.');
-    expect(screen.getByText(/Доставка наступника потребує узгодження попереднього експорту/).textContent).toContain('Успадковані назви також потребують перевірки.');
+    expect(screen.getByText(/Передавання в магазин потребує перевірки попереднього експорту/).textContent).toContain('Успадковані назви також потребують перевірки.');
     expect(screen.getByRole('button', { name: 'Перевірити й застосувати' }).disabled).toBe(true);
     expect(screen.getByRole('button', { name: 'Оновити розрахунок' }).disabled).toBe(false);
     expect(screen.queryByText('raw-evidence-not-for-normal-ui')).toBeNull();
@@ -1191,7 +1294,7 @@ describe('Correction queue polling', () => {
     expect(recordHeader.querySelector('.status-badge')).toBeTruthy();
     expect(recordHeader.querySelector('a.btn-compact-md').textContent).toContain('Історія товару');
     expect(recordHeader.textContent).toContain('Запит #3');
-    expect(recordHeader.textContent).toContain('Автор: Олена Коваль');
+    expect(recordHeader.textContent).toContain('Олена Коваль');
     const changeList = requestRecord.querySelector('.correction-change-list');
     expect(changeList).toBeTruthy();
     expect(changeList.querySelectorAll('.change-record-row')).toHaveLength(1);

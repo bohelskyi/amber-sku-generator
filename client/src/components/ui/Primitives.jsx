@@ -14,13 +14,12 @@ export function Breadcrumbs({ items = [], label = 'Навігаційний шл
   </ol></nav>;
 }
 
-export function PageHeader({ eyebrow, title, description, actions, breadcrumbs, status }) {
+export function PageHeader({ title, description, actions, breadcrumbs, status }) {
   return <header className="page-heading fade-up">
     <div className="min-w-0">
       {breadcrumbs && <Breadcrumbs items={breadcrumbs} />}
-      {eyebrow && <p className="eyebrow">{eyebrow}</p>}
       <div className="ui-page-title-row">
-        <h1 className={eyebrow || breadcrumbs ? 'page-title mt-1' : 'page-title'}>{title}</h1>
+        <h1 className={breadcrumbs ? 'page-title mt-1' : 'page-title'}>{title}</h1>
         {status}
       </div>
       {description && <p className="section-subtitle mt-1 max-w-3xl">{description}</p>}
@@ -44,7 +43,7 @@ export function LocalNavigation({ label, items = [], className = '' }) {
   return <nav className={`local-workspace-nav ${className}`.trim()} aria-label={label}>
     {items.map(({ to, label: title, end = true, activePaths }) => {
       if (!activePaths) return <NavLink key={to} to={to} end={end}>{title}</NavLink>;
-      const active = activePaths.some((path) => matchPath({ path, end: false }, pathname));
+      const active = pathname === to || activePaths.some((path) => matchPath({ path, end: false }, pathname));
       return <Link key={to} to={to} className={active ? 'active' : undefined}
         aria-current={active ? 'page' : undefined}>{title}</Link>;
     })}

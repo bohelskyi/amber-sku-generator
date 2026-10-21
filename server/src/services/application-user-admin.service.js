@@ -131,14 +131,14 @@ async function listApplicationUsers({ databasePool = pool } = {}) {
 
 async function listAssignableRoles({ databasePool = pool } = {}) {
   const result = await databasePool.query(
-    `SELECT id AS role_id, role_key, display_name AS role_display_name,
+    `SELECT id AS role_id, role_key, display_name AS role_display_name, description,
             is_system AS role_is_system, status AS role_status
      FROM roles
      WHERE status = 'active'
      ORDER BY CASE WHEN role_key = 'administrator' AND is_system = TRUE THEN 0 ELSE 1 END,
               LOWER(display_name), id`
   );
-  return result.rows.map(normalizeRole);
+  return result.rows.map((row) => ({ ...normalizeRole(row), description: row.description || '' }));
 }
 
 async function getManagedApplicationUser(userId, queryable) {

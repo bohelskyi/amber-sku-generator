@@ -195,7 +195,7 @@ it('requests and applies automatic pricing without override fields', async () =>
   fireEvent.click(screen.getByText('Open price change'));
 
   vi.useFakeTimers();
-  fireEvent.click(screen.getByRole('radio', { name: 'Автоматична' }));
+  fireEvent.click(screen.getByRole('radio', { name: 'За правилами' }));
   await act(async () => { await vi.advanceTimersByTimeAsync(350); });
 
   expect(screen.getByText('2400 ₴')).toBeTruthy();
@@ -228,7 +228,7 @@ it('makes the request action primary for request-only access', () => {
   expect(requestButton.classList.contains('btn-primary')).toBe(true);
   expect(requestButton.classList.contains('btn-outline')).toBe(false);
   expect(screen.queryByRole('button', { name: 'Змінити ціну' })).toBeNull();
-  expect(screen.queryByRole('radio', { name: 'Ручна UAH' })).toBeNull();
+  expect(screen.queryByRole('radio', { name: 'Вказати суму' })).toBeNull();
 });
 
 it('keeps direct apply primary and the request action secondary for mixed access', () => {
@@ -247,7 +247,7 @@ it('keeps direct apply primary and the request action secondary for mixed access
   expect(requestButton.classList.contains('btn-outline')).toBe(true);
   expect(requestButton.classList.contains('btn-primary')).toBe(false);
   expect(directButton.classList.contains('btn-primary')).toBe(true);
-  expect(screen.getByRole('radio', { name: 'Ручна UAH' })).toBeTruthy();
+  expect(screen.getByRole('radio', { name: 'Вказати суму' })).toBeTruthy();
 });
 
 it('keeps direct apply primary for direct-only access', () => {

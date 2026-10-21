@@ -133,7 +133,8 @@ describe('product timeline', () => {
     vi.spyOn(api, 'get').mockResolvedValue({ data: timeline });
     render(<MemoryRouter initialEntries={['/admin/corrections/history?sku=SKU-B']}><ProductTimeline /></MemoryRouter>);
 
-    await waitFor(() => expect(screen.getAllByText('SKU-A').length).toBeGreaterThan(0));
+    await screen.findByText('Запит виконано та переоблік застосовано');
+    expect(screen.queryByRole('region', { name: 'Еволюція характеристик' })).toBeNull();
     expect(api.get).toHaveBeenCalledWith('/product-timeline', { params: { sku: 'SKU-B' }, signal: expect.any(AbortSignal) });
     expect(screen.getByText('Stored history is incomplete.')).toBeTruthy();
     expect(screen.getByText('Запит виконано та переоблік застосовано')).toBeTruthy();
@@ -153,9 +154,8 @@ describe('product timeline', () => {
     expect(screen.getByText('останній')).toBeTruthy();
     const transitions = screen.getAllByTestId('sku-transition');
     expect(document.querySelectorAll('.timeline-card')).toHaveLength(3);
-    expect(document.querySelectorAll('.timeline-snapshot')).toHaveLength(2);
+    expect(document.querySelectorAll('.timeline-snapshot')).toHaveLength(0);
     expect(document.querySelector('.timeline-card').className).not.toContain('shadow');
-    expect(document.querySelector('.timeline-snapshot').className).not.toContain('shadow');
     expect(document.querySelector('.timeline-change-list')).toBeTruthy();
     expect(transitions).toHaveLength(1);
     expect(transitions[0].closest('details')?.open).toBe(false);
@@ -211,6 +211,7 @@ describe('product timeline', () => {
     vi.spyOn(api, 'get').mockResolvedValue({ data: timeline });
     render(<MemoryRouter initialEntries={['/admin/corrections/history?sku=SKU-B']}><ProductTimeline /></MemoryRouter>);
 
+    fireEvent.click(await screen.findByRole('button', { name: 'Порівняти характеристики' }));
     const evolution = await screen.findByRole('region', { name: 'Еволюція характеристик' });
     const cards = within(evolution).getAllByTestId('configuration-snapshot');
     expect(cards).toHaveLength(2);
@@ -236,8 +237,10 @@ describe('product timeline', () => {
     expect(within(cards[1]).getByText('Бурштин')).toBeTruthy();
     expect(within(cards[1]).getByTestId('configuration-field-kind').dataset.changed).toBe('true');
 
+    expect(screen.queryByLabelText('Хронологія подій')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Події' }));
     const eventTimeline = screen.getByLabelText('Хронологія подій');
-    expect(evolution.compareDocumentPosition(eventTimeline) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByRole('region', { name: 'Еволюція характеристик' })).toBeNull();
     fireEvent.click(screen.getByText('Версії та технічні деталі'));
     const skuChain = screen.getByLabelText('Ланцюжок версій SKU').closest('section');
     expect(eventTimeline.compareDocumentPosition(skuChain) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -262,6 +265,7 @@ describe('product timeline', () => {
     const { unmount } = render(
       <MemoryRouter initialEntries={['/admin/corrections/history?sku=SKU-B']}><ProductTimeline /></MemoryRouter>
     );
+    fireEvent.click(await screen.findByRole('button', { name: 'Порівняти характеристики' }));
     expect(await screen.findByText('Показано лише підтверджені значення.')).toBeTruthy();
     unmount();
 
@@ -276,6 +280,7 @@ describe('product timeline', () => {
       },
     });
     render(<MemoryRouter initialEntries={['/admin/corrections/history?sku=SKU-B']}><ProductTimeline /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: 'Порівняти характеристики' }));
     expect(await screen.findByText('Неможливо надійно впорядкувати конфігурації.')).toBeTruthy();
   });
 });

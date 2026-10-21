@@ -1,9 +1,8 @@
 import { AppPageHeader } from './UiPrimitives.jsx';
 
-export function PageHeader({ title = 'Товари', description = 'Створення, пошук і контроль товарів в одному робочому просторі.', breadcrumbs, actions, status }) {
+export function PageHeader({ title = 'Товари', description, breadcrumbs, actions, status }) {
   return (
     <AppPageHeader
-      eyebrow={breadcrumbs ? undefined : 'Робоча область'}
       title={title}
       description={description}
       breadcrumbs={breadcrumbs}

@@ -5,6 +5,13 @@ import { formatConditionSummary } from '../../lib/admin-conditions';
 import { formatDecimal } from '../../lib/formatters';
 import { MetaItem, ModifierForm, ScenarioForm, ScenarioMatrix } from './AdminPricingForms';
 import { buildScenarioEditorDraft } from '../../lib/admin-pricing-state';
+import './pricing-workspace.css';
+
+function modifierEffect(value) {
+  const percent = (Number(value) - 1) * 100;
+  if (!Number.isFinite(percent)) return 'Не визначено';
+  return percent === 0 ? 'Без зміни ціни' : `${percent < 0 ? 'Знижка' : 'Націнка'} ${formatDecimal(Math.abs(Number(percent.toFixed(4))))}%`;
+}
 
 const EMPTY_NEW_SCENARIO = {
   name: '', group_name: '', match_json: '', axis_x_key: '', axis_y_key: '', priority: '0',
@@ -189,10 +196,10 @@ export function AdminPricingEditor({
   return (
     <div className="pricing-shell fade-up">
       <div className="pricing-workspace-header">
-        <div><p className="eyebrow">Ціни</p><h2>Ціноутворення · {selectedCat.name}</h2></div>
+        <h2>{selectedCat.name}</h2>
         <div className="pricing-mode-tabs" role="group" aria-label="Режим ціноутворення">
-          <button type="button" aria-pressed={workspaceMode === 'scenarios'} className={workspaceMode === 'scenarios' ? 'is-active' : ''} onClick={() => requestTransition(() => setWorkspaceMode('scenarios'))}>Сценарії</button>
-          <button type="button" aria-pressed={workspaceMode === 'modifiers'} className={workspaceMode === 'modifiers' ? 'is-active' : ''} onClick={() => requestTransition(() => setWorkspaceMode('modifiers'))}>Модифікатори</button>
+          <button type="button" aria-pressed={workspaceMode === 'scenarios'} className={workspaceMode === 'scenarios' ? 'is-active' : ''} onClick={() => requestTransition(() => setWorkspaceMode('scenarios'))}>Матриці</button>
+          <button type="button" aria-pressed={workspaceMode === 'modifiers'} className={workspaceMode === 'modifiers' ? 'is-active' : ''} onClick={() => requestTransition(() => setWorkspaceMode('modifiers'))}>Націнки та знижки</button>
         </div>
       </div>
 
@@ -212,7 +219,7 @@ export function AdminPricingEditor({
                     {group.scenarios.map((scenario) => (
                       <button key={scenario.id} type="button" onClick={() => selectScenario(scenario)} className={`pricing-master-row ${selectedScenario?.id === scenario.id && !isNewScenario ? 'is-selected' : ''}`}>
                         <div className="pricing-master-row-title"><i className={`is-${scenario.status || 'active'}`} /><strong>{scenario.name}</strong></div>
-                        <div className="pricing-master-row-meta"><span>{getStatusLabel(scenario.status)}</span><span>Пріоритет {scenario.priority || 0}</span><span>{getPriceModeLabel(scenario.price_mode)}</span></div>
+                        <div className="pricing-master-row-meta"><span>{getStatusLabel(scenario.status)}</span><span>{getPriceModeLabel(scenario.price_mode)}</span></div>
                       </button>
                     ))}
                   </section>
@@ -237,12 +244,12 @@ export function AdminPricingEditor({
                       <button type="button" className="pricing-icon-button is-danger" onClick={() => deleteItem('scenario', selectedScenario.id)} title="Видалити сценарій" aria-label="Видалити сценарій"><Trash2 size={15} /></button>
                     </div>}
                   </div>
-                  <div className="pricing-meta-strip">
+                  <details className="pricing-rule-details"><summary>Параметри правила</summary><div className="pricing-meta-strip">
                     <MetaItem label="Статус" value={getStatusLabel(selectedScenario.status)} />
                     <MetaItem label="Група" value={getScenarioGroupName(selectedScenario)} />
                     <MetaItem label="Пріоритет" value={selectedScenario.priority || 0} />
                     <MetaItem label="Режим" value={getPriceModeLabel(selectedScenario.price_mode)} />
-                  </div>
+                  </div></details>
                   <div className="pricing-local-tabs" role="group" aria-label="Редактор сценарію">
                     <button type="button" aria-pressed={scenarioTab === 'matrix'} className={scenarioTab === 'matrix' ? 'is-active' : ''} onClick={() => requestTransition(() => { setEditScenario(null); setScenarioTabState({ scenarioId: selectedScenario.id, tab: 'matrix' }); })}>Матриця</button>
                     {!readOnly && <button type="button" aria-pressed={scenarioTab === 'settings'} className={scenarioTab === 'settings' ? 'is-active' : ''} onClick={openScenarioSettings}>Налаштування</button>}
@@ -267,7 +274,7 @@ export function AdminPricingEditor({
                   return (
                     <button key={modifier.id} type="button" onClick={() => selectModifier(modifier)} className={`pricing-master-row ${selectedModifier?.id === modifier.id && !isNewModifier ? 'is-selected' : ''}`}>
                       <strong className="pricing-modifier-summary">{summary}</strong>
-                      <div className="pricing-master-row-meta"><span>Множник {formatDecimal(modifier.factor)}</span></div>
+                      <div className="pricing-master-row-meta"><span>{modifierEffect(modifier.factor)}</span></div>
                     </button>
                   );
                 })}
@@ -284,7 +291,7 @@ export function AdminPricingEditor({
               ) : selectedModifier ? (
                 <>
                   <div className="pricing-detail-header">
-                    <div className="min-w-0"><h3>Модифікатор ×{formatDecimal(selectedModifier.factor)}</h3><p>{formatConditionSummary(getModifierRule(selectedModifier), currentCatQuestions, config, 'Завжди')}</p></div>
+                    <div className="min-w-0"><h3>{modifierEffect(selectedModifier.factor)}</h3><p>{formatConditionSummary(getModifierRule(selectedModifier), currentCatQuestions, config, 'Завжди')}</p></div>
                     {!readOnly && <div className="pricing-detail-actions">
                       {!editModifier && <button type="button" className="btn btn-outline flex items-center gap-1.5 px-3 py-2 text-xs" onClick={openModifierEdit}><Pencil size={14} />Редагувати</button>}
                       <button type="button" className="pricing-icon-button is-danger" onClick={() => deleteItem('modifier', selectedModifier.id)} title="Видалити модифікатор" aria-label="Видалити модифікатор"><Trash2 size={15} /></button>
@@ -294,7 +301,7 @@ export function AdminPricingEditor({
                     <ModifierForm config={config} currentCatQuestions={currentCatQuestions} modifier={editModifier} onCancel={() => setEditModifier(null)} onSave={saveModifierEdit} setModifier={setEditModifier} />
                   ) : (
                     <div className="pricing-modifier-overview">
-                      <FormSection title="Правило"><MetaItem label="Умова" value={formatConditionSummary(getModifierRule(selectedModifier), currentCatQuestions, config, 'Завжди')} /><MetaItem label="Множник" value={formatDecimal(selectedModifier.factor)} /></FormSection>
+                      <FormSection title="Правило"><MetaItem label="Зміна ціни" value={modifierEffect(selectedModifier.factor)} /><MetaItem label="Множник для розрахунку" value={formatDecimal(selectedModifier.factor)} /></FormSection>
                     </div>
                   )}
                 </>

@@ -1,281 +1,137 @@
-import {
-  ClipboardList,
-  RotateCcw,
-  ScanSearch,
-  Square,
-  SquareCheckBig,
-} from 'lucide-react';
+import { Fragment, useLayoutEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { TechnicalDisclosure } from '../ui/index.js';
 import { formatDecimal, formatUah } from '../../lib/formatters';
 import { PricingExplanation, SortHeader } from './RepricingTablePrimitives';
 
-export function RepricingTable({
-  canApplyDirectRecount,
-  canCreateCorrectionRequest,
-  canPrepareRepricing,
-  controller,
-}) {
-  const {
-    activeCorrectionRequestByProductId,
-    config,
-    handleManualPriceBlur,
-    handleManualPriceFocus,
-    handleSort,
-    invalidManualPriceIds,
-    keepCurrentManualPrice,
-    manualPrices,
-    preview,
-    resetManualPrice,
-    reviewedProductIdSet,
-    selectAutomaticPrice,
-    setManualPrice,
-    setRecountTarget,
-    sort,
-    toggleReviewed,
-    visibleItems,
-  } = controller;
+function resultLabel(item) {
+  if (item.status === 'error') return item.message || 'Потрібне рішення';
+  if (item.manualPreserved) return 'Ручну ціну збережено';
+  if (item.status === 'skipped') return 'Пропущено';
+  if (item.status === 'unchanged') return 'Без змін';
+  return item.manualOverride ? 'Нова ручна ціна' : 'Зміниться';
+}
 
-  return (
-    <div className="relative isolate max-h-[560px] overflow-auto">
-      <table className="dense-table min-w-full bg-white">
-        <thead>
-          <tr className="table-head">
-            <SortHeader column="sku" sort={sort} onSort={handleSort}>Артикул</SortHeader>
-            <SortHeader column="weight" sort={sort} onSort={handleSort}>Вага</SortHeader>
-            <th scope="col" className="table-cell sticky top-0 z-20 border-b border-slate-200 bg-slate-100 text-left shadow-[0_1px_0_rgba(148,163,184,0.35)]">Умова та розрахунок</th>
-            <SortHeader align="right" column="oldPriceUah" sort={sort} onSort={handleSort}>Стара ціна</SortHeader>
-            <SortHeader align="right" column="newPriceUah" sort={sort} onSort={handleSort}>Нова ціна</SortHeader>
-            <SortHeader align="right" column="priceDeltaUah" sort={sort} onSort={handleSort}>Різниця</SortHeader>
-          </tr>
-        </thead>
-        <tbody>
-          {visibleItems.map((item) => {
-            const isReviewed = reviewedProductIdSet.has(Number(item.productId));
-            const correctionRequest = activeCorrectionRequestByProductId.get(
-              Number(item.productId)
-            );
-            const requiresManualPrice = ['price_missing', 'manual_price'].includes(
-              item.errorCode
-            );
-            const hasManualOverride = Object.prototype.hasOwnProperty.call(
-              manualPrices,
-              item.productId
-            );
-            const hasAutomaticResolution = Boolean(item.useAutomatic);
-            const canUseAutomaticPrice = (item.manualPreserved || item.errorCode === 'manual_price') && item.pricingDetails?.matrix
-              && Number(item.automaticPriceUah ?? item.newPriceUah) > 0;
-            const articleLabel = item.publicSku || 'Артикул недоступний';
-            const manualPriceErrorId = `repricing-price-error-${item.productId}`;
-            return (
-              <tr
-                key={item.productId}
-                className={`border-t border-slate-100 ${isReviewed ? 'bg-emerald-50/45' : ''}`}
-              >
-                <th scope="row" className="table-cell min-w-48 text-left text-xs font-normal text-slate-800">
-                  <div className="font-mono font-semibold">{articleLabel}</div>
-                  {item.sku && <TechnicalDisclosure summary="Внутрішній SKU">
-                    <span className="font-mono">{item.sku}</span>
-                  </TechnicalDisclosure>}
-                  <div className="mt-1 flex flex-wrap gap-1">
-                    <span className={`status-badge ${
-                      item.status === 'error'
-                        ? 'is-error'
-                        : item.status === 'skipped'
-                          ? 'is-skipped'
-                          : item.status === 'unchanged'
-                            ? 'is-neutral'
-                            : 'is-change'
-                    }`}>
-                      {item.status === 'error'
-                        ? 'Помилка'
-                        : item.status === 'skipped'
-                          ? 'Пропущено'
-                          : item.status === 'unchanged'
-                            ? 'Без змін'
-                            : 'Зміниться'}
-                    </span>
-                    <span className={`status-badge ${
-                      item.pricingState === 'manual' || item.errorCode === 'manual_price' || item.manualOverride
-                        ? 'is-manual'
-                        : item.pricingState === 'missing' || item.errorCode === 'price_missing'
-                          ? 'is-missing'
-                          : 'is-automatic'
-                    }`}>
-                      {item.manualOverride
-                        ? 'Ручна підтверджена'
-                        : item.pricingState === 'manual' || item.errorCode === 'manual_price'
-                          ? 'Ручна'
-                          : item.pricingState === 'missing' || item.errorCode === 'price_missing'
-                            ? 'Ціна відсутня'
-                            : 'Автоматична'}
-                    </span>
-                  </div>
-                  <div className="mt-2 flex items-center gap-3 font-sans">
-                    {(canApplyDirectRecount || canCreateCorrectionRequest) && (
-                      <button
-                        type="button"
-                        className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-600 hover:text-slate-900"
-                        onClick={() => setRecountTarget({
-                          productId: Number(item.productId),
-                          sku: item.publicSku || item.sku,
-                          mode: canApplyDirectRecount ? 'apply' : 'request',
-                        })}
-                      >
-                        <ScanSearch size={14} />
-                        Перевірити
-                      </button>
-                    )}
-                    {correctionRequest && (
-                      <Link
-                        to={`/admin/corrections?request=${correctionRequest.id}&from=admin`}
-                        className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-sky-700 hover:text-sky-900"
-                      >
-                        <ClipboardList size={14} />
-                        Запит #{correctionRequest.id}
-                      </Link>
-                    )}
-                    {canPrepareRepricing && <button
-                      type="button"
-                      className={`inline-flex items-center gap-1.5 text-[11px] font-semibold ${isReviewed ? 'text-emerald-700' : 'text-slate-500 hover:text-slate-900'}`}
-                      onClick={() => toggleReviewed(item.productId)}
-                      aria-pressed={isReviewed}
-                    >
-                      {isReviewed ? <SquareCheckBig size={14} /> : <Square size={14} />}
-                      {isReviewed ? 'Переглянуто' : 'Позначити'}
-                    </button>}
-                  </div>
-                </th>
-                <td className="table-cell whitespace-nowrap text-sm">
-                  {item.weight === null || item.weight === undefined
-                    ? '-'
-                    : formatDecimal(item.weight)} г
-                </td>
-                <td className="table-cell min-w-64 text-xs text-slate-600">
-                  {item.manualPreserved ? <div className="space-y-2"><p>Ручну ціну збережено без змін.</p>
-                    {canPrepareRepricing && canUseAutomaticPrice && <button type="button" className="btn btn-outline btn-compact" onClick={() => selectAutomaticPrice(item.productId)}>Перейти на автоматичну ціну · {formatUah(item.automaticPriceUah)}</button>}
-                  </div> : item.status === 'error' && !requiresManualPrice
-                    ? <span className="text-rose-700">{item.message}</span>
-                    : requiresManualPrice
-                      ? (
-                        <div className="space-y-2">
-                          <div className={item.manualOverride || item.useAutomatic ? 'text-amber-800' : 'text-rose-700'}>
-                            {item.message}
-                          </div>
-                          <div className="text-slate-600">
-                            {item.categoryCode ? `${item.categoryCode} — ` : ''}
-                            {item.scenarioName || item.matrixName || 'Активну матрицю не визначено'}
-                            {item.automaticPriceUah > 0
-                              ? ` · розраховано ${formatUah(item.calculatedPriceUah)} → автоматично ${formatUah(item.automaticPriceUah)}`
-                              : ''}
-                          </div>
-                          {canPrepareRepricing && <div className="flex flex-wrap gap-2">
-                            <button
-                              type="button"
-                              className="btn btn-outline btn-compact"
-                              onClick={() => keepCurrentManualPrice(
-                                item.productId,
-                                item.oldPriceUah
-                              )}
-                            >
-                              Залишити ручну ціну · {formatUah(item.oldPriceUah)}
-                            </button>
-                            {canUseAutomaticPrice && (
-                              <button
-                                type="button"
-                                className="btn btn-outline btn-compact text-sky-800"
-                                onClick={() => selectAutomaticPrice(item.productId)}
-                              >
-                                Застосувати автоматичну ціну ·{' '}
-                                {formatUah(item.automaticPriceUah ?? item.newPriceUah)}
-                              </button>
-                            )}
-                          </div>}
-                        </div>
-                      )
-                      : (
-                        <PricingExplanation
-                          config={config}
-                          categoryCode={item.categoryCode || preview.scenario?.categoryCode}
-                          item={item}
-                        />
-                      )}
-                </td>
-                <td className="table-cell whitespace-nowrap text-right text-sm">
-                  {formatUah(item.oldPriceUah)}
-                </td>
-                <td className="table-cell min-w-44 whitespace-nowrap text-right text-sm font-semibold">
-                  {item.status === 'error' && !requiresManualPrice ? '-' : (
-                    <div className="flex flex-col items-end gap-1">
-                      <div className="flex items-center justify-end gap-1.5">
-                        <div className="relative">
-                          <input
-                            className={`input-sm w-28 pr-7 text-right font-semibold ${invalidManualPriceIds.has(item.productId) ? 'border-rose-400 focus:border-rose-500' : ''}`}
-                            inputMode="decimal"
-                            readOnly={!canPrepareRepricing || item.manualPreserved || (preview.scope === 'global' && item.hasManualPrice)}
-                            aria-label={`Нова ціна для ${articleLabel}`}
-                            aria-invalid={invalidManualPriceIds.has(item.productId) || undefined}
-                            aria-describedby={invalidManualPriceIds.has(item.productId) ? manualPriceErrorId : undefined}
-                            value={hasManualOverride
-                              ? manualPrices[item.productId]
-                              : (hasAutomaticResolution
-                                  ? formatDecimal(item.automaticPriceUah ?? item.newPriceUah)
-                                  : (requiresManualPrice ? '' : formatDecimal(item.newPriceUah)))}
-                            onChange={(event) => canPrepareRepricing && setManualPrice(item.productId, event.target.value)}
-                            onFocus={() => { if (canPrepareRepricing && !item.manualPreserved && !(preview.scope === 'global' && item.hasManualPrice)) handleManualPriceFocus(item.productId); }}
-                            onBlur={(event) => canPrepareRepricing && !item.manualPreserved && !(preview.scope === 'global' && item.hasManualPrice) && handleManualPriceBlur(
-                              item.productId,
-                              event.target.value,
-                              hasAutomaticResolution
-                            )}
-                          />
-                          <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-xs font-normal text-slate-400">₴</span>
-                        </div>
-                        {canPrepareRepricing && (hasManualOverride || hasAutomaticResolution) && (
-                          <button
-                            type="button"
-                            className="btn btn-outline btn-icon"
-                            onClick={() => resetManualPrice(item.productId)}
-                            title="Повернути розраховану ціну"
-                            aria-label={`Скинути ручну ціну для ${articleLabel}`}
-                          >
-                            <RotateCcw size={14} />
-                          </button>
-                        )}
-                      </div>
-                      {item.manualOverride && (
-                        <span className="text-[10px] font-semibold uppercase text-amber-700">
-                          {item.resolvedManualPrice || item.resolvedPriceMissing
-                            ? 'Ручну ціну підтверджено'
-                            : `Вручну · автоматично ${formatUah(item.automaticPriceUah)}`}
-                        </span>
-                      )}
-                      {item.useAutomatic && (
-                        <span className="text-[10px] font-semibold uppercase text-sky-700">
-                          Автоматичну ціну підтверджено
-                        </span>
-                      )}
-                      {invalidManualPriceIds.has(item.productId) && (
-                        <span id={manualPriceErrorId} className="text-[10px] font-medium text-rose-600">
-                          Вкажіть ціну більше нуля
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </td>
-                <td className={`table-cell whitespace-nowrap text-right text-sm font-semibold ${Number(item.priceDeltaUah) >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
-                  {item.status === 'error' ? '-' : formatUah(item.priceDeltaUah)}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-      {visibleItems.length === 0 && (
-        <div className="px-4 py-12 text-center text-sm text-slate-500">
-          Немає рядків для цього фільтра.
-        </div>
-      )}
+function RepricingRowDetail({ item, onClose, canApplyDirectRecount, canCreateCorrectionRequest, canPrepareRepricing, controller }) {
+  const headingRef = useRef(null);
+  useLayoutEffect(() => { headingRef.current?.focus(); }, []);
+  const { activeCorrectionRequestByProductId, config, handleManualPriceBlur, handleManualPriceFocus,
+    invalidManualPriceIds, keepCurrentManualPrice, manualPrices, preview, resetManualPrice,
+    reviewedProductIdSet, selectAutomaticPrice, setManualPrice, setRecountTarget, toggleReviewed } = controller;
+  const correctionRequest = activeCorrectionRequestByProductId.get(Number(item.productId));
+  const requiresManualPrice = ['price_missing', 'manual_price'].includes(item.errorCode);
+  const hasManualOverride = Object.prototype.hasOwnProperty.call(manualPrices, item.productId);
+  const hasAutomaticResolution = Boolean(item.useAutomatic);
+  const canUseAutomaticPrice = (item.manualPreserved || item.errorCode === 'manual_price') && item.pricingDetails?.matrix
+    && Number(item.automaticPriceUah ?? item.newPriceUah) > 0;
+  const article = item.publicSku || 'Артикул недоступний';
+  const errorId = `repricing-price-error-${item.productId}`;
+  const locked = !canPrepareRepricing || item.manualPreserved || preview.scope === 'global' && item.hasManualPrice;
+  const isReviewed = reviewedProductIdSet.has(Number(item.productId));
+
+  return <div className="repricing-row-detail" id={`repricing-detail-${item.productId}`}>
+    <div className="space-y-3">
+      <button type="button" className="btn btn-outline repricing-detail-back" onClick={onClose}>До списку цін</button>
+      <h3 ref={headingRef} className="font-semibold" tabIndex={-1}>Рішення для {article}</h3>
+      <p className="text-sm text-slate-500">Вага: {item.weight === null || item.weight === undefined ? 'не вказана' : `${formatDecimal(item.weight)} г`}</p>
+      {item.manualPreserved ? <p>Ручну ціну збережено без змін.</p> : item.status === 'error' && !requiresManualPrice
+        ? <p role="alert">{item.message}</p> : requiresManualPrice ? <p>{item.message}</p>
+          : <PricingExplanation config={config} categoryCode={item.categoryCode || preview.scenario?.categoryCode} item={item} />}
+      {requiresManualPrice && <p>{item.scenarioName || item.matrixName || 'Активну матрицю не визначено'}
+        {Number(item.automaticPriceUah) > 0 ? ` · автоматично ${formatUah(item.automaticPriceUah)}` : ''}</p>}
+      {canPrepareRepricing && <div className="flex flex-wrap gap-2">
+        {requiresManualPrice && !item.manualPreserved && <button type="button" className="btn btn-outline"
+          onClick={() => keepCurrentManualPrice(item.productId, item.oldPriceUah)}>Залишити ручну ціну · {formatUah(item.oldPriceUah)}</button>}
+        {canUseAutomaticPrice && <button type="button" className="btn btn-outline" onClick={() => selectAutomaticPrice(item.productId)}>
+          Перейти на автоматичну ціну · {formatUah(item.automaticPriceUah ?? item.newPriceUah)}</button>}
+      </div>}
+      {!(item.status === 'error' && !requiresManualPrice) && <div className="flex flex-wrap items-end gap-2">
+        <label className="grid gap-1">Нова ціна, грн<input className="input-sm w-40" inputMode="decimal" readOnly={locked}
+          aria-label={`Нова ціна для ${article}`} aria-invalid={invalidManualPriceIds.has(item.productId) || undefined}
+          aria-describedby={invalidManualPriceIds.has(item.productId) ? errorId : undefined}
+          value={hasManualOverride ? manualPrices[item.productId] : hasAutomaticResolution
+            ? formatDecimal(item.automaticPriceUah ?? item.newPriceUah) : requiresManualPrice ? '' : formatDecimal(item.newPriceUah)}
+          onChange={(event) => { if (!locked) setManualPrice(item.productId, event.target.value); }}
+          onFocus={() => { if (!locked) handleManualPriceFocus(item.productId); }}
+          onBlur={(event) => { if (!locked) handleManualPriceBlur(item.productId, event.target.value, hasAutomaticResolution); }} />
+        </label>
+        {canPrepareRepricing && (hasManualOverride || hasAutomaticResolution) && <button type="button" className="btn btn-outline"
+          onClick={() => resetManualPrice(item.productId)} aria-label={`Скинути ручну ціну для ${article}`}>Повернути розраховану ціну</button>}
+        {invalidManualPriceIds.has(item.productId) && <p id={errorId} role="alert">Вкажіть ціну більше нуля</p>}
+      </div>}
+      {item.manualOverride && <p className="text-sm">{item.resolvedManualPrice || item.resolvedPriceMissing ? 'Ручну ціну підтверджено' : `Вручну · автоматично ${formatUah(item.automaticPriceUah)}`}</p>}
+      {item.useAutomatic && <p className="text-sm">Автоматичну ціну підтверджено</p>}
     </div>
-  );
+    <div className="space-y-3">
+      {canPrepareRepricing && <button type="button" className="btn btn-outline" onClick={() => toggleReviewed(item.productId)} aria-pressed={isReviewed}>
+        {isReviewed ? 'Переглянуто' : 'Позначити як переглянутий'}</button>}
+      {(canApplyDirectRecount || canCreateCorrectionRequest) && <button type="button" className="btn btn-outline" onClick={() => setRecountTarget({
+        productId: Number(item.productId), sku: item.publicSku || item.sku, mode: canApplyDirectRecount ? 'apply' : 'request',
+      })}>Змінити характеристики</button>}
+      {correctionRequest && <Link className="btn btn-outline" to={`/admin/corrections?request=${correctionRequest.id}&from=admin`}>Запит #{correctionRequest.id}</Link>}
+      {item.sku && <TechnicalDisclosure summary="Внутрішній SKU"><span className="font-mono">{item.sku}</span></TechnicalDisclosure>}
+    </div>
+  </div>;
+}
+
+export function RepricingTable(props) {
+  const { controller, canPrepareRepricing } = props;
+  const { handleSort, sort, visibleItems, reviewedProductIdSet, handleManualPriceBlur,
+    handleManualPriceFocus, invalidManualPriceIds, manualPrices, preview, setManualPrice } = controller;
+  const [selected, setSelected] = useState(null);
+  return <div className="repricing-table-scroll">
+    <table className="dense-table min-w-full bg-white">
+      <caption className="sr-only">Перевірка цін. Відсутню ручну ціну можна ввести в рядку. Відкрийте деталі для розрахунку й інших рішень.</caption>
+      <thead><tr className="table-head">
+        <SortHeader column="sku" sort={sort} onSort={handleSort}>Артикул</SortHeader>
+        <SortHeader align="right" column="weight" sort={sort} onSort={handleSort}>Вага, г</SortHeader>
+        <SortHeader align="right" column="oldPriceUah" sort={sort} onSort={handleSort}>Зараз</SortHeader>
+        <SortHeader align="right" column="newPriceUah" sort={sort} onSort={handleSort}>Буде</SortHeader>
+        <SortHeader align="right" column="priceDeltaUah" sort={sort} onSort={handleSort}>Різниця</SortHeader>
+        <th scope="col" className="table-cell">Результат</th><th scope="col" className="table-cell"><span className="sr-only">Дії</span></th>
+      </tr></thead>
+      <tbody>{visibleItems.map((item) => {
+        const article = item.publicSku || 'Артикул недоступний';
+        const expanded = selected === item.productId;
+        const requiresManualPrice = ['price_missing', 'manual_price'].includes(item.errorCode);
+        const hasManualOverride = Object.prototype.hasOwnProperty.call(manualPrices, item.productId);
+        const hasAutomaticResolution = Boolean(item.useAutomatic);
+        const locked = !canPrepareRepricing || item.manualPreserved || preview.scope === 'global' && item.hasManualPrice;
+        const errorId = `repricing-price-error-${item.productId}`;
+        const priceKind = item.manualOverride || item.pricingState === 'manual' || item.errorCode === 'manual_price'
+          ? 'manual' : item.pricingState === 'missing' || item.errorCode === 'price_missing' ? 'missing' : 'automatic';
+        return <Fragment key={item.productId}><tr className={expanded ? 'is-selected' : ''}>
+          <th scope="row" className="table-cell text-left"><span className="font-mono">{article}</span>
+            <span className={`status-badge is-${priceKind} mt-1 block w-fit`}>
+              {item.manualOverride ? 'Ручна підтверджена' : priceKind === 'manual' ? 'Ручна' : priceKind === 'missing' ? 'Ціна відсутня' : 'Автоматична'}
+            </span></th>
+          <td className="table-cell text-right tabular-nums">{item.weight === null || item.weight === undefined ? '—' : formatDecimal(item.weight)}</td>
+          <td className="table-cell text-right tabular-nums">{formatUah(item.oldPriceUah)}</td>
+          <td className="table-cell text-right font-semibold tabular-nums">{requiresManualPrice && !expanded ? <>
+            <input className="input-sm w-32 text-right" inputMode="decimal" readOnly={locked}
+              aria-label={`Нова ціна для ${article}`} aria-invalid={invalidManualPriceIds.has(item.productId) || undefined}
+              aria-describedby={invalidManualPriceIds.has(item.productId) ? errorId : undefined}
+              value={hasManualOverride ? manualPrices[item.productId] : hasAutomaticResolution
+                ? formatDecimal(item.automaticPriceUah ?? item.newPriceUah) : ''}
+              onChange={(event) => { if (!locked) setManualPrice(item.productId, event.target.value); }}
+              onFocus={() => { if (!locked) handleManualPriceFocus(item.productId); }}
+              onBlur={(event) => { if (!locked) handleManualPriceBlur(item.productId, event.target.value, hasAutomaticResolution); }} />
+            {invalidManualPriceIds.has(item.productId) && <p id={errorId} role="alert">Вкажіть ціну більше нуля</p>}
+          </> : item.status === 'error' ? '—' : formatUah(item.newPriceUah)}</td>
+          <td className="table-cell text-right tabular-nums">{item.status === 'error' ? '—' : formatUah(item.priceDeltaUah)}</td>
+          <td className="table-cell"><span className={item.status === 'error' ? 'text-rose-700' : ''}>{resultLabel(item)}</span>
+            {reviewedProductIdSet.has(Number(item.productId)) && <span className="ml-2 text-slate-500">· Переглянуто</span>}</td>
+          <td className="table-cell"><button type="button" id={`repricing-open-${item.productId}`} className="btn btn-outline" aria-expanded={expanded}
+            aria-controls={`repricing-detail-${item.productId}`} aria-label={`${expanded ? 'Закрити' : 'Переглянути'} рішення для ${article}`}
+            onClick={() => {
+              setSelected(expanded ? null : item.productId);
+            }}>{expanded ? 'Закрити' : item.status === 'error' ? 'Вирішити' : 'Переглянути'}</button></td>
+        </tr>{expanded && <tr className="repricing-detail-row"><td colSpan={7}><RepricingRowDetail {...props} item={item} onClose={() => {
+          setSelected(null);
+          requestAnimationFrame(() => document.getElementById(`repricing-open-${item.productId}`)?.focus());
+        }} /></td></tr>}</Fragment>;
+      })}</tbody>
+    </table>
+    {visibleItems.length === 0 && <p className="p-6 text-center text-slate-500">Немає рядків для цього фільтра.</p>}
+  </div>;
 }

@@ -19,7 +19,12 @@ const token = 'b'.repeat(64);
 const field = { target: 'weight', scope: 'all', status: 'conflict', reason: 'POPULATED_VALUES_DIFFER', local: { known: true, present: true, value: '12' }, remote: { known: true, present: true, value: '15' }, canAcceptRemote: true, canKeepLocal: true };
 const preview = (sku = product.article) => ({ mode: 'first', sku, previewToken: token, fields: [field], blockers: [], readyForOutbound: false, complete: false });
 const shell = (item = product, principal = auth, onSaved = vi.fn()) => <AuthContext.Provider value={principal}><MemoryRouter><AttentionProblemDetail product={item} productUrl="/products?product=5012" returnTo="/attention?problem=5012" onSaved={onSaved} /></MemoryRouter></AuthContext.Provider>;
-const startReview = () => fireEvent.click(screen.getByRole('button', { name: 'Перевірити актуальні поля' }));
+const openFields = () => {
+  const open = screen.queryByRole('button', { name: 'Переглянути перше отримання полів' });
+  if (open) fireEvent.click(open);
+  else if (screen.queryByText('Додаткові перевірки')) { fireEvent.click(screen.getByText('Додаткові перевірки')); fireEvent.click(screen.getByRole('button', { name: 'Переглянути перше отримання полів' })); }
+};
+const startReview = () => { if (!screen.queryByRole('button', { name: 'Перевірити актуальні поля' })) openFields(); fireEvent.click(screen.getByRole('button', { name: 'Перевірити актуальні поля' })); };
 const pending = () => { let resolve; const promise = new Promise((done) => { resolve = done; }); return { promise, resolve }; };
 beforeEach(() => { api.get.mockResolvedValue({ data: { currentPublishedId: bindingRevisionId } }); });
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
@@ -29,6 +34,7 @@ it.each([
   { code: 'MAPPING_MISSING', resolutionKind: 'integration_configuration', resolution: 'integration_configuration' },
 ])('mounts one manual panel independently of saved diagnosis $code without reading on open', (diagnostic) => {
   render(shell({ ...product, problems: [diagnostic] }));
+  if (!isFirstSyncFieldsProblem(diagnostic)) { expect(screen.queryByRole('region', { name: /Перше отримання полів/ })).toBeNull(); openFields(); }
   expect(screen.getAllByRole('region', { name: `Перше отримання полів ${product.article}` })).toHaveLength(1);
   expect(screen.getAllByRole('button', { name: 'Перевірити актуальні поля' })).toHaveLength(1);
   expect(api.get).not.toHaveBeenCalled(); expect(api.post).not.toHaveBeenCalled();
@@ -48,8 +54,10 @@ it('labels the saved weight diagnosis as historical beside a fresh populated132.
   api.post.mockResolvedValue({data:{...preview(sku),fields:[{...field,target:'decor_weight',local:{known:true,present:true,value:'132.300'},
     remote:{known:true,present:true,value:'132.3'},status:'equal',reason:'NORMALIZED_VALUES_EQUAL',canAcceptRemote:false,canKeepLocal:false}]}});
   const saved=vi.fn();render(shell({...product,productId:1488,article:sku,observedAt,problems:[evaluationProblem]},auth,saved));
-  expect(screen.getByText(/Збережена діагностика ·/).textContent).toContain(new Date(observedAt).toLocaleString('uk-UA'));
-  expect(screen.getByText(/Вона описує попередню перевірку/)).toBeTruthy();startReview();
+  fireEvent.click(screen.getByText('Дані для підтримки'));
+  expect(screen.getByText(/Зафіксовано:/).textContent).toContain(new Date(observedAt).toLocaleString('uk-UA'));
+  startReview();
+  fireEvent.click(await screen.findByRole('button', { name: 'Усі поля (1)' }));
   await screen.findByText('132.300');expect(screen.getByText('Підтверджені значення збігаються після нормалізації.')).toBeTruthy();
   expect(screen.getByRole('button',{name:'Отримати значення Magento: Вага вставки · UA / основний магазин'}).disabled).toBe(true);
   expect(saved).not.toHaveBeenCalled();expect(api.post).toHaveBeenCalledTimes(1);
@@ -98,8 +106,10 @@ it('mounts one shared panel for multiple exact field/language reasons and retain
   const item = { ...product, problems: [problem, { ...problem }, names] };
   render(shell(item)); expect(screen.getAllByRole('region', { name: /Перше отримання полів/ })).toHaveLength(1);
   expect(screen.getAllByRole('button', { name: 'Перевірити актуальні поля' })).toHaveLength(1);
+  fireEvent.click(screen.getByText('Інші перешкоди (1)'));
   expect(screen.getByRole('heading', { name: 'Назва · EN: Значення Magento не підтверджено.' })).toBeTruthy();
-  expect(screen.getAllByText(/Це поле перевіряється у спільній панелі/).length).toBeGreaterThan(0);
+  fireEvent.click(screen.getByRole('button', { name: 'Перевірити поля першого отримання' }));
+  expect(screen.getAllByRole('region', { name: /Перше отримання полів/ })).toHaveLength(1);
   fireEvent.click(screen.getByText('Дані для підтримки'));
   const support = screen.getByText('Збережена діагностика товару').parentElement;
   expect(support.textContent).toContain('REMOTE_READ_UNKNOWN'); expect(support.textContent).toContain('"scope": "en"');
@@ -111,7 +121,7 @@ it('scope and reason keep distinct diagnostics while exact duplicates retain all
   const groups = attentionProblemGroups([problem, { ...problem }, en, another]);
   expect(groups).toHaveLength(3); expect(groups[0].evidence).toHaveLength(2);
   expect(nextAction(problem)).toBe('Перевірити поля першого отримання');
-  expect(problemTitle(en)).toContain('EN'); expect(problemImpact(problem)).toContain('окремо для кожного поля й мови');
+  expect(problemTitle(en)).toContain('EN'); expect(problemImpact(problem)).toContain('Передавання зупинено');
   expect(isFirstSyncFieldsProblem({ resolution: 'first_sync_fields', resolutionKind: 'integration_configuration' })).toBe(false);
 });
 
@@ -147,7 +157,8 @@ it('shows the populated physical weight in a blocked SV11500004 preview without 
   api.post.mockResolvedValue({ data: { ...preview(sku), mode: 'review', fields: [weight], blockers: [{ code: weight.reason, target: 'weight', scope: 'all' }] } });
   render(shell({ ...product, productId: 1488, article: sku, bindingRevisionId: undefined, problems: [evaluationProblem] }, auth, saved));
   startReview(); await screen.findByText('132.300');
-  expect(screen.getByRole('heading', { name: 'Немає додатної ваги для Magento' })).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: 'Немає додатної ваги для Magento' })).toBeNull();
+  expect(screen.getByRole('button', { name: 'Повернутися до причини' })).toBeTruthy();
   expect(screen.getByText(/Перше отримання недоступне/)).toBeTruthy();
   expect(screen.queryByRole('button', { name: /Отримати значення Magento:/ })).toBeNull();
   expect(screen.queryByRole('button', { name: /Залишити значення Amber:/ })).toBeNull();
