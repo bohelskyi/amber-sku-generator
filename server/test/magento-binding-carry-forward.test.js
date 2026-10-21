@@ -6,7 +6,7 @@ const { describeMapper } = require('../src/services/magento/mapper-schema');
 const { buildCandidates } = require('../src/services/magento/binding-bootstrap');
 const { evaluate } = require('../src/services/magento/binding-evidence-products');
 const { normalizeSchema, originHash } = require('../src/services/magento/binding-contract');
-const { carryReviewedBindings, collectLiveVerification } = require('../src/services/magento/binding-carry-forward');
+const { carryReviewedBindings, collectLiveVerification, liveRequests } = require('../src/services/magento/binding-carry-forward');
 const { catalog, product } = require('./fixtures/magento-v1/contract');
 const { parse } = require('../scripts/magento-binding-carry-forward');
 
@@ -234,6 +234,23 @@ test('missing reviewed categories require an exact live full-path and ID before 
     const result = carryReviewedBindings(changed.source, changed.target, changed.targetDefinition, evidence);
     assert.ok(result.blockers.some((row) => row.code === code), name);
   }
+});
+
+test('live category verification accepts a catalog above 100 reviewed categories and stays bounded', () => {
+  // Each route attribute holds at most 100 category rows; the catalog-wide request spans routes.
+  const withCategories = perAttribute => {
+    const f = fixture(), { sourceCategory } = oneCategoryMissing(f);
+    const attributes = f.source.bindings.attributes.filter((row) => row.target === 'categories' && row.evidence.categories?.length
+      && f.target.bindings.attributes.some((target) => target.bindingKey === row.bindingKey));
+    attributes.forEach((attribute, route) => { attribute.evidence.categories = Array.from({ length: perAttribute }, (_, index) => {
+      const path = `${sourceCategory.requestedPath}/Розділ ${route}-${index}`, id = String(48000 + route * 1000 + index);
+      return { requestedPath: path, normalizedPath: path, categoryId: id, candidates: [{ categoryId: id, path }], reviewState: 'approved' };
+    }); });
+    return { f, total: attributes.length * perAttribute };
+  };
+  const many = withCategories(100);
+  assert.ok(many.total > 100, `fixture has ${many.total} category rows`);
+  assert.equal(liveRequests(many.f.source, many.f.target, many.f.targetDefinition).categories.length, many.total);
 });
 
 test('missing reviewed dynamic output is synthesized only with target-domain and exact live option identity', async () => {

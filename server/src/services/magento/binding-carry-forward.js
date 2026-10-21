@@ -16,6 +16,9 @@ const FORMAT = 'amber-magento-binding-reviewed-carry-forward-v1';
 const EVENT = 'magento_binding.review_carried_forward';
 const LIVE_FORMAT = 'amber-magento-binding-reviewed-carry-forward-live-v1';
 const MAX_LIVE_IDENTITIES = 100;
+// Categories are matched against one tree read per store root, so their count does
+// not add Magento reads; the bound only limits the evidence package size.
+const MAX_LIVE_CATEGORIES = 1000;
 
 function fail(code, message, details, status = 409) {
   throw c.error(status, code, message, details);
@@ -159,7 +162,7 @@ function liveRequests(source, target, targetDefinition) {
     [`${row.bindingKey}/${row.normalizedPath}`, row])).values()];
   const uniqueOptions = [...new Map(dynamicOptions.map((row) =>
     [`${row.bindingKey}/${row.outputKey}`, row])).values()];
-  if (uniqueCategories.length > MAX_LIVE_IDENTITIES || uniqueOptions.length > MAX_LIVE_IDENTITIES) {
+  if (uniqueCategories.length > MAX_LIVE_CATEGORIES || uniqueOptions.length > MAX_LIVE_IDENTITIES) {
     fail('MAGENTO_BINDING_CARRY_LIVE_LIMIT', 'Carry-forward live verification exceeds its bounded identity limit');
   }
   return { categories: uniqueCategories, dynamicOptions: uniqueOptions };
