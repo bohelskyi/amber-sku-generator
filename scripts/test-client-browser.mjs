@@ -170,6 +170,12 @@ const repricingPreview = { scope: 'scenario', scenario: { id: 21, categoryCode: 
   items: repricingItems };
 let repricingDraft = null;
 let repricingApplied = false;
+let repricingManualEntryFixture = false;
+const repricingManualItems = repricingItems.slice(0, 50).map((item, index) => ({
+  ...item, weight: 50 - index, status: 'error', newPriceUah: null,
+  errorCode: index % 2 ? 'manual_price' : 'price_missing',
+  pricingState: index % 2 ? 'manual' : 'missing', message: 'Вкажіть ручну ціну.',
+}));
 let correctionRequest = { id: 71, requestType: 'recount', status: 'pending', sourceProductId: 20,
   sourceSku: 'BR1001', proposedSku: 'BR1002', sourceArticle: 'AG-000020', proposedArticle: 'AG-000020',
   sourceInternalSku: 'BR1001', proposedInternalSku: 'BR1002', categoryCode: 'BR', comment: 'Перевірити розмір',
@@ -439,7 +445,10 @@ const server = http.createServer(async (request, response) => {
         applied_at: '2026-10-02T10:00:00Z', category_code: 'BR', scenario_name: repricingScenario.name,
         status: 'completed', changed_count: 1000, can_rollback: true }] : [],
         pageInfo: { limit: 20, offset: 0, total: repricingApplied ? 1 : 0, hasPrevious: false, hasNext: false } }; break;
-      case 'POST /api/admin/repricing/preview': data = repricingPreview; break;
+      case 'POST /api/admin/repricing/preview': data = repricingManualEntryFixture
+        ? { ...repricingPreview, items: repricingManualItems,
+          summary: { ...repricingPreview.summary, candidateCount: 50, changedCount: 0, errorCount: 50 } }
+        : repricingPreview; break;
       case 'POST /api/admin/repricing/drafts':
         repricingDraft = { id: 77, scope: body.scope, scenarioId: body.scenarioId, updatedAt: '2026-10-02T09:00:00Z',
           manualOverrides: body.manualOverrides, automaticProductIds: body.automaticProductIds,
@@ -915,7 +924,7 @@ try {
   const repricingPreviewLatencyMs = Math.round(repricingRenderedAt - repricingPreviewStartedAt);
   assert.ok(repricingPreviewLatencyMs < 3000, `Fixture repricing review should render within 3s, received ${repricingPreviewLatencyMs}ms`);
   await client.click('Далі', "document.querySelector('.repricing-workspace')");
-  await client.wait("document.body.textContent.includes('51–100 із 1000') && document.querySelector('.repricing-workspace tbody th')?.textContent.trim()==='AG-001051'", 'second repricing presentation page');
+  await client.wait("document.body.textContent.includes('51–100 із 1000') && document.querySelector('.repricing-workspace tbody th .font-mono')?.textContent.trim()==='AG-001051'", 'second repricing presentation page');
   const repricingSecondPage = await client.evaluate(`({
     rows: document.querySelectorAll('.repricing-workspace tbody > tr').length,
     summary: document.querySelector('.action-summary-bar')?.textContent || ''
@@ -924,7 +933,7 @@ try {
   assert.ok(repricingSecondPage.summary.includes('Застосування охопить усі 1000 підготовлені зміни.'),
     'Changing the presentation page must retain the full authoritative apply scope');
   await client.click('Назад', "document.querySelector('.repricing-workspace')");
-  await client.wait("document.body.textContent.includes('1–50 із 1000') && document.querySelector('.repricing-workspace tbody th')?.textContent.trim()==='AG-001001'", 'first repricing presentation page restored');
+  await client.wait("document.body.textContent.includes('1–50 із 1000') && document.querySelector('.repricing-workspace tbody th .font-mono')?.textContent.trim()==='AG-001001'", 'first repricing presentation page restored');
   assert.equal(await client.evaluate("document.querySelectorAll('.repricing-workspace tbody > tr').length"), 50,
     'Returning to the first repricing page must retain the 50-row DOM bound');
   await client.evaluate("document.querySelector('[aria-label=\"Переглянути рішення для AG-001001\"]').click()");
@@ -943,6 +952,63 @@ try {
     navigationAndDataMs: Math.round(repricingRenderedAt - repricingStartedAt), previewToReviewMs: repricingPreviewLatencyMs,
     paginationPreservedFullScope: true, amberApplied: true,
     delivery: { synced: 0, pending: 990, needsAttention: 10 } };
+
+  repricingManualEntryFixture = true;
+  await client.navigate('/admin/repricing', 'Переоцінка');
+  await client.wait("!!document.querySelector('.repricing-scope select')", 'manual price preparation');
+  await client.setValue('.repricing-scope select', 'scenario');
+  await client.click('Підготувати переоцінку');
+  await client.wait("document.querySelectorAll('.repricing-workspace tbody input').length===50", '50 inline manual prices');
+  await client.click('Усі');
+  await client.evaluate("document.querySelector('.repricing-workspace tbody input').focus()");
+  const pressTab = async () => {
+    await client.command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
+    await client.command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
+  };
+  for (let index = 0; index < 50; index += 1) {
+    const article = repricingManualItems[index].publicSku;
+    const label = `Нова ціна для ${article}`;
+    assert.equal(await client.evaluate("document.activeElement?.getAttribute('aria-label')"), label,
+      `Tab must reach the inline price for ${article} without opening details`);
+    await client.command('Input.insertText', { text: String(2000 + index) });
+    if (index < 49) {
+      await pressTab();
+      await pressTab();
+    }
+  }
+  await pressTab();
+  await client.wait("document.body.textContent.includes('Ручних цін: 50') && document.body.textContent.includes('Застосування охопить усі 50 підготовлені зміни.') && document.body.textContent.includes('Збережено')", '50 manual resolutions saved');
+  assert.equal(await client.evaluate("document.querySelectorAll('.repricing-row-detail').length"), 0);
+  assert.deepEqual(repricingDraft.manualOverrides, repricingManualItems.map((item, index) => ({
+    productId: item.productId, newPriceUah: 2000 + index,
+  })), 'Draft preview request must receive every keyboard-entered price');
+  await client.screenshot('repricing-inline-keyboard-50');
+  report.repricing.keyboardManualPrices = { count: 50, detailsOpened: false, draftPreviewReceivedAllPrices: true };
+  for (const width of [390, 360]) {
+    await client.command('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: 1, mobile: false });
+    await client.setValue('input[aria-label="Нова ціна для AG-001001"]', '0');
+    await client.evaluate("document.querySelector('[aria-label=\"Переглянути рішення для AG-001001\"]').click()");
+    await client.wait("!!document.querySelector('.repricing-row-detail input')?.getClientRects().length", `visible manual price in mobile details ${width}px`);
+    assert.equal(await client.evaluate("document.querySelectorAll('input[aria-label=\"Нова ціна для AG-001001\"]').length"), 1,
+      'Opening manual details must move the editor, not duplicate its accessible name');
+    assert.equal(await client.evaluate(`(() => { const field=document.querySelector('.repricing-row-detail input');
+      const message=document.getElementById(field.getAttribute('aria-describedby'));
+      return field.getAttribute('aria-invalid')==='true' && !!message?.getClientRects().length; })()`), true);
+    await client.setValue('.repricing-row-detail input', '');
+    await client.evaluate("document.querySelector('.repricing-row-detail input').focus()");
+    await client.command('Input.insertText', { text: `${2500 + width},50` });
+    await pressTab();
+    await client.noOverflow(`Manual price details ${width}px`);
+    await client.screenshot(`repricing-manual-detail-${width}`);
+    await client.click('До списку цін');
+    await client.wait(`document.querySelector('input[aria-label="Нова ціна для AG-001001"]')?.value==='${2500 + width}.5'`, `manual price retained after closing ${width}px`);
+    assert.equal(await client.evaluate("document.querySelectorAll('.repricing-row-detail').length"), 0);
+  }
+  report.repricing.mobileManualDetails = { widths: [390, 360], visibleEditor: true, uniqueAccessibleName: true,
+    validationVisible: true, priceRetainedOnReturn: true };
+  await client.command('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
+  repricingManualEntryFixture = false;
+  repricingDraft = null;
 
   currentPersona = 'exportCreator';
   await client.navigate('/', 'Історичний експорт');

@@ -6,7 +6,7 @@ import { ExchangeRateNotice } from '../ExchangeRateNotice';
 const MODES = [
   { value: 'system_auto', label: 'За правилами' },
   { value: 'manual_uah', label: 'Вказати суму' },
-  { value: 'usd_per_gram', label: 'За грам' },
+  { value: 'usd_per_gram', label: 'USD за грам' },
 ];
 
 function validPositiveDecimal(value, scale) {
@@ -62,7 +62,7 @@ export function ProductPriceChangeDialog({
   const actionDisabled = !validInput || !preview || preview.unchanged || isLoading || isApplying;
 
   return <Dialog open title="Змінити ціну"
-    description={sku}
+    description={`Зміна ціни без переобліку${sku ? ` · ${sku}` : ''}`}
     busy={isApplying} onClose={onCancel} initialFocusRef={confirmButtonRef} size="md"
     footer={<div className={`grid w-full gap-3 ${canApplyDirect && canCreateRequest ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
       <button type="button" className="btn btn-outline" onClick={onCancel} disabled={isApplying}>Скасувати</button>

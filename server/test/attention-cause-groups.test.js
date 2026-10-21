@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
-const { recordedDiagnostics, safeDiagnostics } = require('../src/services/magento/sync-problems');
+const { recordedDiagnostics, safeDiagnostics, problemSelectSql } = require('../src/services/magento/sync-problems');
 const { groupPage, groupProducts } = require('../src/services/magento/problem-groups');
 
 test('shared causes capture the original unambiguous semantic value including zero, never labels as identity', () => {
@@ -41,4 +41,26 @@ test('invalid group identity and paging fail before database access', async () =
   await assert.rejects(groupProducts({}, "' OR true", {}, db), error => error.statusCode === 422);
   await assert.rejects(groupPage({}, { offset: -1 }, db), error => error.statusCode === 422);
   await assert.rejects(groupPage({}, { reason: 'unknown' }, db), error => error.statusCode === 422);
+});
+
+test('group queries use the explicit shared identity projection and retain unfinished identity deletions', async () => {
+  assert.match(problemSelectSql, /\bi\.id AS identity_id\b/, 'The shared SELECT owns the identity column; consumers never inject it by string replacement');
+  const calls = [];
+  const db = { async query(sql) { calls.push(sql); return { rows: [] }; } };
+  await groupPage({ configured: false }, {}, db);
+  await groupProducts({ configured: false }, 'a'.repeat(32), {}, db);
+  for (const sql of calls) {
+    assert.ok(sql.includes(problemSelectSql), 'Both grouped reads use the complete shared projection unchanged');
+    assert.match(sql, /WHERE \(r\.state='needs_attention' OR d\.state<>'finalized'\)/);
+    assert.doesNotMatch(sql, /d\.product_id\s*=\s*p\.id/, 'Unfinished deletions follow the identity join just like the legacy queue');
+  }
+});
+
+test('group samples select one member per group without accumulating every member as JSON', async () => {
+  let statement;
+  const db = { async query(sql) { statement = sql; return { rows: [] }; } };
+  await groupPage({ configured: false }, {}, db);
+  assert.match(statement, /SELECT DISTINCT ON \(group_id\)/);
+  assert.match(statement, /ORDER BY group_id,"productId"/);
+  assert.doesNotMatch(statement, /\barray_agg\s*\(/i);
 });

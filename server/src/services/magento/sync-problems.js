@@ -225,7 +225,7 @@ const problemJoinSql = `FROM products p JOIN public_product_identities i ON i.id
   LEFT JOIN product_full_export_state f ON f.product_id=p.id
   LEFT JOIN magento_name_sync_states n ON n.public_product_identity_id=i.id AND n.origin_hash=$1
   LEFT JOIN magento_test_deletions d ON d.public_product_identity_id=i.id`;
-const problemSelectSql = `SELECT p.id AS "productId",i.public_sku AS "article",p.category,(SELECT b.id FROM magento_binding_revisions b JOIN magento_auto_sync_activation a ON a.installation_key=b.installation_key AND a.singleton WHERE b.state='published' AND b.origin_hash=$1 ORDER BY b.version_number DESC LIMIT 1) AS binding_revision_id,c.name AS category_name,p.status AS product_status,
+const problemSelectSql = `SELECT i.id AS identity_id,p.id AS "productId",i.public_sku AS "article",p.category,(SELECT b.id FROM magento_binding_revisions b JOIN magento_auto_sync_activation a ON a.installation_key=b.installation_key AND a.singleton WHERE b.state='published' AND b.origin_hash=$1 ORDER BY b.version_number DESC LIMIT 1) AS binding_revision_id,c.name AS category_name,p.status AS product_status,
   r.state,d.state AS deletion_state,r.updated_at AS observed_at,CASE WHEN r.state='synced' AND r.public_product_identity_id=p.public_product_identity_id THEN (SELECT max(j.acknowledged_at) FROM magento_sync_jobs j
       WHERE j.product_id=p.id AND j.public_product_identity_id=p.public_product_identity_id
         AND j.automatic_generation=r.desired_generation AND j.state='succeeded'

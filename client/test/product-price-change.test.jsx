@@ -41,7 +41,9 @@ it('defaults to the Manual UAH presentation and shows SKU and authoritative pric
     'system_auto', 'manual_uah', 'usd_per_gram',
   ]);
   expect(screen.getByRole('radio', { name: 'Вказати суму' }).checked).toBe(true);
-  expect(screen.getByText('LN136021')).toBeTruthy();
+  const dialog = screen.getByRole('dialog', { name: 'Змінити ціну' });
+  expect(document.getElementById(dialog.getAttribute('aria-describedby')).textContent)
+    .toBe('Зміна ціни без переобліку · LN136021');
   expect(screen.getByText('2400 ₴')).toBeTruthy();
   expect(screen.getByText('2500 ₴')).toBeTruthy();
   expect(screen.getByText('Різниця: +100 ₴')).toBeTruthy();
@@ -68,7 +70,7 @@ it('shows authoritative automatic pricing without override controls', () => {
 
   expect(screen.getByRole('radio', { name: 'За правилами' }).checked).toBe(true);
   expect(screen.queryByLabelText('Нова ціна UAH')).toBeNull();
-  expect(screen.queryByLabelText('USD за грам')).toBeNull();
+  expect(screen.queryByRole('spinbutton', { name: 'USD за грам' })).toBeNull();
   expect(screen.queryByLabelText('Маркетингове округлення')).toBeNull();
   expect(screen.getByText('2400 ₴')).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Змінити ціну' }).disabled).toBe(false);
@@ -88,12 +90,12 @@ it('surfaces unavailable automatic pricing and keeps apply disabled', () => {
 
 it('switches to USD/g and exposes the rounding control', () => {
   const handlers = renderDialog();
-  fireEvent.click(screen.getByRole('radio', { name: 'За грам' }));
+  fireEvent.click(screen.getByRole('radio', { name: 'USD за грам' }));
   expect(handlers.onModeChange).toHaveBeenCalledWith('usd_per_gram');
 
   cleanup();
   renderDialog({ mode: 'usd_per_gram', manualPriceUah: '', usdPerGram: '7.125' });
-  expect(screen.getByLabelText('USD за грам')).toBeTruthy();
+  expect(screen.getByRole('spinbutton', { name: 'USD за грам' })).toBeTruthy();
   expect(screen.getByLabelText('Маркетингове округлення')).toBeTruthy();
   expect(screen.queryByLabelText('Нова ціна UAH')).toBeNull();
 });

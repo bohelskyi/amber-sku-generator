@@ -75,14 +75,16 @@ function RepricingRowDetail({ item, onClose, canApplyDirectRecount, canCreateCor
 }
 
 export function RepricingTable(props) {
-  const { controller } = props;
-  const { handleSort, sort, visibleItems, reviewedProductIdSet } = controller;
+  const { controller, canPrepareRepricing } = props;
+  const { handleSort, sort, visibleItems, reviewedProductIdSet, handleManualPriceBlur,
+    handleManualPriceFocus, invalidManualPriceIds, manualPrices, preview, setManualPrice } = controller;
   const [selected, setSelected] = useState(null);
   return <div className="repricing-table-scroll">
     <table className="dense-table min-w-full bg-white">
-      <caption className="sr-only">Перевірка цін. Відкрийте рядок для розрахунку й ручного рішення.</caption>
+      <caption className="sr-only">Перевірка цін. Відсутню ручну ціну можна ввести в рядку. Відкрийте деталі для розрахунку й інших рішень.</caption>
       <thead><tr className="table-head">
         <SortHeader column="sku" sort={sort} onSort={handleSort}>Артикул</SortHeader>
+        <SortHeader align="right" column="weight" sort={sort} onSort={handleSort}>Вага, г</SortHeader>
         <SortHeader align="right" column="oldPriceUah" sort={sort} onSort={handleSort}>Зараз</SortHeader>
         <SortHeader align="right" column="newPriceUah" sort={sort} onSort={handleSort}>Буде</SortHeader>
         <SortHeader align="right" column="priceDeltaUah" sort={sort} onSort={handleSort}>Різниця</SortHeader>
@@ -91,10 +93,31 @@ export function RepricingTable(props) {
       <tbody>{visibleItems.map((item) => {
         const article = item.publicSku || 'Артикул недоступний';
         const expanded = selected === item.productId;
+        const requiresManualPrice = ['price_missing', 'manual_price'].includes(item.errorCode);
+        const hasManualOverride = Object.prototype.hasOwnProperty.call(manualPrices, item.productId);
+        const hasAutomaticResolution = Boolean(item.useAutomatic);
+        const locked = !canPrepareRepricing || item.manualPreserved || preview.scope === 'global' && item.hasManualPrice;
+        const errorId = `repricing-price-error-${item.productId}`;
+        const priceKind = item.manualOverride || item.pricingState === 'manual' || item.errorCode === 'manual_price'
+          ? 'manual' : item.pricingState === 'missing' || item.errorCode === 'price_missing' ? 'missing' : 'automatic';
         return <Fragment key={item.productId}><tr className={expanded ? 'is-selected' : ''}>
-          <th scope="row" className="table-cell text-left font-mono">{article}</th>
+          <th scope="row" className="table-cell text-left"><span className="font-mono">{article}</span>
+            <span className={`status-badge is-${priceKind} mt-1 block w-fit`}>
+              {item.manualOverride ? 'Ручна підтверджена' : priceKind === 'manual' ? 'Ручна' : priceKind === 'missing' ? 'Ціна відсутня' : 'Автоматична'}
+            </span></th>
+          <td className="table-cell text-right tabular-nums">{item.weight === null || item.weight === undefined ? '—' : formatDecimal(item.weight)}</td>
           <td className="table-cell text-right tabular-nums">{formatUah(item.oldPriceUah)}</td>
-          <td className="table-cell text-right font-semibold tabular-nums">{item.status === 'error' ? '—' : formatUah(item.newPriceUah)}</td>
+          <td className="table-cell text-right font-semibold tabular-nums">{requiresManualPrice && !expanded ? <>
+            <input className="input-sm w-32 text-right" inputMode="decimal" readOnly={locked}
+              aria-label={`Нова ціна для ${article}`} aria-invalid={invalidManualPriceIds.has(item.productId) || undefined}
+              aria-describedby={invalidManualPriceIds.has(item.productId) ? errorId : undefined}
+              value={hasManualOverride ? manualPrices[item.productId] : hasAutomaticResolution
+                ? formatDecimal(item.automaticPriceUah ?? item.newPriceUah) : ''}
+              onChange={(event) => { if (!locked) setManualPrice(item.productId, event.target.value); }}
+              onFocus={() => { if (!locked) handleManualPriceFocus(item.productId); }}
+              onBlur={(event) => { if (!locked) handleManualPriceBlur(item.productId, event.target.value, hasAutomaticResolution); }} />
+            {invalidManualPriceIds.has(item.productId) && <p id={errorId} role="alert">Вкажіть ціну більше нуля</p>}
+          </> : item.status === 'error' ? '—' : formatUah(item.newPriceUah)}</td>
           <td className="table-cell text-right tabular-nums">{item.status === 'error' ? '—' : formatUah(item.priceDeltaUah)}</td>
           <td className="table-cell"><span className={item.status === 'error' ? 'text-rose-700' : ''}>{resultLabel(item)}</span>
             {reviewedProductIdSet.has(Number(item.productId)) && <span className="ml-2 text-slate-500">· Переглянуто</span>}</td>
@@ -103,7 +126,7 @@ export function RepricingTable(props) {
             onClick={() => {
               setSelected(expanded ? null : item.productId);
             }}>{expanded ? 'Закрити' : item.status === 'error' ? 'Вирішити' : 'Переглянути'}</button></td>
-        </tr>{expanded && <tr className="repricing-detail-row"><td colSpan={6}><RepricingRowDetail {...props} item={item} onClose={() => {
+        </tr>{expanded && <tr className="repricing-detail-row"><td colSpan={7}><RepricingRowDetail {...props} item={item} onClose={() => {
           setSelected(null);
           requestAnimationFrame(() => document.getElementById(`repricing-open-${item.productId}`)?.focus());
         }} /></td></tr>}</Fragment>;

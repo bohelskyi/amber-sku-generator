@@ -41,11 +41,11 @@ test('attention confirmation timestamps require exact PostgreSQL delivery receip
     await db.query('UPDATE magento_auto_sync_activation SET enabled=TRUE,installation_key=$1,actor_user_id=$2 WHERE singleton', [installationKey, actorUserId]);
     assert.equal((await db.query('SELECT count(*)::int n FROM magento_sync_jobs')).rows[0].n, 0, 'Publication/activation alone must not create delivery jobs');
     const acknowledgedAt = '2026-09-01T10:11:12.345Z', observedAt = '2026-10-04T22:33:44.555Z';
-    async function makeProduct() {
+    async function makeProduct(category = 'KL') {
       return runAccessAdminMutation({ databasePool: db, actorUserId, requiredPermission: 'products.archive', createError: c.error,
         operation: async (client) => {
           const product = (await client.query(`INSERT INTO products(full_sku,category,total_price_uah,details)
-            VALUES($1,'KL',240,'{"answers":{"weight":12.7}}') RETURNING *`, [`KL3/RECEIPT-${randomUUID()}`])).rows[0];
+            VALUES($1,$2,240,'{"answers":{"weight":12.7}}') RETURNING *`, [`${category}3/RECEIPT-${randomUUID()}`, category])).rows[0];
           await fullExport.initializeNewProduct(client, product.id);
           await client.query(`UPDATE magento_product_sync_requests SET desired_generation=10,synced_generation=10,state='synced',
             reason_code=NULL,updated_at=$2 WHERE public_product_identity_id=$1`, [product.public_product_identity_id, observedAt]);
@@ -153,6 +153,9 @@ test('attention confirmation timestamps require exact PostgreSQL delivery receip
         const zero = all.items.find(group => group.problem.causeContext?.value === '0');
         const one = all.items.find(group => group.problem.causeContext?.value === '1');
         assert.equal(zero.productCount, 2); assert.equal(zero.diagnosticCount, 3);
+        const firstProduct = products.slice(0, 2).sort((left, right) => left.id - right.id)[0];
+        assert.deepEqual(zero.exampleProduct, { productId: firstProduct.id, article: firstProduct.full_sku, category: 'KL' },
+          'Selecting a sample separately preserves the first-product API contract');
         assert.equal(zero.sharedConfiguration, true); assert.notEqual(zero.id, one.id);
         const legacy = all.items.find(group => group.problem.code === 'OPTION_BINDING_REVIEW_REQUIRED' && !group.problem.causeContext);
         assert.equal(legacy.sharedConfiguration, false); assert.equal(legacy.productCount, 1);
@@ -177,6 +180,44 @@ test('attention confirmation timestamps require exact PostgreSQL delivery receip
         await client.query('COMMIT');
       } finally { await client.query('ROLLBACK'); client.release(); }
       assert.deepEqual(await snapshot(), before, 'Grouping never changes requests, products, jobs or receipts');
+    });
+    await t.test('category facets ignore all filters and reason counts ignore only the selected reason', async () => {
+      const groups = require('../src/services/magento/problem-groups');
+      const selected = await makeProduct('BR'), otherReason = await makeProduct('BR'), otherCategory = await makeProduct('CH');
+      for (const [product, diagnostics] of [
+        [selected, [{ code: 'PRODUCT_EVALUATION_NOT_READY' }, { code: 'OPTION_BINDING_REVIEW_REQUIRED', target: 'color' }]],
+        [otherReason, [{ code: 'authorization' }]],
+        [otherCategory, [{ code: 'NAME_CONFLICT' }]],
+      ]) await db.query(`UPDATE magento_product_sync_requests SET state='needs_attention',reason_code='data_or_binding',
+        diagnostics=$2::jsonb WHERE product_id=$1`, [product.id, JSON.stringify(diagnostics)]);
+      const before = await snapshot();
+      const client = await db.connect();
+      try {
+        await client.query('BEGIN READ ONLY');
+        const all = await groups.groupPage(config, { limit: 100 }, client);
+        const category = await groups.groupPage(config, { category: 'BR' }, client);
+        assert.deepEqual(category.categories, all.categories, 'Selecting BR keeps CH and KL available with their global counts');
+        assert.deepEqual(category.categories.map(item => item.code), ['BR', 'CH', 'KL']);
+        assert.equal(category.summary.productCount, 2);
+        assert.deepEqual(category.summary.reasonCounts, [
+          { reason: 'connection', count: 1 }, { reason: 'integration', count: 1 }, { reason: 'product', count: 1 },
+        ]);
+        const reason = await groups.groupPage(config, { category: 'BR', reason: 'product' }, client);
+        assert.deepEqual(reason.categories, all.categories);
+        assert.deepEqual(reason.summary.reasonCounts, category.summary.reasonCounts, 'Reason selection does not hide the other available reasons');
+        assert.equal(reason.summary.productCount, 1);
+        assert.deepEqual(reason.items.map(item => item.problem.code), ['PRODUCT_EVALUATION_NOT_READY']);
+        const searched = await groups.groupPage(config, { category: 'BR', search: selected.full_sku, reason: 'product' }, client);
+        assert.deepEqual(searched.categories, all.categories, 'Search also preserves the global category selector');
+        assert.deepEqual(searched.summary.reasonCounts, [{ reason: 'integration', count: 1 }, { reason: 'product', count: 1 }],
+          'Reason counts retain category and literal article search filters');
+        const absent = await groups.groupPage(config, { category: 'BR', search: 'NO-SUCH-ARTICLE', reason: 'product' }, client);
+        assert.deepEqual(absent.categories, all.categories);
+        assert.deepEqual(absent.summary.reasonCounts, []);
+        assert.equal(absent.summary.productCount, 0);
+        await client.query('COMMIT');
+      } finally { await client.query('ROLLBACK'); client.release(); }
+      assert.deepEqual(await snapshot(), before, 'Facet reads perform no product, queue, job or audit mutations');
     });
   } finally {
     if (db) await db.end();

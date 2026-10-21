@@ -15,12 +15,18 @@ function queryContext(config, query) {
   if (reason && !['recovery', 'names', 'product', 'connection', 'integration'].includes(reason)) {
     const error = new Error('Невідомий тип проблеми.'); error.statusCode = 422; throw error;
   }
-  let filter = "WHERE (r.state='needs_attention' OR (d.state<>'finalized' AND d.product_id=p.id))";
-  if (category) filter += ` AND p.category=$${values.push(category)}`;
-  if (search) filter += ` AND i.public_sku ILIKE $${values.push('%' + search.replace(/[\\%_]/g, '\\$&') + '%')} ESCAPE '\\'`;
+  const filters = [];
+  if (category) filters.push(`category=$${values.push(category)}`);
+  if (search) filters.push(`article ILIKE $${values.push('%' + search.replace(/[\\%_]/g, '\\$&') + '%')} ESCAPE '\\'`);
   const reasonFilter = reason ? `WHERE reason_group=$${values.push(reason)}` : '';
-  const sql = `WITH queue AS (
-    ${problemSelectSql.replace('SELECT p.id', 'SELECT i.id AS identity_id,p.id')} ${problemJoinSql} ${filter}
+  // Keep the legacy queue's identity-level deletion scope, including retained
+  // historical product rows. Group counts still deduplicate public identities.
+  // Facets keep separate scopes: all queued categories, then category/search
+  // reasons, then the requested reason's actual members and page.
+  const sql = `WITH base_queue AS (
+    ${problemSelectSql} ${problemJoinSql} WHERE (r.state='needs_attention' OR d.state<>'finalized')
+  ), queue AS (
+    SELECT * FROM base_queue ${filters.length ? `WHERE ${filters.join(' AND ')}` : ''}
   ), expanded AS (
     SELECT q.*, problem FROM queue q CROSS JOIN LATERAL jsonb_array_elements(
       CASE WHEN q.reason_code IN ('reconciliation_required','TEST_DELETION_PENDING') THEN jsonb_build_array(jsonb_build_object('code',q.reason_code))
@@ -56,14 +62,17 @@ function pageInfo(limit, offset, total, length) {
 async function groupPage(config, query = {}, db = pool) {
   const { sql, values, limit, offset } = queryContext(config, query);
   const response = (await db.query(`${sql}, grouped AS (
-    SELECT group_id,count(DISTINCT identity_id)::int AS product_count,count(*)::int AS diagnostic_count,
-      (array_agg(to_jsonb(m) ORDER BY "productId"))[1] AS sample FROM members m GROUP BY group_id
-  ), page AS (SELECT * FROM grouped ORDER BY product_count DESC,group_id LIMIT $${values.length + 1} OFFSET $${values.length + 2})
+    SELECT group_id,count(DISTINCT identity_id)::int AS product_count,count(*)::int AS diagnostic_count
+      FROM members GROUP BY group_id
+  ), samples AS (
+    SELECT DISTINCT ON (group_id) group_id,to_jsonb(m) AS sample FROM members m ORDER BY group_id,"productId"
+  ), page AS (SELECT grouped.*,samples.sample FROM grouped JOIN samples USING (group_id)
+    ORDER BY product_count DESC,group_id LIMIT $${values.length + 1} OFFSET $${values.length + 2})
   SELECT (SELECT COALESCE(jsonb_agg(to_jsonb(page) ORDER BY product_count DESC,group_id),'[]') FROM page) AS items,
     (SELECT count(*)::int FROM grouped) AS total,(SELECT count(DISTINCT identity_id)::int FROM members) AS product_count,
     (SELECT count(*)::int FROM members) AS diagnostic_count,
-    (SELECT COALESCE(jsonb_agg(to_jsonb(c)),'[]') FROM (SELECT category AS code,max(category_name) AS name,count(DISTINCT identity_id)::int AS count FROM queue GROUP BY category ORDER BY category) c) AS categories,
-    (SELECT COALESCE(jsonb_agg(to_jsonb(r)),'[]') FROM (SELECT reason_group AS reason,count(DISTINCT identity_id)::int AS count FROM members GROUP BY reason_group ORDER BY reason_group) r) AS reason_counts`,
+    (SELECT COALESCE(jsonb_agg(to_jsonb(c)),'[]') FROM (SELECT category AS code,max(category_name) AS name,count(DISTINCT identity_id)::int AS count FROM base_queue GROUP BY category ORDER BY category) c) AS categories,
+    (SELECT COALESCE(jsonb_agg(to_jsonb(r)),'[]') FROM (SELECT reason_group AS reason,count(DISTINCT identity_id)::int AS count FROM classified GROUP BY reason_group ORDER BY reason_group) r) AS reason_counts`,
   [...values, limit, offset])).rows[0];
   const items = (response?.items || []).map(row => ({ id: row.group_id, productCount: row.product_count,
     diagnosticCount: row.diagnostic_count, sharedConfiguration: Boolean(row.sample.shared_context),

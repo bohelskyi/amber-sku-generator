@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import { AuthContext } from '../src/auth/auth-context.js';
@@ -30,6 +30,43 @@ it('starts with shared causes, counts all affected products and preserves zero i
   expect(target.searchParams.get('route')).toBe('KL.color');
   expect(target.searchParams.get('productId')).toBe('7'); expect(target.searchParams.get('returnTo')).toBe(`/attention?group=${id}`);
   expect(api.get.mock.calls.map(([url]) => url)).toEqual(['/magento/problem-groups/page']);
+  expect(api.post).not.toHaveBeenCalled();
+});
+
+it('keeps every server-provided problem category selectable after a category-filtered group response', async () => {
+  const categories = [{ code: 'KL', name: 'Кулони' }, { code: 'SV', name: 'Свічки' }];
+  const candleGroup = { ...response.items[0], id: 'b'.repeat(32), productCount: 4,
+    exampleProduct: { ...item, productId: 8, article: 'AG-000008', category: 'SV' } };
+  let resolveFiltered;
+  api.get.mockImplementation((url, { params }) => {
+    if (params.category === 'KL') return new Promise(resolve => { resolveFiltered = resolve; });
+    return Promise.resolve({ data: { ...response, categories,
+      items: params.category === 'SV' ? [candleGroup] : [...response.items, candleGroup],
+      pageInfo: { total: params.category === 'SV' ? 1 : 2 } } });
+  });
+  shell(<SyncProblemsPage />);
+  await screen.findByRole('option', { name: 'Свічки' });
+  fireEvent.change(screen.getByRole('combobox', { name: 'Категорія' }), { target: { value: 'KL' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Знайти' }));
+  await waitFor(() => expect(api.get).toHaveBeenLastCalledWith('/magento/problem-groups/page', expect.objectContaining({
+    params: expect.objectContaining({ category: 'KL', offset: 0, limit: 20 }),
+  })));
+  await act(async () => resolveFiltered({ data: { ...response, categories } }));
+
+  const categorySelect = screen.getByRole('combobox', { name: 'Категорія' });
+  expect(categorySelect.value).toBe('KL');
+  expect(within(categorySelect).getAllByRole('option').map(option => option.value)).toEqual(['', 'KL', 'SV']);
+  expect(screen.getByRole('region', { name: 'Причини проблем' })).toBeTruthy();
+
+  fireEvent.change(categorySelect, { target: { value: 'SV' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Знайти' }));
+  await screen.findByRole('button', { name: '4' });
+  expect(api.get).toHaveBeenLastCalledWith('/magento/problem-groups/page', expect.objectContaining({
+    params: expect.objectContaining({ category: 'SV', offset: 0, limit: 20 }),
+  }));
+  const nextCategorySelect = screen.getByRole('combobox', { name: 'Категорія' });
+  expect(nextCategorySelect.value).toBe('SV');
+  expect(within(nextCategorySelect).getByRole('option', { name: 'Кулони' })).toBeTruthy();
   expect(api.post).not.toHaveBeenCalled();
 });
 

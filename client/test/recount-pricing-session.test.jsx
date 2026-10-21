@@ -136,8 +136,8 @@ it('abandoned point-price inputs do not leak into a reopened price-change form',
   await waitFor(() => expect(screen.getByTestId('product').textContent).toBe('1000'));
   fireEvent.click(screen.getByRole('button', { name: 'Start recount' }));
   fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-  fireEvent.click(screen.getByRole('radio', { name: 'За грам' }));
-  fireEvent.change(screen.getByLabelText('USD за грам'), { target: { value: '-1' } });
+  fireEvent.click(screen.getByRole('radio', { name: 'USD за грам' }));
+  fireEvent.change(screen.getByRole('spinbutton', { name: 'USD за грам' }), { target: { value: '-1' } });
   fireEvent.click(screen.getByRole('button', { name: 'Скасувати' }));
   fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
   expect(screen.getByRole('radio', { name: 'Вказати суму' }).checked).toBe(true);
