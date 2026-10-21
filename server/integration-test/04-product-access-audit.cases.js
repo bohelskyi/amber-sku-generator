@@ -299,21 +299,21 @@ test('product register keeps history authorization and bounded filter-bound pagi
       assert.equal(named.data.items[0].nameEn, en);
       assert.equal(named.data.items[0].nameKind, 'subject');
     }
-    const override = { generated: { all: ua, en }, values: { all: 'Повна збережена назва', en: `Exact full name ${nullTimestampProduct.id}` } };
-    await pool.query('UPDATE products SET magento_name_override=$1::jsonb WHERE id=$2', [JSON.stringify(override), nullTimestampProduct.id]);
-    const exactName = await request(`/api/products/register?lifecycle=all&search=${encodeURIComponent(override.values.en)}`);
-    assert.equal(exactName.response.status, 200, exactName.text);
-    assert.equal(exactName.data.items.length, 1);
-    assert.equal(exactName.data.items[0].nameKind, 'saved_full_name');
-    assert.equal(exactName.data.items[0].nameUa, override.values.all);
-    await pool.query(`UPDATE products SET magento_name_subject_ua=NULL,
-      magento_name_override=$1::jsonb WHERE id=$2`,
-    [JSON.stringify({ ...override, values: { en: override.values.en } }), nullTimestampProduct.id]);
-    const englishOnly = await request(`/api/products/register?lifecycle=all&search=${encodeURIComponent(override.values.en)}`);
-    assert.equal(englishOnly.response.status, 200, englishOnly.text);
-    assert.equal(englishOnly.data.items[0].nameUa, null);
-    assert.equal(englishOnly.data.items[0].nameEn, override.values.en);
-    assert.equal(englishOnly.data.items[0].nameKind, 'saved_full_name');
+    const override = { generated: { all: ua, en }, values: {
+      all: `Повна збережена назва ${nullTimestampProduct.id}`, en: `Exact full name ${nullTimestampProduct.id}`,
+    } };
+    // Subjects must be populated or absent as a pair; exact names are a separate pair.
+    await pool.query(`UPDATE products SET magento_name_subject_ua=NULL, magento_name_subject_en=NULL,
+      magento_name_override=$1::jsonb WHERE id=$2`, [JSON.stringify(override), nullTimestampProduct.id]);
+    for (const search of [override.values.all, override.values.en.toLowerCase()]) {
+      const exactName = await request(`/api/products/register?lifecycle=all&search=${encodeURIComponent(search)}`);
+      assert.equal(exactName.response.status, 200, exactName.text);
+      assert.equal(exactName.data.items.length, 1);
+      assert.equal(exactName.data.items[0].id, Number(nullTimestampProduct.id));
+      assert.equal(exactName.data.items[0].nameUa, override.values.all);
+      assert.equal(exactName.data.items[0].nameEn, override.values.en);
+      assert.equal(exactName.data.items[0].nameKind, 'saved_full_name');
+    }
   } finally {
     if (nullTimestampProduct) {
       await pool.query(
