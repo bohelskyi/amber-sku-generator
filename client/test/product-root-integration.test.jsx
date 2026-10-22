@@ -62,7 +62,7 @@ function openWorkspace(permissions, initialEntry = '/products') {
   return router;
 }
 
-it('starts with the register and reads optional sync statistics only when opened', async () => {
+it('shows Magento sync coverage above the register on the products landing page', async () => {
   const originalGet = get.getMockImplementation();
   get.mockImplementation((url, ...args) => url === '/products/register'
     ? Promise.resolve({ data: { items: [], pageInfo: { hasMore: false, nextCursor: null }, filterOptions: { categories: [] } } })
@@ -71,11 +71,11 @@ it('starts with the register and reads optional sync statistics only when opened
       : originalGet(url, ...args));
   openWorkspace(['products.view', 'products.decode', 'history.view']);
   await screen.findByRole('heading', { name: 'Реєстр товарів' });
-  expect(screen.queryByRole('progressbar')).toBeNull();
-  expect(get.mock.calls.some(([url]) => url === '/magento/summary')).toBe(false);
-  fireEvent.click(screen.getByText('Статистика передавання в магазин'));
-  expect((await screen.findByRole('progressbar', { name: 'Синхронізовано з Magento: синхронізовано 40%' })).getAttribute('aria-valuenow')).toBe('40');
+  const coverage = await screen.findByRole('progressbar', { name: 'Синхронізовано з Magento: синхронізовано 40%' });
+  expect(coverage.getAttribute('aria-valuenow')).toBe('40');
   expect(screen.getByRole('progressbar', { name: 'Намисто: синхронізовано 40%' })).toBeTruthy();
+  // Visible without opening anything, and placed before the register.
+  expect(coverage.compareDocumentPosition(screen.getByRole('heading', { name: 'Реєстр товарів' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
 
 it('makes the register the only product search and opens category selection only after Create', async () => {

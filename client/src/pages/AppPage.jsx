@@ -45,7 +45,6 @@ function AppPage() {
   const [historicalSession, setHistoricalSession] = useState(0);
   const [deletionReceipt, setDeletionReceipt] = useState(null);
   const [registerRefresh, setRegisterRefresh] = useState(0);
-  const [statisticsOpen, setStatisticsOpen] = useState(false);
   const [searchParams] = useSearchParams();
   const exportSku = searchParams.get('exportSku')?.slice(0, 160);
   const isLandingRoute = location.pathname === '/products';
@@ -422,15 +421,12 @@ function AppPage() {
           />
         )}
 
+        {isLandingRoute && !sku.selectedCat && !sku.decodeData && !sku.isDecodeLoading && <SyncCoverage />}
+
         {canViewRegister && isLandingRoute && !sku.selectedCat && !sku.decodeData && !sku.isDecodeLoading && (
           <ProductRegister canDecode={canDecodeProducts} refreshKey={registerRefresh}
             onDeleteArchivedTest={canDeleteTestProduct ? (product) => setTestDeletion({ ...product, public_sku: product.publicSku, full_sku: product.internalSku }) : undefined} />
         )}
-        {isLandingRoute && !sku.selectedCat && !sku.decodeData && !sku.isDecodeLoading && <details className="product-register-statistics"
-          onToggle={(event) => setStatisticsOpen(event.currentTarget.open)}>
-          <summary>Статистика передавання в магазин</summary>
-          {statisticsOpen && <SyncCoverage />}
-        </details>}
       </div>
       <HistoricalReactivationReview key={(auth.principalLifetime?.id || auth.applicationUser?.id || 'anonymous') + ':' + historicalSession}
         open={historicalOpen} config={sku.config} onDirtyChange={setHistoricalDirty} onBusyChange={setHistoricalBusy}
