@@ -4,9 +4,10 @@ The working order for bringing existing catalog products under automatic Magento
 sync. Contracts live in [first-sync fields](MAGENTO_FIRST_SYNC_FIELDS.md),
 [automatic sync](MAGENTO_AUTOMATIC_SYNC.md) and [Magento integration](MAGENTO_INTEGRATION.md);
 this page is the practical sequence, the CLIs and the traps already hit in production.
-Every CLI below runs inside the server container (`docker compose exec -T server node
-/app/scripts/<name>.js …`), is sequential, reads Magento with GET only and never
-enqueues or writes Magento directly.
+The operator CLIs run inside the server container (`docker compose exec -T server node
+/app/scripts/<name>.js …`). The four reviewed wrappers below read Magento with GET
+only; apply can record local changes and synchronization requests through the same
+services as the UI. The ordinary worker performs any later Magento writes.
 
 ## Where a product stands
 
@@ -105,8 +106,9 @@ Every publication has side effects on products that are **not yet synced**:
   SKU. Retired archived copies are accepted when the SKU reservation belongs to the
   selected current product and no copy is current, in correction lineage or carrying
   unfinished sync work; anything else remains a real conflict.
-- `docker compose` deploys wipe the container's `/tmp`. Keep scripts and journals on
-  the host (`docker compose cp`) and copy them in again after each deploy.
+- Container replacement loses files in `/tmp`. The repository's `server/scripts`
+  ship in the server image; keep input files, reviewed plans and result journals
+  outside the container, and copy inputs in and outputs out as needed.
 - In an interactive shell use `set +H` before node one-liners containing `!`.
 - Placeholders like `<installationKey>` must be replaced; the shell treats `<…>` as
   redirection.
@@ -132,6 +134,57 @@ Every publication has side effects on products that are **not yet synced**:
 | `sv-optional-characteristics.js` | One-off SV template change (2026-10-14) | script header |
 | `legacy-answer-recount-batch.js` | Reviewed UI recount + stable recount exposure for an absent answer or truncated weight, ≤50 | [recount batch](RECOUNT_CORRECTIONS.md#reviewed-legacy-answer-recount-batch) |
 | `canonical-weight-repair.js` | Reviewed zero-weight repair from the recorded answer or (`--source magento-readback`) Magento `decor_weight` | [weight repair](CANONICAL_WEIGHT_REPAIR.md), [Magento source](CANONICAL_WEIGHT_REPAIR.md#magento-readback-source) |
+| `recover-skus.js` | Review and apply the UI stable recount exposure action, ≤50 exact current public SKUs | [reviewed wrappers](#reviewed-operator-wrappers) |
+| `names-batch.js` | Review ordinary name resolution from Magento (equal pairs retain Amber), ≤50 products | [reviewed wrappers](#reviewed-operator-wrappers) |
+| `scope-from-skus.js` | Resolve exact current public SKUs and materialize a reviewed scope file, ≤100 | [reviewed wrappers](#reviewed-operator-wrappers) |
+| `controlled-resync.js` | Record a reviewed broader-resync handoff for the current installation's publication, ≤100 products | [reviewed wrappers](#reviewed-operator-wrappers) |
+
+## Reviewed operator wrappers
+
+These four scripts require an active Administrator, `--actor-id` and an exact
+`--expected-database`. Recovery additionally requires `exports.reconcile`; names
+require `exports.create`; scope requires `export_templates.view`; controlled resync
+requires `export_templates.manage`, `export_templates.publish` and `exports.view`.
+The same server authorization services used by the UI enforce these permissions.
+
+Every command requires `--mode preview|apply --input FILE --output NEWFILE`.
+Preview uses a dedicated read-only PostgreSQL pool and allows only Magento GETs.
+It creates a new JSON review and prints its `planHash`. Review its products, actions
+and blockers before apply. Apply takes that exact review as `--input` and the printed
+hash as `--plan-hash`; it binds the actor, database target, Magento origin and deployed
+code, then lets the existing service revalidate its original review/token. A changed
+context or stale service review requires a new preview and operator review.
+
+Input JSON shapes (replace the example SKU, IDs and reason with the intended scope):
+
+```json
+{"skus":["EXACT_PUBLIC_SKU"],"reason":"Reviewed recount recovery"}
+```
+
+Use this shape for recovery; scope takes only `{"skus":["EXACT_PUBLIC_SKU"]}`.
+Names takes `{"items":[{"sku":"EXACT_PUBLIC_SKU","productId":123}]}`; it also
+accepts a recovery preview or the old recovery JSONL, selecting only products blocked
+by `DURABLE_REMOTE_ID_REQUIRED`. Controlled resync takes
+`{"reason":"Reviewed handoff","items":[{"sku":"EXACT_PUBLIC_SKU","productId":123}]}`
+or `{"reason":"Reviewed handoff","scopeFiles":["scope.json"]}`. Relative scope
+paths resolve beside the input JSON. Missing, ambiguous, retired or duplicate SKUs
+fail closed; no partial or silently deduplicated scope is accepted.
+
+For example, inside the container:
+
+```sh
+node /app/scripts/recover-skus.js --mode preview --input /tmp/recovery-input.json --output /tmp/recovery-review.json --expected-database DATABASE_NAME --actor-id ACTOR_ID
+node /app/scripts/recover-skus.js --mode apply --input /tmp/recovery-review.json --output /tmp/recovery-result.jsonl --expected-database DATABASE_NAME --actor-id ACTOR_ID --plan-hash HASH_FROM_PREVIEW
+```
+
+All outputs are created exclusively; an existing path is never overwritten.
+Mutating apply writes and flushes its prepared/result journal around service calls,
+stops on the first error and never retries automatically. An `unconfirmed` result
+requires checking the durable UI/service state before any further action. Recovery
+leaves blocked entries unchanged; name resolution can create the ordinary pending
+sync request; recovery and controlled resync can record local handoffs. Scope apply
+also uses a read-only pool: it rechecks exact SKU identities and creates a new JSON
+scope with an embedded completion journal. Keep every review and result file.
 
 ## Open follow-ups
 
