@@ -185,8 +185,81 @@ async function createTestDatabase(databaseName, { template = true, directory = m
   return url;
 }
 
-// Existing migration/checkpoint cases intentionally retain a genuinely empty DB.
-async function recreateTestDatabase(databaseName, { template = false } = {}) {
+// Legacy *.cases.js modules share this API for both ordinary runtime fixtures and
+// migrations. Keep their callers unchanged: only these audited, exact names opt
+// into the current schema. Unknown names and all checkpoint/upgrade fixtures stay
+// empty. Add a name only after checking every caller, including helper reuse; a
+// caller that starts testing an older schema must explicitly request template:false.
+const fullSchemaFixtures = new Set([
+  // 06-migration-upgrades: these three test seeding/bootstrap, after full migrations.
+  'amber_startup_race_test',
+  'amber_seed_failure_test',
+  'amber_bootstrap_admin_test',
+  // 12-rbac-audit: runtime transaction rollback and last-Administrator races.
+  'amber_user_admin_audit_rollback_test',
+  'amber_user_admin_safety_test',
+  // 14/15/16: phase3-fixture and sv-create-worker migrate fully before their cases.
+  'amber_phase3_repair_test',
+  'amber_cutover_contract_test',
+  'amber_sv_create_test',
+  // 17/18/22: runtime reads, obligations, delivery cutover and controlled deletion.
+  'amber_lifecycle_reads_test',
+  'amber_automatic_mutations_test',
+  'amber_magento_delivery_cutover_test',
+  'amber_test_delete_test',
+  // 24-magento-editor: overview and CREATE-preview fixtures.
+  'amber_integration_editor_test',
+  'amber_integration_summary_test',
+  'amber_integration_create_preview_test',
+  // 25-magento-configuration setup(name, false); amber_reseal_upgrade_test is fresh.
+  'amber_configuration_category_test',
+  'amber_category_reseal_test',
+  'amber_configuration_recovery_test',
+  'amber_configuration_uncertain_test',
+  // 26-magento-options setup and its 29-option-labels consumers, including loop values.
+  'amber_option_en_required_test',
+  'amber_option_reseal_test',
+  'amber_option_attestation_test',
+  'amber_option_race_test',
+  'amber_option_recovery_lost_test',
+  'amber_option_recovery_returned_test',
+  'amber_option_labels_test',
+  'amber_option_ambiguous_labels_test',
+  'amber_option_scope_review_test',
+  'amber_option_en_verify_test',
+  'amber_en_catalog_test',
+  'amber_option_label_update_test',
+  'amber_label_lost_true_test',
+  'amber_label_lost_false_test',
+  // 27-magento-successor: both direct fixtures and setup() consumers.
+  'amber_columns_successor_test',
+  'amber_sv_successor_test',
+  'amber_successor_preparation_test',
+  'amber_successor_catalog_test',
+  // 28-magento-publication setup and the pagination consumer in 29-option-labels.
+  'amber_publication_scope_test',
+  'amber_category_workspace_test',
+  'amber_publication_lifecycle_before_test',
+  'amber_publication_lifecycle_after_test',
+  'amber_publication_handoff_test',
+  'amber_publication_loss_test',
+  'amber_publication_create_test',
+  'amber_publication_native_receipt_test',
+  'amber_exact_controlled_test',
+  'amber_publication_locale_labels_test',
+  'amber_controlled_pagination_test',
+  // 32: recovery-history and current SV-preview fixtures use the current schema.
+  'amber_recovery_history_test',
+  'amber_sv_current_preview_test',
+  // 33-magento-attributes setup(name, false); amber_attribute_upgrade_test is fresh.
+  'amber_attribute_race_test',
+  'amber_attribute_recovery_lost_test',
+  'amber_attribute_recovery_returned_test',
+  'amber_attribute_assignment_test',
+  'amber_attribute_authority_test',
+]);
+
+async function recreateTestDatabase(databaseName, { template = fullSchemaFixtures.has(databaseName) } = {}) {
   await dropTestDatabase(databaseName, { force: true });
   return createTestDatabase(databaseName, { template });
 }

@@ -164,6 +164,51 @@ test('template setup preserves isolated databases, fresh migrations and exact ch
       assert.equal((await fresh.query("SELECT count(*)::int n FROM pg_tables WHERE schemaname='public'")).rows[0].n, 0);
       await closeClients();
     });
+
+    await t.test('legacy mixed helpers clone ordinary fixtures but keep their upgrade names fresh', async () => {
+      const recreate = require('./harness').recreateTestDatabase;
+      const expectedManifest = await migrationManifest();
+      // Both legacy setup(name, checkpoint) helpers call recreate with only name.
+      // Their exact normal/upgrade identities must therefore retain opposite modes.
+      for (const [name, migrated] of [
+        ['amber_configuration_category_test', true],
+        ['amber_reseal_upgrade_test', false],
+        ['amber_attribute_race_test', true],
+        ['amber_attribute_upgrade_test', false],
+        ['amber_magento_binding_fresh_test', false],
+        ['amber_stable_exposure_test', false],
+      ]) {
+        try {
+          await recreate(name);
+          const db = await connect(name);
+          const ledger = (await db.query("SELECT to_regclass('schema_migrations') name")).rows[0].name;
+          assert.equal(ledger !== null, migrated, name);
+          if (migrated) {
+            assert.deepEqual((await db.query('SELECT name, checksum FROM schema_migrations ORDER BY name')).rows,
+              expectedManifest);
+            assert.equal((await db.query('SELECT count(*)::int n FROM categories')).rows[0].n, 0);
+          } else {
+            assert.equal((await db.query("SELECT count(*)::int n FROM pg_tables WHERE schemaname='public'")).rows[0].n, 0);
+          }
+        } finally {
+          await closeClients();
+          await dropTestDatabase(name);
+        }
+      }
+    });
+
+    await t.test('an explicit fresh request overrides an ordinary fixture registry entry', async () => {
+      const name = 'amber_configuration_category_test';
+      try {
+        await require('./harness').recreateTestDatabase(name, { template: false });
+        const fresh = await connect(name);
+        assert.equal((await fresh.query("SELECT to_regclass('schema_migrations') name")).rows[0].name, null);
+        assert.equal((await fresh.query("SELECT count(*)::int n FROM pg_tables WHERE schemaname='public'")).rows[0].n, 0);
+      } finally {
+        await closeClients();
+        await dropTestDatabase(name);
+      }
+    });
   } finally {
     await closeClients();
     for (const name of cloneNames) await dropTestDatabase(name);
