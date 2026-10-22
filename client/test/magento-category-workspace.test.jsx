@@ -601,7 +601,11 @@ it('keeps the focused review task open while publication checking is in flight',
   fireEvent.change(await screen.findByLabelText('Текст для магазину'), { target: { value: 'Новий текст' } });
   fireEvent.click(screen.getByRole('button', { name: 'Готово' })); fireEvent.click(screen.getByRole('button', { name: 'Перевірити зміни' }));
   const dialog = await screen.findByRole('dialog', { name: 'Перевірка та застосування' });
-  await waitFor(() => expect(within(dialog).getByRole('button', { name: 'До редагування' }).disabled).toBe(true));
+  await waitFor(() => {
+    expect(resolvePreview).toBeTypeOf('function');
+    expect(within(dialog).getByText('Перевіряємо вплив усього пакета на товари…')).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: 'До редагування' }).disabled).toBe(true);
+  });
   fireEvent.keyDown(dialog, { key: 'Escape' }); expect(screen.getByRole('dialog', { name: 'Перевірка та застосування' })).toBe(dialog);
   await act(async () => resolvePreview({ data: { previewToken: 'impact', blockers: [], affected: [], preservedNames: [], lostProducts: [], lostRoutes: [], totalProducts: 1 } }));
   await waitFor(() => expect(within(dialog).getByRole('button', { name: 'До редагування' }).disabled).toBe(false));
