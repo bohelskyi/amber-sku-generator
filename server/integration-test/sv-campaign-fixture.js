@@ -2,10 +2,9 @@
 require('../test/setup-env');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
-const { promisify } = require('node:util');
-const { execFile } = require('node:child_process');
 const path = require('node:path');
 const { Client } = require('pg');
+const { createTestDatabase } = require('./harness');
 const fixture = require('../test/fixtures/magento-bindings');
 const { insertProductFixture } = require('./product-fixture');
 const c = require('../src/services/magento/binding-contract');
@@ -51,11 +50,9 @@ async function setup(t) {
     await control.end();
   });
   assert.equal((await control.query('SELECT count(*)::int n FROM pg_database WHERE datname=$1', [name])).rows[0].n, 0);
-  await control.query('CREATE DATABASE ' + name); created = true;
+  await createTestDatabase(name); created = true;
   const target = new URL(source); target.pathname = '/' + name;
   const env = { ...process.env, DATABASE_URL: target.toString() };
-  await promisify(execFile)(process.execPath, ['-e', "require('./src/db/run-migrations').runMigrations().then(()=>require('./src/db/pool').end()).catch(e=>{console.error(e);process.exitCode=1;});"],
-    { cwd: serverRoot, env, timeout: 60000 });
   t.mock.method(globalThis, 'fetch', () => assert.fail('Live network is forbidden in the synthetic SV campaign fixture'));
   const runtime = Object.assign(stages.createRuntime(serverRoot), outbound.extendRuntime(serverRoot));
   db = runtime.createPool(env);
