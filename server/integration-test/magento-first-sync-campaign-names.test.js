@@ -3,7 +3,6 @@ require('../test/setup-env');
 const test=require('node:test'),assert=require('node:assert/strict');
 const {randomUUID,createHash}=require('node:crypto');
 const fs=require('node:fs/promises'),path=require('node:path'),os=require('node:os');
-const {promisify}=require('node:util'),{execFile}=require('node:child_process');
 const {Pool,Client}=require('pg');
 const fixture=require('../test/fixtures/magento-bindings');
 const c=require('../src/services/magento/binding-contract');
@@ -26,8 +25,8 @@ async function setup(t){
  let db,created=false;const dir=await fs.mkdtemp(path.join(os.tmpdir(),'amber-campaign-names-'));
  t.after(async()=>{if(db)await db.end();if(created)await control.query('DROP DATABASE '+name);await control.end();await fs.rm(dir,{recursive:true,force:true});});
  assert.equal((await control.query('SELECT count(*)::int n FROM pg_database WHERE datname=$1',[name])).rows[0].n,0);
- await control.query('CREATE DATABASE '+name);created=true;const target=new URL(source);target.pathname='/'+name;const url=target.toString();
- await promisify(execFile)(process.execPath,['-e',"require('./src/db/run-migrations').runMigrations().then(()=>require('./src/db/pool').end()).catch(e=>{console.error(e);process.exitCode=1;});"],{cwd:serverRoot,env:{...process.env,DATABASE_URL:url}});
+ await require('./harness').createTestDatabase(name);created=true;const target=new URL(source);target.pathname='/'+name;const url=target.toString();
+
  db=new Pool({connectionString:url,max:4});t.mock.method(globalThis,'fetch',()=>assert.fail('Live HTTP forbidden in synthetic names fixture'));
     const actor=Number((await db.query("INSERT INTO application_users(status,display_name) VALUES('active','Names fixture Administrator') RETURNING id")).rows[0].id);
     await db.query("INSERT INTO user_role_assignments(application_user_id,role_id) SELECT $1,id FROM roles WHERE role_key='administrator'",[actor]);

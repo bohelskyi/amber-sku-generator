@@ -13,12 +13,12 @@ test('guided v5 publication and option preparation precede first native product 
   global.fetch = async () => { assert.fail('External HTTP prohibited by this fixture'); };
   try {
     assert.equal((await control.query('SELECT count(*)::int n FROM pg_database WHERE datname=$1', [name])).rows[0].n, 0);
-    await control.query(`CREATE DATABASE ${name}`); created = true;
+    await require('./harness').createTestDatabase(name); created = true;
     const url = new URL(sourceUrl); url.pathname = `/${name}`;
     process.env.DATABASE_URL = url.toString(); process.env.NBU_RATE_OVERRIDE = '40'; process.env.MAGENTO_BASE_URL = '';
     require('../test/setup-env'); appPool = require('../src/db/pool');
     db = new Client({ connectionString: url.toString() }); await db.connect();
-    await require('../src/db/run-migrations').runMigrations();
+
     const actor = (await db.query("INSERT INTO application_users(status,display_name) VALUES('active','Guided source fixture') RETURNING id")).rows[0].id;
     await db.query("INSERT INTO user_role_assignments(application_user_id,role_id) SELECT $1,id FROM roles WHERE role_key='administrator'", [actor]);
     const options = { databasePool: appPool, mutationContext: { actorUserId: actor } };

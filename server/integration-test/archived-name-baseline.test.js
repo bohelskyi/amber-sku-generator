@@ -7,17 +7,17 @@ test('archived name-baseline review preserves exact Magento names before a separ
   const source = new URL(process.env.TEST_DATABASE_URL || '');
   assert.equal(source.hostname, '127.0.0.1'); assert.equal(source.port, '55432'); assert.ok(source.pathname.endsWith('_test'));
   const name = `amber_archived_names_${process.pid}_${randomBytes(6).toString('hex')}_test`;
-  const expected = [...new Set(['amber_test', 'postgres', 'template0', 'template1', source.pathname.slice(1)])].sort();
+  const expected = [...new Set(['amber_test', 'postgres', 'template0', 'template1', source.pathname.slice(1), ...await require('./harness').verifiedTemplateDatabaseNames()])].sort();
   const control = new Client({ connectionString: source.toString() }); await control.connect();
   let db, appPool, created = false;
   try {
     assert.deepEqual((await control.query('SELECT datname FROM pg_database ORDER BY datname')).rows.map(r => r.datname), expected);
     assert.equal((await control.query('SELECT 1 FROM pg_database WHERE datname=$1', [name])).rowCount, 0);
-    await control.query(`CREATE DATABASE ${name}`); created = true;
+    await require('./harness').createTestDatabase(name); created = true;
     const url = new URL(source); url.pathname = `/${name}`;
     process.env.DATABASE_URL = url.toString(); process.env.MAGENTO_BASE_URL = ''; process.env.NBU_RATE_OVERRIDE = '40';
     require('../test/setup-env'); appPool = require('../src/db/pool'); db = new Pool({ connectionString: url.toString(), max: 8 });
-    await require('../src/db/run-migrations').runMigrations();
+
     const c = require('../src/services/magento/binding-contract');
     const actor = Number((await db.query("INSERT INTO application_users(status,display_name) VALUES('active','Archived names fixture') RETURNING id")).rows[0].id);
     await db.query("INSERT INTO user_role_assignments(application_user_id,role_id) SELECT $1,id FROM roles WHERE role_key='administrator'", [actor]);

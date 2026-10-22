@@ -4,11 +4,10 @@ const {createRequire}=require('node:module'),{randomUUID}=require('node:crypto')
 const SERVER=require('node:path').resolve(__dirname,'..'),app=createRequire(SERVER+'/package.json');
 app('./test/setup-env');
 if(!process.env.TEST_DATABASE_URL||!new URL(process.env.TEST_DATABASE_URL).pathname.endsWith('_test'))throw Error('Disposable *_test database required');
-const harness=app('./integration-test/harness'),{Pool,recreateTestDatabase,dropTestDatabase,runNodeInDatabase}=harness;
+const harness=app('./integration-test/harness'),{Pool,recreateTestDatabase,dropTestDatabase}=harness;
 const SKUS=Object.freeze(['SV5011001','SV5111001']),fixture=app('./test/fixtures/legacy-sv-schema6');
 const name='amber_legacy_completion_native_preview_test';
-async function setup(){const url=await recreateTestDatabase(name),db=new Pool({connectionString:url});try{
- await runNodeInDatabase(url,"require('./src/db/run-migrations').runMigrations().then(()=>require('./src/db/pool').end()).catch(e=>{console.error(e);process.exitCode=1;});");
+async function setup(){const url=await recreateTestDatabase(name, { template: true }),db=new Pool({connectionString:url});try{
  const actor=Number((await db.query("INSERT INTO application_users(status,display_name) VALUES('active','SV2 synthetic Administrator') RETURNING id")).rows[0].id);
  await db.query("INSERT INTO user_role_assignments(application_user_id,role_id) SELECT $1,id FROM roles WHERE role_key='administrator'",[actor]);
  for(const category of ['NM','KL','CH','AR','BR'])await db.query('INSERT INTO categories(code,name) VALUES($1,$1)',[category]);

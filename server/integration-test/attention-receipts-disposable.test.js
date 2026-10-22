@@ -10,11 +10,11 @@ test('attention confirmation timestamps require exact PostgreSQL delivery receip
   await maintenance.connect(); let created = false, db;
   try {
     assert.equal((await maintenance.query('SELECT current_database() AS name')).rows[0].name, 'amber_test');
-    await maintenance.query(`CREATE DATABASE "${databaseName}"`); created = true;
+    await require('./harness').createTestDatabase(databaseName); created = true;
     process.env.DATABASE_URL = `postgresql://amber_test:amber_test_local_only@127.0.0.1:55432/${databaseName}`;
     require('../test/setup-env');
     t.mock.method(globalThis, 'fetch', () => assert.fail('Receipt projection must never call Magento or any external HTTP'));
-    await require('../src/db/run-migrations').runMigrations();
+
     db = new Pool({ connectionString: process.env.DATABASE_URL, max: 5, connectionTimeoutMillis: 3000 });
     const c = require('../src/services/magento/binding-contract');
     const { runAccessAdminMutation } = require('../src/services/access-admin-transaction');

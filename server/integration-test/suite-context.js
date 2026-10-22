@@ -6,6 +6,9 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const sqlite3 = require('sqlite3').verbose();
+const harness = require('./harness');
+const suiteDatabaseName = `amber_suite_${process.pid}_test`;
+harness.useSuiteDatabase(suiteDatabaseName);
 const {
   Pool,
   TEST_DATABASE_URL,
@@ -13,6 +16,7 @@ const {
   closeServer,
   createApp,
   createHttpRequester,
+  createTestDatabase,
   dropTestDatabase,
   execFileAsync,
   listen,
@@ -20,7 +24,7 @@ const {
   recreateTestDatabase,
   runNodeInDatabase,
   serverRoot,
-} = require('./harness');
+} = harness;
 const express = require('express');
 const { createSessionMiddleware } = require('../src/auth/session');
 const { createAuthRouter } = require('../src/routes/auth.routes');
@@ -408,10 +412,8 @@ async function createLegacySemiCalibratedNecklaceFixture() {
 }
 
 test.before(async () => {
+  await createTestDatabase(suiteDatabaseName);
   await assertDisposableTestDatabase();
-  await pool.query('DROP SCHEMA public CASCADE');
-  await pool.query('CREATE SCHEMA public');
-  await runMigrations();
   await seedDefaultData();
   schemas.ZZScenario = await createFixtureCategory('ZZ', false, true);
   await createFixtureCategory('MM', false, false);
@@ -458,6 +460,7 @@ test.before(async () => {
 test.after(async () => {
   await closeServer(server);
   await pool.end();
+  await dropTestDatabase(suiteDatabaseName);
 });
 
 function sqliteRun(db, sql) {

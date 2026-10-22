@@ -12,7 +12,7 @@ test('historical NEW intents preserve unknown history and use an exact atomic UP
   const name = `amber_historical_reactivation_${process.pid}_${randomBytes(6).toString('hex')}_test`;
   const marker = process.env.CODEX_FINAL_DB_MARKER || `historical-owned-${randomUUID()}`;
   assert.match(marker,/^[a-z0-9-]{1,160}$/);
-  const expectedDatabases=[...new Set(['amber_test','postgres','template0','template1',source.pathname.slice(1)])].sort();
+  const expectedDatabases=[...new Set(['amber_test','postgres','template0','template1',source.pathname.slice(1),...await require('./harness').verifiedTemplateDatabaseNames()])].sort();
   const control = new Client({ connectionString: source.toString() }); await control.connect();
   let db, appPool, checkpoint, created = false;
   try {

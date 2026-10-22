@@ -67,6 +67,10 @@ jobs:
       - name: PostgreSQL integration tests
         run: npm run test:integration
         working-directory: server
+      - name: Remove integration template database
+        if: always()
+        run: node integration-test/harness.js cleanup-template
+        working-directory: server
 
   client:
     runs-on: ubuntu-latest

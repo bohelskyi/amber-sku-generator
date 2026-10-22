@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { Pool, recreateTestDatabase, dropTestDatabase, runNodeInDatabase } = require('./harness');
+const { Pool, recreateTestDatabase, dropTestDatabase } = require('./harness');
 const templates = require('../src/services/export-templates/template.service');
 const bindings = require('../src/services/magento/binding.service');
 const review = require('../src/services/magento/binding-review');
@@ -9,9 +9,8 @@ const carry = require('../src/services/magento/binding-carry-forward');
 const { upgradeNameReadiness } = require('../src/services/export-templates/effective-product-names');
 
 test('reviewed names carry repairs the exact existing draft, preserves actual manual choices and refuses stale counters', async () => {
-  const name = 'amber_names_review_carry_test', url = await recreateTestDatabase(name), db = new Pool({ connectionString: url });
+  const name = 'amber_names_review_carry_test', url = await recreateTestDatabase(name, { template: true }), db = new Pool({ connectionString: url });
   try {
-    await runNodeInDatabase(url, "require('./src/db/run-migrations').runMigrations().catch(e=>{console.error(e);process.exitCode=1;});");
     const actor = Number((await db.query("INSERT INTO application_users(status,display_name) VALUES('active','Names carry admin') RETURNING id")).rows[0].id);
     await db.query("INSERT INTO user_role_assignments(application_user_id,role_id) SELECT $1,id FROM roles WHERE role_key='administrator'", [actor]);
     const options = { databasePool: db, mutationContext: { actorUserId: actor } }, f = require('../test/fixtures/magento-successor').fixture();
