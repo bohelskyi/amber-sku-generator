@@ -233,9 +233,14 @@ async function getAuditEvents(query = {}, { databasePool = pool } = {}) {
   if (filters.actorId) where.push(`actor_user_id = ${add(filters.actorId)}`);
   if (filters.subjectType) where.push(`subject_type = ${add(filters.subjectType)}`);
   if (filters.subjectId) where.push(`subject_id = ${add(filters.subjectId)}`);
+  // Keep the product PK indexable and the old exact-text identity semantics.
+  // CASE guards the cast; at most ten digits fit bigint, including values outside
+  // the product integer range, which safely compare as absent rather than throw.
   if (filters.article) where.push(`subject_type = 'product' AND EXISTS (
     SELECT 1 FROM products p JOIN public_product_identities identity ON identity.id = p.public_product_identity_id
-    WHERE p.id::text = audit_events.subject_id AND identity.public_sku ILIKE ${add(`%${filters.article.replace(/[\\%_]/g, '\\$&')}%`)} ESCAPE '\\')`);
+    WHERE p.id = CASE WHEN audit_events.subject_id ~ '^(0|-?[1-9][0-9]{0,9})$'
+      THEN audit_events.subject_id::bigint END
+      AND identity.public_sku ILIKE ${add(`%${filters.article.replace(/[\\%_]/g, '\\$&')}%`)} ESCAPE '\\')`);
   if (cursor) {
     const occurredAtParam = add(cursor.occurredAt);
     const idParam = add(cursor.id);
@@ -245,7 +250,8 @@ async function getAuditEvents(query = {}, { databasePool = pool } = {}) {
   const result = await databasePool.query(
     `SELECT page.*, (SELECT identity.public_sku FROM products p
        JOIN public_product_identities identity ON identity.id = p.public_product_identity_id
-       WHERE page.subject_type = 'product' AND p.id::text = page.subject_id) AS public_sku
+       WHERE page.subject_type = 'product' AND p.id = CASE WHEN page.subject_id ~ '^(0|-?[1-9][0-9]{0,9})$'
+         THEN page.subject_id::bigint END) AS public_sku
      FROM (SELECT id, event_key, actor_user_id, actor_snapshot, subject_type, subject_id, details, occurred_at
        FROM audit_events
        ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
