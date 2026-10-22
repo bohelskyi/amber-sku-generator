@@ -410,7 +410,9 @@ function presentProductTimeline(querySku, data, magentoStatuses) {
     }
   }
   const normalizedEvents = events.map((event, index) => {
-    const { internalGroup, sortOrder, sourceOrder, ...publicEvent } = event;
+    const { internalGroup, ...publicEvent } = event;
+    delete publicEvent.sortOrder;
+    delete publicEvent.sourceOrder;
     return {
       id: `timeline-${index + 1}`,
       ...publicEvent,
