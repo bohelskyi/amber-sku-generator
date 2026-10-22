@@ -69,7 +69,7 @@ Technical references: [client development](../client/README.md),
 - Finish the first sync per category (SV, CH, KL, BR, NM, then silver); see the runbook.
 - Remove legacy SKU dependencies after the mass sync ([retain remote](FIRST_SYNC_RETAIN_REMOTE.md)).
 - Account-onboarding invitations are not implemented ([RBAC](AUTH_RBAC.md#correction-ownership-and-remaining-gap)).
-- Magento attribute/set mutation, complex option types and `url_key` generation remain deferred ([integration](MAGENTO_INTEGRATION.md)).
+- Complex Magento option types and `url_key` generation remain deferred; reviewed ordinary attribute creation, set membership, option creation and option-label updates are implemented ([integration](MAGENTO_INTEGRATION.md)).
 - Infrastructure policy (DB exposure, image upgrades, non-root containers, backup schedule/retention/encryption) remains separate operational work ([operations](OPERATIONS.md)).
 - Manual UX evidence for 200% zoom and second-account collaboration ([audit](archive/ux/EXPORT_UX_ACCEPTANCE_AUDIT_POST_UX5_2026-09-26.md#що-ще-потребує-оператора)).
 
