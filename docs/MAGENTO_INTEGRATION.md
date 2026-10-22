@@ -265,6 +265,16 @@ product. Contradictory links, modern missing pointers, independently excluded
 ancestors, compatibility exclusions and non-retired predecessors remain blockers.
 It does not rewrite any historical pointer, identity, SKU or exclusion policy.
 
+The held current successor of a pre-cutover (manual) recount is the same kind of
+baseline: cutover held it from migration-039 evidence, so its source-correction
+pointer is NULL too. That NULL is accepted only when its own exact cutover proof
+(approved manifest `hold` entry, applied batch receipt, unchanged evidence) is
+verified and exactly one reciprocal correction record links it. Its unknown
+business-exclusion policy is not attested by this recipe: release it first with the
+reviewed `release_exclusion` action. After confirmation the same proof stays valid
+through the reconciliation `priorEvidence`, so the admitted first-sync history is
+unchanged. Any other missing modern pointer remains a blocker.
+
 Canonical cutover may have replaced a then-current migration baseline's evidence
 with `origin: cutover` before a later recount retired it. Such a retired ancestor
 qualifies only when its immutable approved cutover manifest and applied batch

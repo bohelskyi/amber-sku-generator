@@ -72,3 +72,53 @@ test('a validly sealed modern origin or non-baseline policy is not treated as mi
     assert.equal((await baseline.read(client, [f.member])).size, 0);
   }
 });
+
+test('the held current successor of a pre-cutover recount is verified only with its exact baseline; only its exclusion may be resolved', async () => {
+  const held = f => {
+    Object.assign(f.member.product, { status: 'active', corrected_from_product_id: 2, corrected_to_product_id: null });
+    Object.assign(f.member.lifecycle, { route: 'hold' });
+  };
+  for (const exclusion of ['unknown', 'none']) {
+    const f = fixture(); held(f); f.member.lifecycle.business_exclusion_state = exclusion;
+    const proofs = await baseline.read(f.client, [f.member]);
+    assert.equal(proofs.size, 1, exclusion);
+    assert.equal(baseline.verified({ ...f.member, cutoverBaseline: proofs.get(3) }), true);
+  }
+  for (const change of [
+    f => { f.member.lifecycle.business_exclusion_state = 'excluded'; }, f => { f.member.lifecycle.source_correction_id = 9; },
+    f => { f.member.lifecycle.evidence = { ...f.member.lifecycle.evidence, decision: 'released' }; },
+    f => { f.member.lifecycle.route = 'normal'; }, f => { f.member.product.corrected_from_product_id = null; },
+    f => { f.member.product.corrected_to_product_id = 7; }, f => { f.member.lifecycle.recount_compatibility_excluded = true; },
+  ]) {
+    const f = fixture(); held(f); change(f);
+    assert.equal((await baseline.read(f.client, [f.member])).size, 0, change.toString());
+  }
+  // A retired member keeps the original rule: its policy is never treated as resolved.
+  const f = fixture(); f.member.lifecycle.business_exclusion_state = 'none';
+  assert.equal((await baseline.read(f.client, [f.member])).size, 0);
+});
+
+test('after the reviewed historical confirmation the held current keeps the same proof through its priorEvidence only', async () => {
+  const confirmed = f => {
+    Object.assign(f.member.product, { status: 'active', corrected_from_product_id: 2, corrected_to_product_id: null });
+    f.member.lifecycle.business_exclusion_state = 'none';
+    f.member.lifecycle.evidence = { ...f.member.lifecycle.evidence, origin: 'reconciliation', action: 'magento_historical_recount_prior_exposure',
+      priorEvidence: structuredClone(f.member.lifecycle.evidence), magentoPriorExposure: { planHash: 'p'.repeat(64) } };
+    Object.assign(f.member.lifecycle, { route: 'hold' });
+  };
+  const held = fixture(); Object.assign(held.member.product, { status: 'active', corrected_from_product_id: 2, corrected_to_product_id: null });
+  Object.assign(held.member.lifecycle, { route: 'hold', business_exclusion_state: 'none' });
+  const before = (await baseline.read(held.client, [held.member])).get(3);
+  const f = fixture(); confirmed(f);
+  const proof = (await baseline.read(f.client, [f.member])).get(3);
+  assert.deepEqual(proof, before);
+  assert.equal(baseline.verified({ ...f.member, cutoverBaseline: proof }), true);
+  for (const change of [
+    v => { v.member.lifecycle.evidence.action = 'magento_stable_recount_prior_exposure'; },
+    v => { v.member.lifecycle.evidence.priorEvidence.decision = 'changed'; },
+    v => { v.member.product.status = 'corrected'; v.member.lifecycle.route = 'retired'; },
+  ]) {
+    const changed = fixture(); confirmed(changed); change(changed);
+    assert.equal((await baseline.read(changed.client, [changed.member])).size, 0, change.toString());
+  }
+});
