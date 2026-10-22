@@ -93,7 +93,7 @@ Draft test-preview requires both the requested revision and hash. It loads only 
 
 Events `export_template.created`, `.draft_updated`, `.published`, and `.activated` commit with their mutations. Details contain IDs, hashes and revision/generation changes, not definitions or products. Audit failure rolls back all changes; failures, no-ops and completed retries emit no success event. The audit reader exposes only the public `definitionHash` exception to its general hash redaction; `audit.view` remains Administrator-only.
 
-Snapshot binding is described below. Recount target cleanup, lifecycle routing, the editor and durable sessions are implemented. Target catalog/alias lineage, frozen-rule/mapping decisions, measurement units and fresh controlled Magento acceptance remain operational matters; see [pending work](README.md#deferred-work-and-operationally-pending-items).
+Snapshot binding is described below. Recount target cleanup, lifecycle routing, the editor and durable sessions are implemented. Target catalog/alias lineage, frozen-rule/mapping decisions, measurement units and fresh controlled Magento acceptance remain operational matters; see [pending work](README.md#open-work).
 
 ## Published preview and snapshot binding
 

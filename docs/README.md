@@ -55,6 +55,7 @@ index, publication side effects and traps. Per-tool details:
 
 ## Other runbooks
 
+- [Operator CLI index](CLI_SCRIPTS.md): tracked entry points, modes and per-tool safeguards.
 - [Reviewed canonical weight repair](CANONICAL_WEIGHT_REPAIR.md)
 - [Reviewed bulk correction requests](CORRECTION_REQUEST_BATCH.md)
 - [Full-product cutover](FULL_PRODUCT_CUTOVER_RUNBOOK.md): only for installations not yet cut over; production is done.

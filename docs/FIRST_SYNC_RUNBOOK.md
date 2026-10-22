@@ -4,10 +4,13 @@ The working order for bringing existing catalog products under automatic Magento
 sync. Contracts live in [first-sync fields](MAGENTO_FIRST_SYNC_FIELDS.md),
 [automatic sync](MAGENTO_AUTOMATIC_SYNC.md) and [Magento integration](MAGENTO_INTEGRATION.md);
 this page is the practical sequence, the CLIs and the traps already hit in production.
-The operator CLIs run inside the server container (`docker compose exec -T server node
-/app/scripts/<name>.js …`). The four reviewed wrappers below read Magento with GET
-only; apply can record local changes and synchronization requests through the same
-services as the UI. The ordinary worker performs any later Magento writes.
+The scripts below run from `server/` or a matching server container
+(`docker compose exec -T server node /app/scripts/<name>.js …`). Their Magento
+transport is GET-only, but apply modes can change local data, stage ordinary
+automatic requests or record controlled handoff. An enabled worker can then
+deliver those products. In particular, publication and the SV campaign include
+handoff; they are not read-only operations. Use the [complete CLI index](CLI_SCRIPTS.md)
+for modes, side effects and the distinction between commands and support modules.
 
 ## Where a product stands
 
@@ -24,7 +27,8 @@ services as the UI. The ordinary worker performs any later Magento writes.
 1. **History admission** (`mode: review`, `FIRST_SYNC_HISTORY_REVIEW_REQUIRED`).
    - Ordinary legacy products: [`first-sync-history-batch.js`](FIRST_SYNC_HISTORY_BATCH.md),
      scope files of ≤50 `{sku, productId, remoteProductId}`.
-     Run `--mode preview --preview-all` to see every blocker in one run, then
+     Run `--mode preview --preview-all` with the required input SHA-256, database,
+     actor and new output path to collect per-item blockers, then
      `--mode apply` per scope file. Apply stops at the first non-admitted item; rerun it
      after transient `MAGENTO_TIMEOUT` (already admitted rows report `already_admitted`).
    - Ordinary legacy products listed in a retained legacy export file report
@@ -63,8 +67,11 @@ services as the UI. The ordinary worker performs any later Magento writes.
      [recount batch](RECOUNT_CORRECTIONS.md#reviewed-legacy-answer-recount-batch).
 4. **Handoff.** Field decisions do not wake `needs_attention` requests. Record a
    reviewed `broader_resync` through `binding-controlled-actions` (`preview` → token →
-   `apply`, ≤100 products, the reason text is part of the token). History admission
-   and the recount action record their own handoff.
+   `apply`, ≤100 products, the reason text is part of the token). The history batch
+   records admission evidence only; it does not wake a request or record handoff.
+   The stable-recount action records its own handoff. Name/source updates can also
+   stage ordinary automatic requests; inspect the resulting request state before
+   planning a separate handoff.
 5. **Verify.** Re-run the per-SKU review: synced products report `mode: ordinary`.
 
 Useful flags: `--schema-cache-seconds 120` on history batch, keep-local and
@@ -106,9 +113,12 @@ Every publication has side effects on products that are **not yet synced**:
   SKU. Retired archived copies are accepted when the SKU reservation belongs to the
   selected current product and no copy is current, in correction lineage or carrying
   unfinished sync work; anything else remains a real conflict.
-- Container replacement loses files in `/tmp`. The repository's `server/scripts`
-  ship in the server image; keep input files, reviewed plans and result journals
-  outside the container, and copy inputs in and outputs out as needed.
+- Container replacement does not retain `/tmp`. The checked-in server Dockerfile
+  includes repository `server/scripts/` in the image; verify the deployed image's
+  commit before use. Keep input files, reviewed plans and journals on persistent
+  host storage, copy inputs into the container when needed, and copy results back
+  before replacement. Host-only helpers and scripts from an unmerged branch are
+  not provided by that image.
 - In an interactive shell use `set +H` before node one-liners containing `!`.
 - Placeholders like `<installationKey>` must be replaced; the shell treats `<…>` as
   redirection.
@@ -116,6 +126,10 @@ Every publication has side effects on products that are **not yet synced**:
   must be copied back before the next deploy.
 
 ## CLI index
+
+This is the first-sync subset. [All server scripts](CLI_SCRIPTS.md) also covers
+diagnosis, bindings, cutover, repair and helper-only files; its mode column matters
+because not every command accepts `--mode preview|apply`.
 
 | Script | Purpose | Doc |
 | --- | --- | --- |
