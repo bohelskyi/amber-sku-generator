@@ -44,7 +44,11 @@ test('native first-sync canonical inputs preserve identity/history and atomic re
       await activationClient.query("SET LOCAL amber.magento_delivery_cutover='on'");
       await activationClient.query(`UPDATE magento_auto_sync_activation SET enabled=TRUE,installation_key='canonical-fixture',actor_user_id=$1,legacy_product_csv_enabled=FALSE,cutover_at=CURRENT_TIMESTAMP,cutover_by_user_id=$1,cutover_event_id=$2 WHERE singleton`,[actor,cutoverEvent]);await activationClient.query('COMMIT');
     }catch(e){await activationClient.query('ROLLBACK');throw e;}finally{activationClient.release();}
-    const rateObservation=await require('../src/services/currency.service').observeUsdRate({databasePool:db});
+    // Read a fresh persisted fixture even when CI supplies NBU_RATE_OVERRIDE.
+    await db.query(`INSERT INTO exchange_rate_cache(currency_pair,rate,rate_date,fetched_at)
+      VALUES('USD_UAH',40,(CURRENT_TIMESTAMP AT TIME ZONE 'Europe/Kyiv')::date,CURRENT_TIMESTAMP)`);
+    const rateObservation=await require('../src/services/currency.service').observeUsdRate({databasePool:db,rateOverride:null});
+    assert.equal(rateObservation.rateError,null);assert.equal(rateObservation.rateInfo.rate,40);
     const config={baseUrl:'https://canonical.invalid'};
     const make=async(empty=false)=>{const p=(await require('./product-fixture').insertNativeProductFixture(db,{category:'BR',weight:empty?null:3,totalPriceUah:200,isTestProduct:true,actorUserId:actor,details:{answers:empty?{}:{weight:'3',binding_test_semantic:7},manualPriceUah:200,keep:'original history'}})).rows[0];return p;};
     const actual=async p=>(await db.query('SELECT * FROM products WHERE id=$1',[p.id])).rows[0];
@@ -107,7 +111,9 @@ test('native first-sync canonical inputs preserve identity/history and atomic re
     });
     await t.test('rate observation timestamps do not stale identical economic evidence',async()=>{
       const p=await make(),args=await prepared(p),a=await helper.prepareFirstSyncLocal(db,args);
-      const later=await require('../src/services/currency.service').observeUsdRate({databasePool:db});
+      await db.query("UPDATE exchange_rate_cache SET fetched_at=clock_timestamp() WHERE currency_pair='USD_UAH'");
+      const later=await require('../src/services/currency.service').observeUsdRate({databasePool:db,rateOverride:null});
+      assert.equal(later.rateError,null);assert.notEqual(later.rateInfo.fetchedAt,rateObservation.rateInfo.fetchedAt);
       const b=await helper.prepareFirstSyncLocal(db,{...args,rateObservation:later});assert.equal(a.canonicalHash,b.canonicalHash);assert.deepEqual(b.blockedFields,[]);
     });
 
