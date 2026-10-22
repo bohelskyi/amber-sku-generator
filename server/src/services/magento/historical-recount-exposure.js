@@ -32,7 +32,10 @@ function lineageBlockers(members, corrections, currentId) {
       if (f?.source_correction_id != null) out.push('CORRECTION_LINEAGE_CONFLICT');
     } else {
       const links = corrections.filter(v => v.corrected_product_id === p.id);
-      if (links.length !== 1 || (f?.source_correction_id !== links[0].id && !(retired && legacy(member) && f.source_correction_id == null))) out.push('CORRECTION_LINEAGE_CONFLICT');
+      // A pre-cutover recount never recorded the pointer, also on its held current
+      // successor. Only the exact applied cutover baseline proves that absence.
+      const legacyPointer = f?.source_correction_id == null && (retired && legacy(member) || p.id === currentId && cutover.verified(member));
+      if (links.length !== 1 || (f?.source_correction_id !== links[0].id && !legacyPointer)) out.push('CORRECTION_LINEAGE_CONFLICT');
     }
   }
   return [...new Set(out)];

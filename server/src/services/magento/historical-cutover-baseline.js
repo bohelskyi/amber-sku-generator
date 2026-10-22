@@ -11,8 +11,21 @@ function approvedManifest(event, hash, database) {
     && body.entries.every(e => e && Number.isSafeInteger(e.productId) && ['preserve','hold','legacy_baseline','first_delivery'].includes(e.action))
     && contentSha256 === hash && digest(body) === hash ? body : null;
 }
+// The held current successor of a pre-cutover recount is the same kind of
+// migration-039 baseline. Only its business-exclusion policy may have been
+// resolved since (an audited operator decision); everything else stays exact.
+const heldCurrent = m => m.product.status === 'active' && m.product.corrected_to_product_id == null
+  && m.product.corrected_from_product_id != null && m.lifecycle?.route === 'hold';
+// After its reviewed historical exposure confirmation the held current keeps the
+// exact cutover evidence as priorEvidence, so the same proof stays valid.
+function baselineEvidence(m) {
+  const e = m.lifecycle?.evidence;
+  return heldCurrent(m) && e?.origin === 'reconciliation' && e.action === 'magento_historical_recount_prior_exposure'
+    && e.priorEvidence?.origin === 'cutover' ? e.priorEvidence : e;
+}
 function matchesBaseline(member, entry) {
   const { product: p, lifecycle: f } = member, before = entry?.before, after = entry?.after;
+  const current = heldCurrent(member);
   return entry?.productId === p.id && entry.sku === p.full_sku && entry.action === 'hold'
     && before?.evidence?.origin === 'migration_039' && before.evidence.coverage === 'unresolved_historical'
     && before.revision === '1' && before.confirmed_revision === '0' && before.source_correction_id === null
@@ -21,8 +34,9 @@ function matchesBaseline(member, entry) {
     && after?.route === 'hold' && after.source_correction_id === null
     && after.business_exclusion_state === 'unknown' && after.recount_compatibility_excluded === false
     && after.evidence?.origin === 'cutover' && after.evidence.decision === 'hold'
-    && f.source_correction_id === null && f.business_exclusion_state === 'unknown'
-    && f.recount_compatibility_excluded === false && digest(f.evidence) === digest(after.evidence);
+    && f.source_correction_id === null
+    && (f.business_exclusion_state === 'unknown' || current && f.business_exclusion_state === 'none')
+    && f.recount_compatibility_excluded === false && digest(baselineEvidence(member)) === digest(after.evidence);
 }
 
 // Read immutable canonical approval AND application receipts. An origin label or
@@ -30,8 +44,8 @@ function matchesBaseline(member, entry) {
 // Retiring the source later may change its route/counters, not its provenance.
 async function read(client, members) {
   const result = new Map();
-  const candidates = members.filter(m => m.product.status === 'corrected' && m.lifecycle?.route === 'retired'
-    && m.lifecycle.evidence?.origin === 'cutover' && hashPattern.test(m.lifecycle.repair_manifest_hash));
+  const candidates = members.filter(m => (m.product.status === 'corrected' && m.lifecycle?.route === 'retired' || heldCurrent(m))
+    && baselineEvidence(m)?.origin === 'cutover' && hashPattern.test(m.lifecycle.repair_manifest_hash));
   if (!candidates.length || candidates.length > 30) return result;
   const gate = (await client.query('SELECT current_database() AS database,phase FROM full_product_export_activation WHERE singleton')).rows[0];
   if (gate?.phase !== 'active') return result;
@@ -67,15 +81,15 @@ async function read(client, members) {
       || digest(applied.productIds) !== digest(p.batch.map(e => e.productId)) || receipt.details.beforeAfterHash !== digest(p.batch)) continue;
     result.set(p.member.product.id, { productId: p.member.product.id, manifestHash: p.hash,
       approvalEventId: String(p.approval.id), batchEventId: String(receipt.id), entryHash: digest(p.entry),
-      evidenceHash: digest(p.member.lifecycle.evidence) });
+      evidenceHash: digest(baselineEvidence(p.member)) });
   }
   return result;
 }
 
 function verified(member) {
   const proof = member.cutoverBaseline;
-  return member.lifecycle?.evidence?.origin === 'cutover' && proof?.productId === member.product.id
+  return baselineEvidence(member)?.origin === 'cutover' && proof?.productId === member.product.id
     && proof.manifestHash === member.lifecycle.repair_manifest_hash && hashPattern.test(proof.manifestHash)
-    && proof.evidenceHash === digest(member.lifecycle.evidence);
+    && proof.evidenceHash === digest(baselineEvidence(member));
 }
 module.exports = { read, verified };

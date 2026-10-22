@@ -51,3 +51,20 @@ test('historical proof requires an explicit current-only decision and every exac
     assert.throws(()=>service.validateEvidence(plan,bad),{code:'RECONCILIATION_UNRESOLVED'});
   }
 });
+test('a held current successor keeps its missing pointer only with its own verified cutover baseline', () => {
+  const { members, corrections } = fixture(), current = members[4];
+  current.lifecycle.source_correction_id = null;
+  current.lifecycle.evidence = { origin: 'cutover', decision: 'hold' };
+  current.lifecycle.repair_manifest_hash = 'a'.repeat(64);
+  assert.ok(service.lineageBlockers(members, corrections, 5).includes('CORRECTION_LINEAGE_CONFLICT'));
+  current.cutoverBaseline = { productId: 5, manifestHash: current.lifecycle.repair_manifest_hash, evidenceHash: digest(current.lifecycle.evidence) };
+  assert.deepEqual(service.lineageBlockers(members, corrections, 5), []);
+  for (const change of [
+    m => { m[4].cutoverBaseline.productId = 4; }, m => { m[4].lifecycle.evidence.decision = 'other'; },
+    m => { m[4].lifecycle.business_exclusion_state = 'unknown'; }, m => { m[4].lifecycle.source_correction_id = 999; },
+  ]) { const clone = structuredClone(members); change(clone); assert.ok(service.lineageBlockers(clone, corrections, 5).length, change.toString()); }
+  // Another member's proof never covers the current product's pointer.
+  const other = structuredClone(members); delete other[4].cutoverBaseline;
+  other[3].cutoverBaseline = { productId: 5, manifestHash: 'a'.repeat(64), evidenceHash: digest(other[4].lifecycle.evidence) };
+  assert.ok(service.lineageBlockers(other, corrections, 5).includes('CORRECTION_LINEAGE_CONFLICT'));
+});

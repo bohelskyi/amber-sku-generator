@@ -197,3 +197,102 @@ for (const versionCount of [3,5]) suite.test(`historical recount exposure: ${ver
     });
   } finally {await db.end();await dropTestDatabase(name);}
 });
+suite.test('historical recount exposure: held current successor of a pre-cutover recount with a missing pointer', async t => {
+  const { assert, Pool, recreateTestDatabase, dropTestDatabase, runNodeInDatabase } = suite;
+  const name='amber_historical_current_test',url=await recreateTestDatabase(name),db=new Pool({connectionString:url,options:'-c amber.lifecycle_writer_version=1'});
+  try {
+    await require('./historical-runtime-fixture')(suite,url);
+    const actor=Number((await db.query("INSERT INTO application_users(status,display_name) VALUES('active','Historical test') RETURNING id")).rows[0].id);
+    await db.query("INSERT INTO user_role_assignments(application_user_id,role_id) SELECT $1,id FROM roles WHERE role_key='administrator'",[actor]);
+    const {scenario,config,published,installationKey}=await require('./stable-recount-exposure-fixture')(db,actor,{firstSyncReview:true});
+    const s=await scenario();
+    // Production shape (KL, 2026-09): a manual pre-cutover recount; both versions excluded, no pointer anywhere.
+    const old=(await insertProductFixture(db,`INSERT INTO products(full_sku,base_sku,sequence_number,category,weight,total_price,total_price_uah,price_per_gram,uah_rate,details)
+       VALUES('SV-LEGACY-A','SV-LEGACY-A',0,'BR',5,10,42,2,40,'{"answers":{}}') RETURNING *`)).rows[0];
+    const current=(await db.query('SELECT * FROM products WHERE id=$1',[s.product.id])).rows[0];
+    const conn=await db.connect();
+    try {
+      await conn.query('BEGIN');
+      await conn.query("UPDATE products SET status='corrected',exclude_from_export=1,corrected_to_product_id=$2 WHERE id=$1",[old.id,current.id]);
+      await conn.query('UPDATE products SET corrected_from_product_id=$2,exclude_from_export=1 WHERE id=$1',[current.id,old.id]);
+      await conn.query('INSERT INTO product_corrections(source_product_id,corrected_product_id,source_sku,corrected_sku) VALUES($1,$2,$3,$4)',[old.id,current.id,old.full_sku,current.full_sku]);
+      await conn.query(`UPDATE product_full_export_state SET route=CASE WHEN product_id=$2 THEN 'hold' ELSE 'retired' END,
+        hold_reason=CASE WHEN product_id=$2 THEN 'historical_ambiguity' ELSE NULL END,business_exclusion_state='unknown',
+        evidence='{"origin":"migration_039","coverage":"unresolved_historical"}',delivery_version=delivery_version+1 WHERE product_id=ANY($1::int[])`,[[old.id,current.id],current.id]);
+      await conn.query('COMMIT');
+      const cutoverService=require('../src/services/full-product-cutover.service');
+      const cutoverOptions={databasePool:db,expectedDatabase:name,mutationContext:{actorUserId:actor},deploymentEvidence:'Disposable held-current fixture'};
+      await cutoverService.prepare(cutoverOptions);
+      const index=await cutoverService.generate('index',cutoverOptions);
+      await cutoverService.indexHistorical(index,index.contentSha256,cutoverOptions);
+      const manifest=await cutoverService.generate('cutover',cutoverOptions);
+      await cutoverService.approve(manifest,manifest.contentSha256,'Reviewed disposable held-current fixture',cutoverOptions);
+      await cutoverService.applyBatch(manifest.contentSha256,0,cutoverOptions);
+      await cutoverService.activate(manifest.contentSha256,cutoverOptions);
+      await conn.query('BEGIN');
+      const event=async key=>(await conn.query(`INSERT INTO audit_events(event_key,actor_user_id,actor_snapshot,subject_type,subject_id,request_id)
+        VALUES($1,$2,'{"displayName":"Historical test","preferredUsername":null}','fixture','singleton',$1) RETURNING id`,[key,actor])).rows[0].id;
+      const activation=await event('public_sku.activated'),cutover=await event('magento_delivery.cutover');
+      await conn.query("SET LOCAL amber.public_sku_activation='on'; SET LOCAL amber.magento_delivery_cutover='on'");
+      await conn.query('UPDATE public_sku_activation SET enabled=TRUE,activated_at=CURRENT_TIMESTAMP,activated_by_user_id=$1,activation_event_id=$2 WHERE singleton',[actor,activation]);
+      await conn.query(`UPDATE magento_auto_sync_activation SET enabled=TRUE,installation_key=$1,actor_user_id=$2,
+        legacy_product_csv_enabled=FALSE,cutover_at=CURRENT_TIMESTAMP,cutover_by_user_id=$2,cutover_event_id=$3 WHERE singleton`,[installationKey,actor,cutover]);
+      await conn.query('COMMIT');
+    } finally {await conn.query('ROLLBACK');conn.release();}
+    await runNodeInDatabase(url,"require('./src/db/run-migrations').runMigrations().finally(()=>require('./src/db/pool').end()).catch(e=>{console.error(e);process.exitCode=1;});");
+    const fetchImpl=async(url,init)=>{
+      assert.equal(init.method,'GET','review/apply has no Magento writes');
+      const u=new URL(url),sku=u.searchParams.get('searchCriteria[filter_groups][0][filters][0][value]');
+      if(u.pathname.endsWith('/products') && sku!==s.input.sku) return new Response(JSON.stringify({items:[],total_count:0}),{headers:{'content-type':'application/json'}});
+      return s.options.fetchImpl(url,init);
+    };
+    const options={...s.options,fetchImpl,databasePool:db,expectedDatabase:name,bindingRevisionId:published.id,mutationContext:{actorUserId:actor}};
+    const lifecycle=async()=>(await db.query('SELECT f.*,p.exclude_from_export FROM product_full_export_state f JOIN products p ON p.id=f.product_id WHERE product_id=$1',[current.id])).rows[0];
+    const born=await lifecycle();
+    assert.deepEqual([born.route,born.hold_reason,born.source_correction_id,born.business_exclusion_state,born.evidence.origin,born.exclude_from_export],
+      ['hold','historical_ambiguity',null,'unknown','cutover',1]);
+    const evidence={files:[],confirmation:{disposition:'current_update_only',evidence:'Manual pre-cutover recount; the old article was renamed in Magento'}};
+    await t.test('the exact cutover baseline proves the missing pointer; only the unknown exclusion remains',async()=>{
+      const record=await recovery.productRecovery(config,current.id,{...options,canReconcileLifecycle:true});
+      assert.deepEqual(record.lifecycle.availableKinds,['release_exclusion']);
+      assert.ok(record.history.products.find(p=>p.productId===current.id).cutoverBaseline?.batchEventId);
+      assert.equal(record.lifecycle.unavailableReasons.includes('CORRECTION_LINEAGE_CONFLICT'),false,JSON.stringify(record.lifecycle));
+      const denied=await recovery.preview(config,current.id,{kind:'historical_recount_exposure'},options);
+      assert.ok(denied.blockers.includes('EXCLUSION_OR_UNKNOWN_POLICY'));assert.equal(denied.blockers.includes('CORRECTION_LINEAGE_CONFLICT'),false);
+    });
+    await t.test('a changed baseline row is not proven and keeps the lineage blocker',async()=>{
+      const original=born.evidence;
+      try {
+        await db.query("UPDATE product_full_export_state SET evidence=evidence||'{\"note\":\"changed\"}',delivery_version=delivery_version+1 WHERE product_id=$1",[current.id]);
+        const record=await recovery.productRecovery(config,current.id,{...options,canReconcileLifecycle:true});
+        assert.ok(record.lifecycle.unavailableReasons.includes('CORRECTION_LINEAGE_CONFLICT'));
+      } finally {await db.query('UPDATE product_full_export_state SET evidence=$2,delivery_version=delivery_version+1 WHERE product_id=$1',[current.id,JSON.stringify(original)]);}
+    });
+    await t.test('after the reviewed exclusion release the historical recipe confirms exposure and admits first sync',async()=>{
+      const release=await recovery.preview(config,current.id,{kind:'release_exclusion'},options);
+      assert.equal(release.eligible,true,JSON.stringify(release));
+      await recovery.apply(config,current.id,{review:release.review,reviewHash:release.reviewHash,reason:'Pre-cutover manual recount exclusion, product is on sale'},options);
+      const released=await lifecycle();
+      assert.deepEqual([released.business_exclusion_state,released.exclude_from_export,released.source_correction_id],['none',0,null]);
+      const record=await recovery.productRecovery(config,current.id,{...options,canReconcileLifecycle:true});
+      assert.ok(record.lifecycle.availableKinds.includes('historical_recount_exposure'),JSON.stringify(record.lifecycle));
+      const review=await recovery.preview(config,current.id,{kind:'historical_recount_exposure'},options);
+      assert.equal(review.eligible,true,JSON.stringify(review.blockers));
+      const H=async()=>{const cl=await db.connect();try{return await require('../src/services/magento/recovery-history').read(cl,current.id);}finally{cl.release();}};
+      const proofBefore=(await H()).products.find(p=>p.productId===current.id).cutoverBaseline;
+      const result=await recovery.apply(config,current.id,{review:review.review,reviewHash:review.reviewHash,reason:'Reviewed current product only',evidence},options);
+      // The same cutover proof stays valid after the transition (it is part of the admitted history).
+      const after=await H();
+      assert.deepEqual(after.products.find(p=>p.productId===current.id).cutoverBaseline,proofBefore);
+      assert.deepEqual(after.historicalRecountBlockers,[]);
+      assert.equal(result.holdReason,'prior_exposure');
+      const confirmed=await lifecycle();
+      assert.deepEqual([confirmed.hold_reason,confirmed.evidence.origin,confirmed.evidence.action,confirmed.source_correction_id],
+        ['prior_exposure','reconciliation','magento_historical_recount_prior_exposure',null]);
+      assert.equal(s.writes.length,0);
+      await require('../src/services/magento/binding-handoff').processHandoffs(config,{databasePool:db});
+      const first=await require('../src/services/magento/first-sync.service').review(config,{sku:s.input.sku,bindingRevisionId:published.id},{...options,actorUserId:actor});
+      assert.equal(first.mode,'first',JSON.stringify(first.blockers));
+    });
+  } finally {await db.end();await dropTestDatabase(name);}
+});
