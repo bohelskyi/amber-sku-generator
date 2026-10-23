@@ -594,6 +594,46 @@ test('first-sync coordinator preserves real names, partial progress and transact
       }
     });
 
+    await t.test('an exact external receipt on a legacy recount successor is ordinary only for unrecorded correction pointers', async () => {
+      async function legacyChain({ predecessorRoute = 'retired' } = {}) {
+        const n=++sequence, oldSku='BR-LEGACY-OLD-'+n, sku='BR-LEGACY-'+n;
+        return write(async client => {
+          const insert=`INSERT INTO products(full_sku,category,weight,total_price_uah,details,corrected_from_product_id)
+            VALUES($1,'BR',5,42,'{"answers":{"braclet_size":"17"},"manualPriceUah":42}',$2) RETURNING id,full_sku,public_product_identity_id`;
+          const old=(await client.query(insert,[oldSku,null])).rows[0];
+          const item=(await client.query(insert,[sku,old.id])).rows[0];
+          await client.query("UPDATE products SET status='corrected',corrected_to_product_id=$2,exclude_from_export=1 WHERE id=$1",[old.id,item.id]);
+          // Recorded before successor rows carried source_correction_id.
+          await client.query('INSERT INTO product_corrections(source_product_id,corrected_product_id,source_sku,corrected_sku) VALUES($1,$2,$3,$4)',[old.id,item.id,oldSku,sku]);
+          const event=(await client.query(`INSERT INTO audit_events(event_key,actor_user_id,actor_snapshot,subject_type,subject_id,request_id,details)
+            VALUES('product.external_delivery_acknowledged',$1,'{"displayName":"First coordinator administrator","preferredUsername":null}','product',$2,$3,$4::jsonb) RETURNING id`,
+          [actor,String(item.id),randomUUID(),JSON.stringify({planHash:'a'.repeat(64),entryHash:'b'.repeat(64),resolutionKey:'legacy-external-'+item.id,
+            internalSku:sku,publicSku:sku,fullRevision:'1',confirmedRevision:'0',deliveryVersionBefore:'1',routeBefore:'replacement',
+            remote:{originHash:binding.originHash,productId:1000+item.id,sku,observedAt:'2026-10-09T00:00:00Z'},
+            externalDeliverySemantic:true,snapshotConfirmationClaimed:false,payloadEqualityClaimed:false,
+            automaticSyncSuccessClaimed:false,snapshotEvidenceUsed:false,futureDeliveryWaived:false})])).rows[0];
+          await client.query(`INSERT INTO product_full_export_state(product_id,route,evidence,business_exclusion_state)
+            VALUES($1,$2,'{"origin":"migration_039","fixture":true}','unknown')`,[old.id,predecessorRoute]);
+          await client.query(`INSERT INTO product_full_export_state(product_id,route,evidence,business_exclusion_state,
+            externally_delivered_revision,externally_delivered_event_id)
+            VALUES($1,'normal','{"origin":"reconciliation","action":"replacement","fixture":true}','none',1,$2)`,[item.id,event.id]);
+          return item;
+        });
+      }
+      const history=require('../src/services/magento/recovery-history');
+      const item=await legacyChain(), lineage=await history.read(db,item.id);
+      assert.equal(lineage.identityChanged,true);
+      assert.deepEqual(lineage.issues.map(issue=>issue.code),['SOURCE_CORRECTION_NOT_RECORDED']);
+      let before=await snapshot(), result=await service.inspect(config,await observation(item),options);
+      assert.equal(result.mode,'ordinary',JSON.stringify(result.blockers));
+      assert.equal(await snapshot(),before); assert.equal(await session(item),undefined);
+      const unretired=await legacyChain({ predecessorRoute: 'normal' });
+      before=await snapshot(); result=await service.inspect(config,await observation(unretired),options);
+      assert.equal(result.mode,'review');
+      assert.deepEqual(result.blockers.map(blocker=>blocker.code),['FIRST_SYNC_HISTORY_REVIEW_REQUIRED']);
+      assert.equal(await snapshot(),before);
+    });
+
     await t.test('an allocated native identity cannot adopt names or values from an unacknowledged same-SKU remote product', async () => {
       const audit = async eventKey => (await db.query(`INSERT INTO audit_events(event_key,actor_user_id,actor_snapshot,subject_type,subject_id,request_id)
         VALUES($1,$2,'{"displayName":"First coordinator administrator","preferredUsername":null}','public_sku_activation','singleton',$3) RETURNING id`,

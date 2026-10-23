@@ -136,3 +136,54 @@ test('audited recount admission permits first field review only and never delive
   assert.equal(classify({...reviewed,externalDeliveryIssue:'FIRST_SYNC_IDENTITY_CHANGED'}).mode,'review');
   assert.equal(classify({...reviewed,remote:null}).mode,'review');
 });
+
+const {externalLegacyLineage}=require('../src/services/magento/first-sync-eligibility');
+const legacyHistory=()=>({productId:72,complete:true,hasRecount:true,identityChanged:true,
+  products:[
+    {productId:72,article:'KL2/2',status:'active',previousProductId:71,nextProductId:null,route:'normal',holdReason:null,
+      businessExclusion:'none',compatibilityExcluded:false,independentExclusion:false,legacyExportExcluded:false,sourceCorrectionId:null},
+    {productId:71,article:'KL2/1-001',status:'corrected',previousProductId:70,nextProductId:72,route:'retired',holdReason:null,
+      businessExclusion:'unknown',compatibilityExcluded:false,independentExclusion:false,legacyExportExcluded:false,sourceCorrectionId:null},
+    {productId:70,article:'KL2/1',status:'corrected',previousProductId:null,nextProductId:71,route:'retired',holdReason:null,
+      businessExclusion:'unknown',compatibilityExcluded:false,independentExclusion:false,legacyExportExcluded:false,sourceCorrectionId:null}],
+  corrections:[{correctionId:11,sourceProductId:70,successorProductId:71},{correctionId:12,sourceProductId:71,successorProductId:72}],
+  issues:[{code:'SOURCE_CORRECTION_NOT_RECORDED',productId:72,correctionId:12,recordedCorrectionId:null},
+    {code:'SOURCE_CORRECTION_NOT_RECORDED',productId:71,correctionId:11,recordedCorrectionId:null}]});
+const delivered={externalDelivery:true,issue:null}, currentReceipt=[{productId:72}];
+test('externally delivered recount successor with only unrecorded legacy correction pointers is ordinary',()=>{
+  const history=legacyHistory();
+  assert.equal(externalLegacyLineage(history,72,currentReceipt,delivered),true);
+  const evidence={...base,remote:{id:801,sku:'KL2/2'},sku:'KL2/2',history,historicalEvidence:true,
+    externalDelivery:true,previousDelivery:true,externalLegacyLineage:true};
+  assert.equal(classify(evidence).mode,'ordinary');
+  assert.equal(classify({...evidence,externalLegacyLineage:false}).blockers[0].code,'FIRST_SYNC_HISTORY_REVIEW_REQUIRED');
+  assert.equal(classify({...evidence,history:{...history,complete:false}}).mode,'review');
+  assert.equal(classify({...evidence,otherOrigin:true}).blockers[0].code,'FIRST_SYNC_ORIGIN_REVIEW_REQUIRED');
+  assert.equal(classify({...evidence,protectedWork:true}).mode,'ordinary');
+  assert.equal(classify({...evidence,externalDelivery:false,previousDelivery:false}).blockers[0].code,'FIRST_SYNC_HISTORY_REVIEW_REQUIRED');
+  // An incomplete field session keeps its own history gate.
+  assert.equal(classify({...evidence,session:{...session,public_sku:'KL2/2'}}).mode,'review');
+});
+for(const [label,change,receipts=currentReceipt,external=delivered] of [
+  ['no external delivery',()=>{},currentReceipt,{externalDelivery:false,issue:null}],
+  ['receipt only on a predecessor',()=>{},[{productId:71}]],
+  ['incomplete history',h=>{h.complete=false;}],
+  ['other current product',h=>{h.productId=71;}],
+  ['single product',h=>{h.products=[h.products[0]];}],
+  ['current on hold',h=>{h.products[0].route='hold';h.products[0].holdReason='prior_exposure';}],
+  ['current excluded',h=>{h.products[0].businessExclusion='excluded';}],
+  ['current legacy excluded',h=>{h.products[0].legacyExportExcluded=true;}],
+  ['current has successor',h=>{h.products[0].nextProductId=73;}],
+  ['predecessor still active',h=>{h.products[1].status='active';}],
+  ['predecessor not retired',h=>{h.products[1].route='normal';}],
+  ['predecessor outside chain',h=>{h.products[2].nextProductId=99;}],
+  ['missing correction edge',h=>{h.corrections=h.corrections.slice(1);}],
+  ['correction edge from other source',h=>{h.corrections[1].sourceProductId=70;}],
+  ['duplicate correction edge',h=>{h.corrections.push({correctionId:13,sourceProductId:71,successorProductId:72});}],
+  ['mismatched recorded pointer',h=>{h.products[0].sourceCorrectionId=99;h.issues=h.issues.slice(1);}],
+  ['other lineage issue',h=>{h.issues.push({code:'DISCONNECTED_IDENTITY_HISTORY',productId:72});}],
+  ['issue for another correction',h=>{h.issues[0].correctionId=11;}],
+]) test('legacy external lineage stays history review: '+label,()=>{
+  const history=legacyHistory();change(history);
+  assert.equal(externalLegacyLineage(history,72,receipts,external),false);
+});
