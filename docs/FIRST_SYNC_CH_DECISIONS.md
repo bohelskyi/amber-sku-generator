@@ -35,6 +35,13 @@ the policy was approved), so it no longer raises `FIRST_SYNC_UNSETTLED_PRIOR_FIE
 No operator choice is offered or accepted for these fields. Products that stopped on
 that blocker need only a reviewed `broader_resync` handoff. NM SEO snapshots are unchanged.
 
+The approved `initialize_create_only` policy ("Amber sets it only on create") is
+retained the same way for any category: an existing product's ordinary UPDATE never
+writes it, so first sync records the same `remote_retained` receipt with the extra
+source key `policy: initialize_create_only`. New products created from Amber receive
+the template value; existing ones keep their Magento SEO until the policy is changed
+to `authoritative_create_update`. `magento_managed` receipts keep their exact shape.
+
 ## Batch keep_local
 
 `server/scripts/first-sync-keep-local.js` records the approved "Amber wins" choices

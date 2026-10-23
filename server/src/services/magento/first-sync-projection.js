@@ -514,9 +514,12 @@ function projectFirstSyncFields(input) {
     // this derived SEO output: Magento keeps its value. The progress plan records
     // that as a terminal remote_retained receipt (no Amber or Magento write), which
     // also settles any earlier non-terminal record of the field.
+    // initialize_create_only behaves the same for an existing product: ordinary
+    // UPDATE preserves the field and only a create sends Amber's value.
     const magentoManagedSeo = kind === 'derived' && !direct && MAGENTO_MANAGED_SEO.has(target) && !reason
-      && policy?.reviewState === 'approved' && policy.policy === 'magento_managed';
+      && policy?.reviewState === 'approved' && ['magento_managed', 'initialize_create_only'].includes(policy.policy);
     if (magentoManagedSeo) remoteRetention = MAGENTO_MANAGED_SEO_RETENTION;
+    const retentionPolicy = magentoManagedSeo && policy.policy === 'initialize_create_only' ? policy.policy : null;
     if (unit && remote.known) remote.unit = unit;
     const receipt = receipts.get(scope + '/' + target);
     if (!receipt && importBlocker && local.known && !local.present && remote.known && remote.present) reason ||= importBlocker;
@@ -558,7 +561,7 @@ function projectFirstSyncFields(input) {
       requiresRuntimeValidation: ['information', 'weight', 'price', 'characteristic', 'name'].includes(persistence),
       ...(persistence === 'weight' ? { mirrorAnswerKey: 'weight', setterContract: 'canonical-g-scale3-and-answer-coherence' } : {}),
       ...(persistence === 'price' ? { setterContract: 'manual-UAH-scale2-preserve-server-pricing-baseline' } : {}),
-      ...(importBlocker ? { importBlocker } : {}), ...(remoteRetention ? { remoteRetention } : {}),
+      ...(importBlocker ? { importBlocker } : {}), ...(remoteRetention ? { remoteRetention } : {}), ...(retentionPolicy ? { retentionPolicy } : {}),
       ...(localAuthority && !reason ? { localAuthority } : {}), ...(enReason && scope === 'en' ? { readReason: enReason } : {}),
       ...(reason ? { reason } : {}) });
     coverage.push({ target, scope, state: 'projected', persistence });
