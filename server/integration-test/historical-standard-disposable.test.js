@@ -34,9 +34,17 @@ test('reviewed historical standard REST intents reuse normal outbox and preserve
     await db.query("INSERT INTO user_role_assignments(application_user_id,role_id) SELECT $1,id FROM roles WHERE role_key='administrator'",[actor]);
     await db.query("INSERT INTO categories(code,name,requires_weight) VALUES('BR','Historical fixture',0)");
     for(const category of ['NM','KL','CH','AR','SV'])await db.query('INSERT INTO categories(code,name,requires_weight) VALUES($1,$1,0)',[category]);
-    const products = [];
-    for (let i=0;i<70;i++) products.push((await insertProductFixture(db, `INSERT INTO products(full_sku,category,total_price_uah,weight,status,exclude_from_export,details)
-      VALUES($1,'BR',240,12.7,'archived',1,'{"answers":{"weight":12.7},"logMessage":"unknown prior archive"}') RETURNING *`, [`BR3/HISTORY-${i}-${randomUUID()}`])).rows[0]);
+    const productSkus = Array.from({ length: 70 }, (_, i) => `BR3/HISTORY-${i}-${randomUUID()}`.toUpperCase());
+    const insertedProducts = (await insertProductFixture(db, `INSERT INTO products(full_sku,category,total_price_uah,weight,status,exclude_from_export,details)
+      SELECT sku,'BR',240,12.7,'archived',1,'{"answers":{"weight":12.7},"logMessage":"unknown prior archive"}'
+      FROM unnest($1::text[]) WITH ORDINALITY AS source(sku, ordinal) ORDER BY ordinal RETURNING *`, [productSkus])).rows;
+    const productsBySku = new Map(insertedProducts.map(product => [product.full_sku, product]));
+    assert.equal(insertedProducts.length, 70);
+    assert.equal(productsBySku.size, 70);
+    // RETURNING has no ordering contract; retain the original scenario-to-product mapping.
+    const products = productSkus.map(sku => {
+      const product = productsBySku.get(sku); assert.ok(product); return product;
+    });
     await t.test('066 on existing historical archives and repeated migration startup never enroll or alter prior facts',async()=>{
       const snapshot=async()=>(await db.query(`SELECT (SELECT jsonb_agg(p ORDER BY id) FROM products p) products,
         (SELECT jsonb_agg(f ORDER BY product_id) FROM product_full_export_state f) lifecycle,

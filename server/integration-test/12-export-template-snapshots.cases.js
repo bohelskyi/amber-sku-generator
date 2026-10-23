@@ -20,18 +20,18 @@ const opts = (databasePool = pool, actor = admin) => ({ databasePool,
 const explicit = (v = version) => ({ mode: 'explicit', templateId: v.templateId, versionId: v.id });
 const command = (p, selection = explicit()) => ({ requestContract: 'template-v1', selection,
   fromSku: p.full_sku, toSku: p.full_sku });
-async function publish(d = definition('PR3 persisted')) {
-  const family = await templates.createTemplate({ key: `pr3-${crypto.randomUUID()}`, displayName: 'PR3 fixture', definition: d }, opts());
+async function publish(d = definition('PR3 persisted'), options = opts()) {
+  const family = await templates.createTemplate({ key: `pr3-${crypto.randomUUID()}`, displayName: 'PR3 fixture', definition: d }, options);
   return templates.publishTemplate(family.id, { expectedRevision: family.draft.revision,
-    expectedDefinitionHash: family.draft.definitionHash }, opts());
+    expectedDefinitionHash: family.draft.definitionHash }, options);
 }
 async function select(v) {
   const previous = await templates.getActivation();
   return templates.updateActivation({ expectedGeneration: previous.generation,
     implementation: v ? 'template' : 'legacy', templateVersionId: v?.id || null }, opts());
 }
-async function insert(p = product('BR'), sku = `BR-PR3-${crypto.randomUUID()}`.toUpperCase()) {
-  return (await insertProductFixture(pool,`INSERT INTO products
+async function insert(p = product('BR'), sku = `BR-PR3-${crypto.randomUUID()}`.toUpperCase(), databasePool = pool) {
+  return (await insertProductFixture(databasePool,`INSERT INTO products
     (full_sku, base_sku, category, weight, total_price_uah, details, magento_name_subject_ua, magento_name_subject_en)
     VALUES ($1,$1,$2,$3,$4,$5::jsonb,$6,$7) RETURNING *`, [sku, p.category, p.weight, p.total_price_uah,
     JSON.stringify(p.details), p.magento_name_subject_ua || null, p.magento_name_subject_en || null])).rows[0];
@@ -43,12 +43,12 @@ async function create(input, p, key = crypto.randomUUID(), options = opts()) {
 async function countEvents(id, key = 'export_snapshot.created') {
   return (await pool.query('SELECT count(*)::int AS n FROM audit_events WHERE subject_id=$1 AND event_key=$2', [id, key])).rows[0].n;
 }
-async function exportState() {
+async function exportState(databasePool = pool) {
   const result = {};
   for (const table of ['export_snapshots', 'magento_export_artifacts', 'product_export_revisions', 'export_state']) {
-    result[table] = (await pool.query(`SELECT COALESCE(jsonb_agg(t ORDER BY to_jsonb(t)::text),'[]') AS data FROM ${table} t`)).rows[0].data;
+    result[table] = (await databasePool.query(`SELECT COALESCE(jsonb_agg(t ORDER BY to_jsonb(t)::text),'[]') AS data FROM ${table} t`)).rows[0].data;
   }
-  result.events = (await pool.query("SELECT count(*) FROM audit_events WHERE event_key LIKE 'export_snapshot.%'")).rows[0].count;
+  result.events = (await databasePool.query("SELECT count(*) FROM audit_events WHERE event_key LIKE 'export_snapshot.%'")).rows[0].count;
   return result;
 }
 async function worker() {
@@ -709,14 +709,49 @@ test('PR3 actual 035 checkpoint upgrade, failed migration rollback, repeat start
   }
 });
 
-test('PR3 output-limit failure during transactional capture leaves no parent, artifacts, audit or exposure', async () => {
-  const v = await publish(definition('x'.repeat(4096)));
-  const row = await insert(); const input = { ...command(row, explicit(v)), toSku: null };
-  const p = await preview(input);
-  await insertProductFixture(pool,`INSERT INTO products (full_sku,base_sku,category,weight,total_price_uah,details)
-    SELECT 'BR-PR3-LIMIT-' || n,'BR-PR3-LIMIT','BR',10,100,'{"answers":{}}'::jsonb FROM generate_series(1,8200) n`);
-  const before = await exportState();
-  await assert.rejects(create(input, p), { code: 'EVALUATION_LIMIT' });
-  assert.deepEqual(await exportState(), before);
-  assert.equal((await pool.query("SELECT count(*)::int AS n FROM product_export_revisions r JOIN products p ON p.id=r.product_id WHERE p.full_sku LIKE 'BR-PR3-LIMIT-%'")).rows[0].n, 0);
+test('PR3 output-limit failure during transactional capture leaves no parent, artifacts, audit or exposure', async t => {
+  // Keep the full output-limit fixture out of later shared-suite snapshots and recounts.
+  const name = 'amber_pr3_output_limit_test', url = await recreateTestDatabase(name);
+  const db = new Pool({ connectionString: url });
+  let sharedQuery, sharedConnect;
+  try {
+    await runNodeInDatabase(url, "require('./src/db/run-migrations').runMigrations().catch(e=>{console.error(e);process.exitCode=1;});");
+    assert.deepEqual((await db.query(`SELECT current_database() AS name,
+      (SELECT phase FROM full_product_export_activation WHERE singleton) AS phase,
+      (SELECT enabled FROM public_sku_activation WHERE singleton) AS public_sku_enabled,
+      (SELECT legacy_product_csv_enabled FROM magento_auto_sync_activation WHERE singleton) AS csv_enabled`)).rows,
+    [{ name, phase: 'legacy', public_sku_enabled: false, csv_enabled: true }]);
+    // Real service calls must stay on the explicit database, including permission/audit reads.
+    sharedQuery = t.mock.method(pool, 'query', () => assert.fail('Output-limit fixture used the shared pool'));
+    sharedConnect = t.mock.method(pool, 'connect', () => assert.fail('Output-limit fixture connected to the shared pool'));
+    const actorId = Number((await db.query("INSERT INTO application_users(status,display_name) VALUES('active','Output limit actor') RETURNING id")).rows[0].id);
+    assert.ok(Number.isSafeInteger(actorId) && actorId > 0);
+    assert.equal((await db.query(`INSERT INTO user_role_assignments(application_user_id,role_id)
+      SELECT $1,id FROM roles WHERE role_key='administrator' AND status='active'`, [actorId])).rowCount, 1);
+    const options = opts(db, { applicationUser: { id: actorId } }), d = definition('x'.repeat(4096));
+    assert.equal((await db.query('INSERT INTO categories(code,name) SELECT code,code FROM unnest($1::text[]) AS routes(code)',
+      [d.groups.map(group => group.route)])).rowCount, d.groups.length);
+    const v = await publish(d, options);
+    const row = await insert(undefined, undefined, db), bounded = command(row, explicit(v));
+    // Preserve nonempty historical evidence as well as proving no new partial capture.
+    const retained = await create(bounded, await preview(bounded, options), crypto.randomUUID(), options);
+    assert.equal(retained.row_count, 1);
+    const input = { ...bounded, toSku: null };
+    const p = await preview(input, options);
+    await insertProductFixture(db,`INSERT INTO products (full_sku,base_sku,category,weight,total_price_uah,details)
+      SELECT 'BR-PR3-LIMIT-' || n,'BR-PR3-LIMIT','BR',10,100,'{"answers":{}}'::jsonb FROM generate_series(1,8200) n`);
+    assert.equal((await db.query("SELECT count(*)::int AS n FROM products WHERE full_sku LIKE 'BR-PR3-LIMIT-%'")).rows[0].n, 8200);
+    const before = await exportState(db);
+    assert.ok(before.export_snapshots.length > 0);
+    assert.ok(before.magento_export_artifacts.length > 0);
+    assert.ok(before.product_export_revisions.length > 0);
+    assert.ok(Number(before.events) > 0);
+    await assert.rejects(create(input, p, crypto.randomUUID(), options), { code: 'EVALUATION_LIMIT' });
+    assert.deepEqual(await exportState(db), before);
+    assert.equal((await db.query("SELECT count(*)::int AS n FROM product_export_revisions r JOIN products p ON p.id=r.product_id WHERE p.full_sku LIKE 'BR-PR3-LIMIT-%'")).rows[0].n, 0);
+  } finally {
+    sharedConnect?.mock.restore(); sharedQuery?.mock.restore();
+    try { await db.end(); } finally { await dropTestDatabase(name); }
+  }
+  assert.equal((await pool.query("SELECT count(*)::int AS n FROM products WHERE full_sku LIKE 'BR-PR3-LIMIT-%'")).rows[0].n, 0);
 });
