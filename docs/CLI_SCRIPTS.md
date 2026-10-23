@@ -1,7 +1,7 @@
 # Server CLI index
 
-Inventory of all **54 JavaScript files in `server/scripts/`: 46 executable entry
-points and 8 support modules**. The linked parsers and services define the exact
+Inventory of all **61 JavaScript files in `server/scripts/`: 50 executable entry
+points and 11 support modules**. The linked parsers and services define the exact
 arguments and checks. This index describes this checkout, not which commit is
 installed in an operator's container. Read the linked domain procedure before a
 mutation; the presence of a command is not approval to run it.
@@ -37,6 +37,30 @@ Keep inputs, reviewed plans and journals outside the repository and on persisten
 storage. New-output and resume rules are command-specific; stdout output is not
 automatically a durable journal. Container `/tmp` is not retained across container
 replacement. An uncertain write needs receipt reconciliation, not blind replay.
+
+## Reviewed recovery, names, scope and resync
+
+These four wrappers share `--mode preview|apply --input FILE --output NEWFILE
+--expected-database NAME --actor-id ID`. Apply additionally requires `--plan-hash
+SHA256` and the saved preview as input; preview rejects that flag. Every wrapper
+requires an active Administrator plus the permissions below. Preview uses a
+read-only PostgreSQL pool; any Magento access is GET-only in both modes. Scope
+never accesses Magento. Outputs are new files, not overwritten or resumed.
+
+| Entry point | Preview input / permission | Scope and apply effect |
+| --- | --- | --- |
+| [recover-skus.js](../server/scripts/recover-skus.js) | `{"skus":["EXACT_PUBLIC_SKU"],"reason":"Reviewed recovery"}`; `exports.reconcile` | 1–50 exact current public SKUs; original UI `stable_recount_exposure` reviews/hashes. Apply processes eligible rows, preserves blocked/unavailable/error rows, and can record a local handoff; no direct Magento write. |
+| [names-batch.js](../server/scripts/names-batch.js) | `{"items":[{"sku":"EXACT_PUBLIC_SKU","productId":123}]}` or recovery preview / legacy `.jsonl`; `exports.create` | 1–50 exact pairs. Recovery inputs select only blocked `DURABLE_REMOTE_ID_REQUIRED` rows. Equal name pairs retain Amber; otherwise the reviewed choice is Magento. Apply reuses each original token and can stage ordinary sync requests; this is not missing-name completion. |
+| [scope-from-skus.js](../server/scripts/scope-from-skus.js) | `{"skus":["EXACT_PUBLIC_SKU"]}`; `export_templates.view` | 1–100 exact current public SKUs. Both modes use a read-only pool; apply rechecks identities and creates a JSON scope with `items` and an embedded completion `journal`. No Magento configuration or access. |
+| [controlled-resync.js](../server/scripts/controlled-resync.js) | `{"reason":"Reviewed handoff","items":[{"sku":"EXACT_PUBLIC_SKU","productId":123}]}` or `reason` plus `scopeFiles`; `export_templates.manage`, `export_templates.publish`, `exports.view` | At most 100 distinct current products, from at most 100 scope files of 1 MiB each. Relative files resolve beside the input JSON. Apply uses the saved current-publication revision, exact scope, reason and token; blockers reject the whole action. Records local `broader_resync` handoff; the ordinary worker delivers separately. |
+
+Treat any deployment between preview and apply as invalidating the plan: create
+and review a new preview. Changed implementation bytes, database target or Magento
+origin are rejected automatically with `OPERATOR_CONTEXT_CHANGED`; an identical
+redeploy is not a separately tracked event. Do not run apply while another mass
+operation is in progress. This is an operator coordination rule, not a global
+concurrency gate in the wrappers. See the [reviewed-wrapper procedure](FIRST_SYNC_RUNBOOK.md#reviewed-operator-wrappers)
+for authority, review, journals, drift and uncertain outcomes.
 
 ## Diagnosis and read-only inventory
 
@@ -143,6 +167,9 @@ must not be generalized to a live installation.
 
 | Module | Used for |
 | --- | --- |
+| [operator-cli.js](../server/scripts/operator-cli.js) | Shared strict argument parsing, bounded input, read-only/GET-only runtime, actor/target/implementation-bound review hashes, exclusive output and flushed journals; no standalone CLI. |
+| [operator-authority.js](../server/scripts/operator-authority.js) | Active-Administrator and permission checks through the UI services, rechecked at their existing authority-lock boundary; no global mass-operation lock. |
+| [operator-scope.js](../server/scripts/operator-scope.js) | Exact public-SKU/current-product resolution and identity revalidation with strict scope bounds; rejects missing, duplicate, ambiguous and changed identities. |
 | [exposure-bulk-receipt.js](../server/scripts/exposure-bulk-receipt.js) | Fresh-directory, fsynced receipt summaries for reviewed bulk operations. |
 | [first-sync-initial-name-plan.js](../server/scripts/first-sync-initial-name-plan.js) | Exact initial-name scope and selection validation. |
 | [first-sync-name-commit.js](../server/scripts/first-sync-name-commit.js) | Shared guarded canonical name-commit execution. |

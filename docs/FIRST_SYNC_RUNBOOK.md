@@ -162,12 +162,27 @@ requires `export_templates.manage`, `export_templates.publish` and `exports.view
 The same server authorization services used by the UI enforce these permissions.
 
 Every command requires `--mode preview|apply --input FILE --output NEWFILE`.
+Only apply accepts and requires `--plan-hash`; preview rejects that flag. Raw
+input and saved review files are bounded at 4 MiB.
 Preview uses a dedicated read-only PostgreSQL pool and allows only Magento GETs.
 It creates a new JSON review and prints its `planHash`. Review its products, actions
 and blockers before apply. Apply takes that exact review as `--input` and the printed
 hash as `--plan-hash`; it binds the actor, database target, Magento origin and deployed
 code, then lets the existing service revalidate its original review/token. A changed
 context or stale service review requires a new preview and operator review.
+
+Treat **any deployment between preview and apply as invalidating the plan**:
+generate and review a new preview after the deployment. The automatic
+`OPERATOR_CONTEXT_CHANGED` guard compares the actual server `src/` and `scripts/`
+JavaScript files plus dependency manifests, database target and Magento origin.
+It does not record deployment events, so an identical-byte redeploy alone need
+not produce that error; the fresh-preview rule still applies.
+
+**Do not run apply while another mass operation is in progress.** Coordinate an
+exclusive operator window before review/apply. This is an operational rule, not
+an automated global mass-operation gate; the existing per-action locks and final
+service revalidation remain in force. Do not infer permission to overlap runs
+from the absence of a lock error.
 
 Input JSON shapes (replace the example SKU, IDs and reason with the intended scope):
 
@@ -177,11 +192,13 @@ Input JSON shapes (replace the example SKU, IDs and reason with the intended sco
 
 Use this shape for recovery; scope takes only `{"skus":["EXACT_PUBLIC_SKU"]}`.
 Names takes `{"items":[{"sku":"EXACT_PUBLIC_SKU","productId":123}]}`; it also
-accepts a recovery preview or the old recovery JSONL, selecting only products blocked
-by `DURABLE_REMOTE_ID_REQUIRED`. Controlled resync takes
+accepts a recovery preview or old recovery `.jsonl`, selecting only products blocked
+by `DURABLE_REMOTE_ID_REQUIRED`; the whole supplied recovery scope must fit the
+50-product bound before filtering. Controlled resync takes
 `{"reason":"Reviewed handoff","items":[{"sku":"EXACT_PUBLIC_SKU","productId":123}]}`
 or `{"reason":"Reviewed handoff","scopeFiles":["scope.json"]}`. Relative scope
-paths resolve beside the input JSON. Missing, ambiguous, retired or duplicate SKUs
+paths resolve beside the input JSON; at most 100 files of 1 MiB each and 100
+distinct current products total are accepted. Missing, ambiguous, retired or duplicate SKUs
 fail closed; no partial or silently deduplicated scope is accepted.
 
 For example, inside the container:
