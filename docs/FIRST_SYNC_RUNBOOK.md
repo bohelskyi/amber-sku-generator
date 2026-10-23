@@ -4,10 +4,13 @@ The working order for bringing existing catalog products under automatic Magento
 sync. Contracts live in [first-sync fields](MAGENTO_FIRST_SYNC_FIELDS.md),
 [automatic sync](MAGENTO_AUTOMATIC_SYNC.md) and [Magento integration](MAGENTO_INTEGRATION.md);
 this page is the practical sequence, the CLIs and the traps already hit in production.
-The operator CLIs run inside the server container (`docker compose exec -T server node
-/app/scripts/<name>.js …`). The four reviewed wrappers below read Magento with GET
-only; apply can record local changes and synchronization requests through the same
-services as the UI. The ordinary worker performs any later Magento writes.
+The scripts below run from `server/` or a matching server container
+(`docker compose exec -T server node /app/scripts/<name>.js …`). Their Magento
+transport is GET-only, but apply modes can change local data, stage ordinary
+automatic requests or record controlled handoff. An enabled worker can then
+deliver those products. In particular, publication and the SV campaign include
+handoff; they are not read-only operations. Use the [complete CLI index](CLI_SCRIPTS.md)
+for modes, side effects and the distinction between commands and support modules.
 
 ## Where a product stands
 
@@ -24,7 +27,8 @@ services as the UI. The ordinary worker performs any later Magento writes.
 1. **History admission** (`mode: review`, `FIRST_SYNC_HISTORY_REVIEW_REQUIRED`).
    - Ordinary legacy products: [`first-sync-history-batch.js`](FIRST_SYNC_HISTORY_BATCH.md),
      scope files of ≤50 `{sku, productId, remoteProductId}`.
-     Run `--mode preview --preview-all` to see every blocker in one run, then
+     Run `--mode preview --preview-all` with the required input SHA-256, database,
+     actor and new output path to collect per-item blockers, then
      `--mode apply` per scope file. Apply stops at the first non-admitted item; rerun it
      after transient `MAGENTO_TIMEOUT` (already admitted rows report `already_admitted`).
    - Ordinary legacy products listed in a retained legacy export file report
@@ -63,8 +67,11 @@ services as the UI. The ordinary worker performs any later Magento writes.
      [recount batch](RECOUNT_CORRECTIONS.md#reviewed-legacy-answer-recount-batch).
 4. **Handoff.** Field decisions do not wake `needs_attention` requests. Record a
    reviewed `broader_resync` through `binding-controlled-actions` (`preview` → token →
-   `apply`, ≤100 products, the reason text is part of the token). History admission
-   and the recount action record their own handoff.
+   `apply`, ≤100 products, the reason text is part of the token). The history batch
+   records admission evidence only; it does not wake a request or record handoff.
+   The stable-recount action records its own handoff. Name/source updates can also
+   stage ordinary automatic requests; inspect the resulting request state before
+   planning a separate handoff.
 5. **Verify.** Re-run the per-SKU review: synced products report `mode: ordinary`.
 
 Useful flags: `--schema-cache-seconds 120` on history batch, keep-local and
@@ -106,9 +113,12 @@ Every publication has side effects on products that are **not yet synced**:
   SKU. Retired archived copies are accepted when the SKU reservation belongs to the
   selected current product and no copy is current, in correction lineage or carrying
   unfinished sync work; anything else remains a real conflict.
-- Container replacement loses files in `/tmp`. The repository's `server/scripts`
-  ship in the server image; keep input files, reviewed plans and result journals
-  outside the container, and copy inputs in and outputs out as needed.
+- Container replacement does not retain `/tmp`. The checked-in server Dockerfile
+  includes repository `server/scripts/` in the image; verify the deployed image's
+  commit before use. Keep input files, reviewed plans and journals on persistent
+  host storage, copy inputs into the container when needed, and copy results back
+  before replacement. Host-only helpers and scripts from an unmerged branch are
+  not provided by that image.
 - In an interactive shell use `set +H` before node one-liners containing `!`.
 - Placeholders like `<installationKey>` must be replaced; the shell treats `<…>` as
   redirection.
@@ -116,6 +126,10 @@ Every publication has side effects on products that are **not yet synced**:
   must be copied back before the next deploy.
 
 ## CLI index
+
+This is the first-sync subset. [All server scripts](CLI_SCRIPTS.md) also covers
+diagnosis, bindings, cutover, repair and helper-only files; its mode column matters
+because not every command accepts `--mode preview|apply`.
 
 | Script | Purpose | Doc |
 | --- | --- | --- |
@@ -148,12 +162,27 @@ requires `export_templates.manage`, `export_templates.publish` and `exports.view
 The same server authorization services used by the UI enforce these permissions.
 
 Every command requires `--mode preview|apply --input FILE --output NEWFILE`.
+Only apply accepts and requires `--plan-hash`; preview rejects that flag. Raw
+input and saved review files are bounded at 4 MiB.
 Preview uses a dedicated read-only PostgreSQL pool and allows only Magento GETs.
 It creates a new JSON review and prints its `planHash`. Review its products, actions
 and blockers before apply. Apply takes that exact review as `--input` and the printed
 hash as `--plan-hash`; it binds the actor, database target, Magento origin and deployed
 code, then lets the existing service revalidate its original review/token. A changed
 context or stale service review requires a new preview and operator review.
+
+Treat **any deployment between preview and apply as invalidating the plan**:
+generate and review a new preview after the deployment. The automatic
+`OPERATOR_CONTEXT_CHANGED` guard compares the actual server `src/` and `scripts/`
+JavaScript files plus dependency manifests, database target and Magento origin.
+It does not record deployment events, so an identical-byte redeploy alone need
+not produce that error; the fresh-preview rule still applies.
+
+**Do not run apply while another mass operation is in progress.** Coordinate an
+exclusive operator window before review/apply. This is an operational rule, not
+an automated global mass-operation gate; the existing per-action locks and final
+service revalidation remain in force. Do not infer permission to overlap runs
+from the absence of a lock error.
 
 Input JSON shapes (replace the example SKU, IDs and reason with the intended scope):
 
@@ -163,11 +192,13 @@ Input JSON shapes (replace the example SKU, IDs and reason with the intended sco
 
 Use this shape for recovery; scope takes only `{"skus":["EXACT_PUBLIC_SKU"]}`.
 Names takes `{"items":[{"sku":"EXACT_PUBLIC_SKU","productId":123}]}`; it also
-accepts a recovery preview or the old recovery JSONL, selecting only products blocked
-by `DURABLE_REMOTE_ID_REQUIRED`. Controlled resync takes
+accepts a recovery preview or old recovery `.jsonl`, selecting only products blocked
+by `DURABLE_REMOTE_ID_REQUIRED`; the whole supplied recovery scope must fit the
+50-product bound before filtering. Controlled resync takes
 `{"reason":"Reviewed handoff","items":[{"sku":"EXACT_PUBLIC_SKU","productId":123}]}`
 or `{"reason":"Reviewed handoff","scopeFiles":["scope.json"]}`. Relative scope
-paths resolve beside the input JSON. Missing, ambiguous, retired or duplicate SKUs
+paths resolve beside the input JSON; at most 100 files of 1 MiB each and 100
+distinct current products total are accepted. Missing, ambiguous, retired or duplicate SKUs
 fail closed; no partial or silently deduplicated scope is accepted.
 
 For example, inside the container:

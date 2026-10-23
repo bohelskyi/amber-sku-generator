@@ -91,4 +91,4 @@ acceptance.
 
 Use the [root quickstart](README.md), [engineering requirements](AGENTS.md), [migration guide](docs/DATABASE_MIGRATIONS.md) and [operations](docs/OPERATIONS.md). CI uses Node 20/PostgreSQL 16 and checks Compose, server lint/unit/integration, and client tests/lint/build. Windows integration tests use only the canonical disposable `postgres-test`; failure is not permission to try another database.
 
-Current deferrals and pending acceptance are listed in the [index](docs/README.md#deferred-work-and-operationally-pending-items). Completed plans, investigations and audits live in the [archive](docs/archive/README.md).
+Current deferrals and pending acceptance are listed in the [index](docs/README.md#open-work). Completed plans, investigations and audits live in the [archive](docs/archive/README.md).
