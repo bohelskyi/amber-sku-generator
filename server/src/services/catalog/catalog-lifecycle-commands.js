@@ -78,6 +78,11 @@ async function updateQuestionsOrder({ category_code, questions }, options = {}) 
 
   const normalizedQuestions = new Map();
   for (const question of questions) {
+    if (question === null || typeof question !== 'object' || Array.isArray(question)) {
+      const err = new Error('Некоректні дані порядку питань');
+      err.statusCode = 400;
+      throw err;
+    }
     const questionId = Number(question.id);
     const displayOrder = Number(question.display_order);
     if (!Number.isFinite(questionId) || !Number.isFinite(displayOrder)) {
