@@ -75,6 +75,30 @@ test('question reorder refuses missing scope and non-finite coordinates before c
   assert.equal(db.connections, 0);
 });
 
+for (const [label, questions] of [
+  ['null', [null]],
+  ['undefined', [undefined]],
+  ['a sparse entry', new Array(1)],
+  ['a string', ['question']],
+  ['a number', [7]],
+  ['a boolean', [false]],
+  ['an array', [[]]],
+  ['a nested array of questions', [[{ id: 7, display_order: 1 }]]],
+  ['a valid question followed by null', [{ id: 7, display_order: 1 }, null]],
+  ['null followed by a valid question', [null, { id: 7, display_order: 1 }]],
+]) {
+  test(`question reorder rejects ${label} before any database access`, async t => {
+    const db = catalogDb(t);
+    await assert.rejects(commands.updateQuestionsOrder({ category_code: 'SV', questions }, mutationOptions), {
+      statusCode: 400,
+      message: 'Некоректні дані порядку питань',
+    });
+    assert.equal(db.connections, 0);
+    assert.deepEqual(db.queries, []);
+    assert.deepEqual(db.events, []);
+  });
+}
+
 test('question reorder preserves omitted SKU positions and audits only actual changes', async t => {
   const db = catalogDb(t, { respond(sql, values) {
     if (sql.startsWith('SELECT id, display_order, sku_index ')) {
