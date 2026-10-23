@@ -62,6 +62,209 @@ async function openConfirmation(props = {}) {
   return { ...view, confirmation };
 }
 
+const informationConfig = {
+  categories: { BR: { code: 'BR', name: 'Браслети', requires_weight: 1 } },
+  questions: { BR: [{
+    id: 'braclet_size', key: 'braclet_size', label: 'Розмір', required: 1, include_in_sku: 0,
+    options: [{ id: 1, label: 'Малий' }, { id: 2, label: 'Великий' }],
+  }] },
+};
+const informationTitle = 'Оновити інформаційні характеристики?';
+const informationAction = 'Оновити характеристики';
+const informationCalls = (path) => api.post.mock.calls.filter(([url]) => url === `/product-information/${path}`);
+
+function pendingInformationResponse() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+async function editInformation({ previewResponse, applyResponse, ...props } = {}) {
+  decoded = {
+    existsInDb: true, sku: 'BR-INTERNAL-1', publicSku: 'AG-000041', category: informationConfig.categories.BR,
+    decodedAnswers: [{ key: 'braclet_size', label: 'Розмір', value_id: 1, value_label: 'Малий' }],
+    suffix: { type: 'sequence', value: 1, raw: '001' }, skuSchema: { version: 1 },
+    product: { id: 41, status: 'active', weight: 5, details: { answers: { braclet_size: 1 } } },
+    pricing: { totalPriceUah: 1000, weight: 5 },
+  };
+  preview = {
+    source: { sku: decoded.sku, publicSku: decoded.publicSku, totalPriceUah: 1000 },
+    corrected: { categoryCode: 'BR', publicSku: decoded.publicSku, totalPriceUah: 1000, autoPriceUah: 1000 },
+    changes: [{ key: 'braclet_size', from: 1, to: 2 }], priceDeltaUah: 0,
+  };
+  const original = api.post.getMockImplementation();
+  api.post.mockImplementation((url, ...args) => {
+    if (url === '/product-information/preview') {
+      return previewResponse || Promise.resolve({ data: { previewToken: 'reviewed-information' } });
+    }
+    if (url === '/product-information/apply' && applyResponse) return applyResponse;
+    return original(url, ...args);
+  });
+  const view = mount({ config: informationConfig, initialSku: decoded.publicSku,
+    canApplyRecount: true, canCreateRequest: false, ...props });
+  fireEvent.click(await screen.findByRole('button', {
+    name: props.canApplyRecount === false ? 'Підготувати запит' : 'Змінити характеристики',
+  }));
+  fireEvent.click(screen.getByRole('button', { name: 'Великий' }));
+  return view;
+}
+
+async function reviewInformation(options) {
+  const view = await editInformation(options);
+  const reviewButton = await screen.findByRole('button', { name: informationAction });
+  await waitFor(() => expect(reviewButton.disabled).toBe(false));
+  reviewButton.focus();
+  fireEvent.click(reviewButton);
+  const confirmation = await screen.findByRole('dialog', { name: informationTitle });
+  await waitFor(() => expect(within(confirmation).getByRole('button', { name: 'Скасувати' }).disabled).toBe(false));
+  return { ...view, confirmation, reviewButton };
+}
+
+it('reviews information separately, submits its exact token only on confirmation and blocks duplicate apply while busy', async () => {
+  const pendingPreview = pendingInformationResponse();
+  const pendingApply = pendingInformationResponse();
+  const view = await editInformation({ previewResponse: pendingPreview.promise, applyResponse: pendingApply.promise });
+  const reviewButton = await screen.findByRole('button', { name: informationAction });
+  fireEvent.click(reviewButton);
+  await waitFor(() => expect(reviewButton.disabled).toBe(true));
+  fireEvent.click(reviewButton);
+  expect(informationCalls('preview')).toEqual([['/product-information/preview', {
+    productId: 41, answersPatch: { braclet_size: 2 },
+  }]]);
+  expect(screen.queryByRole('dialog', { name: informationTitle })).toBeNull();
+  expect(informationCalls('apply')).toEqual([]);
+
+  // Whitespace is accepted only to determine non-emptiness; the opaque proof is sent verbatim.
+  const token = '  reviewed-information  ';
+  await act(async () => pendingPreview.resolve({ data: { previewToken: token } }));
+  const confirmation = await screen.findByRole('dialog', { name: informationTitle });
+  expect(confirmation.getAttribute('aria-modal')).toBe('true');
+  expect(within(confirmation).getByText('Артикул AG-000041. SKU, ціна та стан товару не зміняться.')).toBeTruthy();
+  expect(confirmation.textContent).not.toContain('BR-INTERNAL-1');
+  expect(screen.queryByRole('dialog', { name: 'Застосувати переоблік?' })).toBeNull();
+  const confirm = within(confirmation).getByRole('button', { name: informationAction });
+  await waitFor(() => expect(confirm.disabled).toBe(false));
+  expect(informationCalls('apply')).toEqual([]);
+  fireEvent.click(confirm);
+  await waitFor(() => expect(confirm.getAttribute('aria-busy')).toBe('true'));
+  for (const button of [confirm, within(confirmation).getByRole('button', { name: 'Скасувати' }),
+    within(confirmation).getByRole('button', { name: 'Закрити' }), screen.getByRole('button', { name: 'Закрити декодер' })]) {
+    expect(button.disabled).toBe(true);
+    fireEvent.click(button);
+  }
+  fireEvent.keyDown(confirmation, { key: 'Escape' });
+  expect(screen.getByRole('dialog', { name: informationTitle })).toBe(confirmation);
+  expect(view.onClose).not.toHaveBeenCalled();
+  expect(informationCalls('apply')).toEqual([['/product-information/apply', {
+    productId: 41, answersPatch: { braclet_size: 2 }, previewToken: token, reason: '',
+  }]]);
+  expect(api.post.mock.calls.some(([url]) => ['/recount/apply', '/admin/correction-requests'].includes(url))).toBe(false);
+  expect(view.onApplied).not.toHaveBeenCalled();
+
+  const result = { productId: 41, state: 'applied' };
+  await act(async () => pendingApply.resolve({ data: result }));
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: informationTitle })).toBeNull());
+  expect(await screen.findByText(/Характеристики товару AG-000041 оновлено/)).toBeTruthy();
+  expect(view.onApplied).toHaveBeenCalledExactlyOnceWith({ result, sourceSku: 'BR-INTERNAL-1',
+    correctedSku: 'BR-INTERNAL-1', informationOnly: true });
+  expect(view.onRequestCreated).not.toHaveBeenCalled();
+  expect(informationCalls('apply')).toHaveLength(1);
+});
+
+it.each(['cancel', 'close', 'Escape'])('information %s returns focus to edited parameters without closing the drawer or applying', async (action) => {
+  // Expose layout solely for the real keyboard focus trap in jsdom.
+  vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([{ width: 10, height: 10 }]);
+  const view = await reviewInformation();
+  const cancel = within(view.confirmation).getByRole('button', { name: 'Скасувати' });
+  const confirm = within(view.confirmation).getByRole('button', { name: informationAction });
+  await waitFor(() => expect(document.activeElement).toBe(cancel));
+  expect(view.container.inert).toBe(true);
+  confirm.focus();
+  fireEvent.keyDown(confirm, { key: 'Tab' });
+  expect(document.activeElement).toBe(within(view.confirmation).getByRole('button', { name: 'Закрити' }));
+  if (action === 'Escape') fireEvent.keyDown(view.confirmation, { key: 'Escape' });
+  else fireEvent.click(within(view.confirmation).getByRole('button', { name: action === 'cancel' ? 'Скасувати' : 'Закрити' }));
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: informationTitle })).toBeNull());
+  expect(screen.getByRole('dialog', { name: 'Товар і переоблік' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Великий' }).getAttribute('aria-pressed')).toBe('true');
+  expect(document.activeElement).toBe(view.reviewButton);
+  expect(Boolean(view.container.inert)).toBe(false);
+  expect(view.onClose).not.toHaveBeenCalled();
+  expect(informationCalls('apply')).toEqual([]);
+  fireEvent.click(view.reviewButton);
+  await screen.findByRole('dialog', { name: informationTitle });
+  expect(informationCalls('preview')).toHaveLength(2);
+  expect(informationCalls('apply')).toEqual([]);
+});
+
+it('keeps an information preview refusal in the drawer without confirmation or apply', async () => {
+  const pendingPreview = pendingInformationResponse();
+  const view = await editInformation({ previewResponse: pendingPreview.promise });
+  fireEvent.click(await screen.findByRole('button', { name: informationAction }));
+  await waitFor(() => expect(informationCalls('preview')).toHaveLength(1));
+  await act(async () => pendingPreview.reject({ response: { status: 403, data: { error: 'Інформаційні зміни заборонено' } } }));
+  expect((await screen.findByRole('alert')).textContent).toBe('Інформаційні зміни заборонено');
+  expect(screen.queryByRole('dialog', { name: informationTitle })).toBeNull();
+  expect(informationCalls('apply')).toEqual([]);
+  expect(view.onApplied).not.toHaveBeenCalled();
+});
+
+it.each([403, 409])('shows information apply refusal %s inside the confirmation without success or retry', async (status) => {
+  const pendingApply = pendingInformationResponse();
+  const view = await reviewInformation({ applyResponse: pendingApply.promise });
+  fireEvent.click(within(view.confirmation).getByRole('button', { name: informationAction }));
+  await waitFor(() => expect(informationCalls('apply')).toHaveLength(1));
+  const message = status === 403 ? 'Право переобліку відкликано' : 'Товар змінився після перегляду. Оновіть дані.';
+  await act(async () => pendingApply.reject({ response: { status, data: { error: message } } }));
+  expect((await within(view.confirmation).findByRole('alert')).textContent).toBe(message);
+  expect(screen.getByRole('dialog', { name: informationTitle })).toBe(view.confirmation);
+  expect(informationCalls('apply')).toEqual([['/product-information/apply', {
+    productId: 41, answersPatch: { braclet_size: 2 }, previewToken: 'reviewed-information', reason: '',
+  }]]);
+  expect(view.onApplied).not.toHaveBeenCalled();
+  expect(view.onRequestCreated).not.toHaveBeenCalled();
+  expect(screen.queryByText(/Характеристики товару AG-000041 оновлено/)).toBeNull();
+});
+
+it.each([undefined, null, '', '  ', 123])('does not enable information apply without a nonempty string preview token (%s)', async (previewToken) => {
+  const view = await reviewInformation({ previewResponse: Promise.resolve({ data: { previewToken } }) });
+  const confirm = within(view.confirmation).getByRole('button', { name: informationAction });
+  expect(confirm.disabled).toBe(true);
+  fireEvent.click(confirm);
+  expect(informationCalls('apply')).toEqual([]);
+  expect(view.onApplied).not.toHaveBeenCalled();
+});
+
+it('keeps the same size-only edit in the ordinary correction path for a request-only user', async () => {
+  const view = await editInformation({ canApplyRecount: false, canCreateRequest: true });
+  const original = api.post.getMockImplementation();
+  const request = { id: 43 };
+  api.post.mockImplementation((url, ...args) => url === '/admin/correction-requests'
+    ? Promise.resolve({ data: { request } }) : original(url, ...args));
+  fireEvent.change(screen.getByLabelText('Коментар до запиту'), { target: { value: 'Уточнений розмір виробу' } });
+  const continueButton = await screen.findByRole('button', { name: 'Продовжити' });
+  await waitFor(() => expect(continueButton.disabled).toBe(false));
+  fireEvent.click(continueButton);
+  const confirmation = await screen.findByRole('dialog', { name: 'Передати товар на виправлення?' });
+  expect(screen.queryByRole('dialog', { name: informationTitle })).toBeNull();
+  expect(screen.queryByRole('button', { name: informationAction })).toBeNull();
+  expect(informationCalls('preview')).toEqual([]);
+  expect(informationCalls('apply')).toEqual([]);
+  expect(writes()).toEqual([]);
+  fireEvent.click(within(confirmation).getByRole('button', { name: 'Створити запит' }));
+  await waitFor(() => expect(view.onRequestCreated).toHaveBeenCalledExactlyOnceWith({ request, sourceSku: 'BR-INTERNAL-1' }));
+  expect(writes()).toEqual([['/admin/correction-requests', expect.objectContaining({
+    sourceSku: 'BR-INTERNAL-1', answers: { braclet_size: 2 }, weight: 5, reason: 'Уточнений розмір виробу',
+  })]]);
+  expect(view.onApplied).not.toHaveBeenCalled();
+  expect(informationCalls('preview')).toEqual([]);
+  expect(informationCalls('apply')).toEqual([]);
+});
+
 it('opening an empty drawer performs no decode, preview or mutation', () => {
   const view = mount();
   expect(screen.getByRole('dialog', { name: 'Товар і переоблік' }).getAttribute('aria-modal')).toBe('true');
