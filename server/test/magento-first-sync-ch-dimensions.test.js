@@ -160,3 +160,20 @@ test('approved magento_managed CH SEO becomes an automatic terminal remote_retai
   const unknown = projectFirstSyncFields(chFixture({ policies: { meta_title: 'magento_managed' }, remote: { meta_title: { nested: true } } }));
   assert.notEqual(row(prepareProgress(unknown, null), 'meta_title').record.state, 'remote_retained');
 });
+
+test('approved initialize_create_only SEO is retained like magento_managed for an existing product, with its policy recorded', () => {
+  const created = projectFirstSyncFields(chFixture({ policies: { meta_title: 'initialize_create_only' } }));
+  assert.equal(metadata(created, 'meta_title').remoteRetention, 'magento-managed-seo-v1');
+  assert.equal(metadata(created, 'meta_title').retentionPolicy, 'initialize_create_only');
+  assert.equal(created.blockers.some(blocker => blocker.target === 'meta_title'), false);
+  const seo = row(prepareProgress(created, null), 'meta_title');
+  assert.deepEqual([seo.record.state, seo.record.after, seo.record.source.decision, seo.record.source.retention, seo.record.source.policy],
+    ['remote_retained', null, 'retain_remote', 'magento_managed_seo', 'initialize_create_only']);
+  // magento_managed receipts keep their exact earlier shape (no policy key).
+  const managed = row(prepareProgress(projectFirstSyncFields(chFixture({ policies: { meta_title: 'magento_managed' } })), null), 'meta_title');
+  assert.equal(Object.hasOwn(managed.record.source, 'policy'), false);
+  // The authoritative policy still requires an explicit decision.
+  const owned = projectFirstSyncFields(chFixture({ policies: { meta_title: 'authoritative_create_update' } }));
+  assert.equal(field(owned, 'meta_title').reason, 'DERIVED_FORWARD_MISMATCH');
+  assert.equal(metadata(owned, 'meta_title').remoteRetention, undefined);
+});

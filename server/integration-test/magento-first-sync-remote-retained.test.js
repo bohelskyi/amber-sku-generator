@@ -188,6 +188,7 @@ test('080 legacy SV remote retention records terminal first-sync receipts withou
         assert.equal(await insert(seo),true);
         assert.equal(await insert({...seo,target:'meta_description',scope:'en',source:{...seo.source,field:'meta_description'}}),true);
         assert.equal(await insert({...seo,remote:{known:true,present:false,value:''}}),true,'an empty Magento SEO value is retained as read');
+        assert.equal(await insert({...seo,source:{...seo.source,policy:'initialize_create_only'}}),true,'create-only SEO retention records its policy');
         for(const malformed of [
           {...seo,after:'Amber title'},
           {...seo,remote:{known:false}},

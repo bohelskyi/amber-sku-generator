@@ -88,7 +88,7 @@ function prepareProgress(projection, progress, decision = null) {
       ...(priorKeep || selected?.choice==='keep_local' ? {decision:'keep_local'}:{}),
       ...(selected?.choice==='accept_remote' ? {decision:'accept_remote'}:{}),
       ...(selected?.choice==='retain_remote' ? {decision:'retain_remote'}:{}),
-      ...(managedSeo ? {decision:'retain_remote',retention:'magento_managed_seo'}:{}),
+      ...(managedSeo ? {decision:'retain_remote',retention:'magento_managed_seo',...(meta.retentionPolicy ? {policy:meta.retentionPolicy}:{})}:{}),
       ...(seo && prior?.state==='seo_pending_initial_readback' && selected?.choice==='keep_local'
         ? {seoAuthorityChange:{revision:prior.revision,evidence:Object.fromEntries(['target','scope','state','before','remote','after','source','mappingHash'].map(k=>[k,prior[k]]))}} : {})};
     const record={target:field.target,scope:field.scope,state,before:field.local,remote:field.remote,
