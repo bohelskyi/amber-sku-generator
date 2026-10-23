@@ -103,8 +103,11 @@ it('keeps a native question draft after refusal and closes it only on an explici
   expect(screen.getByRole('textbox', { name: 'Назва характеристики' }).value).toBe('Нова ознака');
   expect(props.onDirtyChange).toHaveBeenLastCalledWith(true);
   fireEvent.click(screen.getByRole('button', { name: 'Зберегти характеристику' }));
-  await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Назва характеристики' })).toBeNull());
-  expect(props.addQuestion).toHaveBeenCalledTimes(2); expect(props.onDirtyChange).toHaveBeenLastCalledWith(false);
+  await waitFor(() => {
+    expect(screen.queryByRole('textbox', { name: 'Назва характеристики' })).toBeNull();
+    expect(props.onDirtyChange).toHaveBeenLastCalledWith(false);
+  });
+  expect(props.addQuestion).toHaveBeenCalledTimes(2);
 });
 
 it('edits the selected question and clears its local editor before selecting another question', () => {
