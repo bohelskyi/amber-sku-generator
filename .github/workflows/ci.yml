@@ -65,7 +65,14 @@ jobs:
         run: npm ci
         working-directory: server
       - name: PostgreSQL integration tests
+        env:
+          AMBER_INTEGRATION_FILE_TIMING: "1"
+          NODE_OPTIONS: --require=${{ github.workspace }}/server/integration-test/file-timing.js
         run: npm run test:integration
+        working-directory: server
+      - name: Remove integration template database
+        if: always()
+        run: node integration-test/harness.js cleanup-template
         working-directory: server
 
   client:

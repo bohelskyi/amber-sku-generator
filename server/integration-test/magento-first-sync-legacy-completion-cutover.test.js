@@ -1,15 +1,15 @@
 // Native immutable cutover and local completion on a disposable schema6 copy. No live HTTP.
 require('../test/setup-env');
 const test=require('node:test'),assert=require('node:assert/strict');
-const {Client,Pool}=require('pg'),{execFile}=require('node:child_process'),{promisify}=require('node:util');
-const path=require('node:path'),{randomUUID}=require('node:crypto');
+const {Client,Pool}=require('pg');
+const {randomUUID}=require('node:crypto');
 const fixture=require('../test/fixtures/legacy-sv-schema6');
 test('attested legacy SV completion preserves both admitted and changed-delivery-history cutover boundaries',async t=>{
   const source=new URL(process.env.TEST_DATABASE_URL||'');assert.equal(source.hostname,'127.0.0.1');assert.equal(source.port,'55432');assert.ok(source.pathname.endsWith('_test'));
   const name='amber_completion_cutover_'+process.pid+'_test',control=new Client({connectionString:source.toString()});await control.connect();let created=false,db;
   try{
-    await control.query('CREATE DATABASE '+name);created=true;const target=new URL(source);target.pathname='/'+name;
-    await promisify(execFile)(process.execPath,['-e',"require('./src/db/run-migrations').runMigrations().then(()=>require('./src/db/pool').end()).catch(e=>{console.error(e);process.exitCode=1;});"],{cwd:path.resolve(__dirname,'..'),env:{...process.env,DATABASE_URL:target.toString()}});
+    await require('./harness').createTestDatabase(name);created=true;const target=new URL(source);target.pathname='/'+name;
+
     db=new Pool({connectionString:target.toString(),max:4});t.mock.method(globalThis,'fetch',()=>assert.fail('No remote HTTP permitted'));
     const actor=Number((await db.query("INSERT INTO application_users(status,display_name) VALUES('active','Schema6 fixture administrator') RETURNING id")).rows[0].id);
     await db.query("INSERT INTO user_role_assignments(application_user_id,role_id) SELECT $1,id FROM roles WHERE role_key='administrator'",[actor]);

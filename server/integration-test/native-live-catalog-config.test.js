@@ -15,12 +15,12 @@ test('native public config and creation use unpublished live values/questions wh
   try {
     assert.equal((await control.query('SELECT count(*)::int n FROM pg_database WHERE datname=$1', [name])).rows[0].n, 0,
       'Never reuse or drop a database this test did not create');
-    await control.query(`CREATE DATABASE ${name}`); created = true;
+    await require('./harness').createTestDatabase(name); created = true;
     const url = new URL(sourceUrl); url.pathname = `/${name}`;
     process.env.DATABASE_URL = url.toString(); process.env.NBU_RATE_OVERRIDE = '40'; process.env.MAGENTO_BASE_URL = '';
     require('../test/setup-env'); appPool = require('../src/db/pool');
     db = new Client({ connectionString: url.toString() }); await db.connect();
-    await require('../src/db/run-migrations').runMigrations();
+
     const actor = (await db.query("INSERT INTO application_users(status,display_name) VALUES('active','Live catalog fixture') RETURNING id")).rows[0].id;
     await db.query("INSERT INTO user_role_assignments(application_user_id,role_id) SELECT $1,id FROM roles WHERE role_key='administrator'", [actor]);
     const options = { mutationContext: { actorUserId: actor } };

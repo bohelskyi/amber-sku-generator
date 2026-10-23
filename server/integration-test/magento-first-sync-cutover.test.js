@@ -4,11 +4,7 @@ require('../test/setup-env');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
-const { promisify } = require('node:util');
-const { execFile } = require('node:child_process');
-const path = require('node:path');
 const { Client, Pool } = require('pg');
-const exec = promisify(execFile);
 
 test('explicit cutover-only first-sync admission preserves history and field decisions', async t => {
   const source = new URL(process.env.TEST_DATABASE_URL || '');
@@ -18,10 +14,9 @@ test('explicit cutover-only first-sync admission preserves history and field dec
   await control.connect(); let created = false, db;
   try {
     assert.equal((await control.query('SELECT count(*)::int n FROM pg_database WHERE datname=$1', [name])).rows[0].n, 0);
-    await control.query('CREATE DATABASE ' + name); created = true;
+    await require('./harness').createTestDatabase(name); created = true;
     const target = new URL(source); target.pathname = '/' + name;
-    await exec(process.execPath, ['-e', "require('./src/db/run-migrations').runMigrations().then(()=>require('./src/db/pool').end()).catch(e=>{console.error(e);process.exitCode=1;});"],
-      { cwd: path.resolve(__dirname, '..'), env: { ...process.env, DATABASE_URL: target.toString() } });
+
     db = new Pool({ connectionString: target.toString(), max: 10 });
     t.mock.method(globalThis, 'fetch', () => assert.fail('No live HTTP or NBU request is permitted'));
     const service = require('../src/services/magento/first-sync.service');

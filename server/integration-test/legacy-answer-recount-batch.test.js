@@ -1,6 +1,6 @@
 // Isolated disposable database: real recount + stable recount exposure through the batch CLI. Synthetic Magento GETs only.
 const test = require('node:test'), assert = require('node:assert/strict');
-const { Client } = require('pg'), { execFile } = require('node:child_process'), { promisify } = require('node:util');
+const { Client } = require('pg');
 const fs = require('node:fs/promises'), os = require('node:os'), path = require('node:path'), { randomUUID } = require('node:crypto');
 const source = new URL(process.env.TEST_DATABASE_URL || '');
 const name = `amber_legacy_answer_batch_${process.pid}_test`, target = new URL(source); target.pathname = '/' + name;
@@ -13,9 +13,8 @@ test('legacy answer recount batch: read-only preview, reviewed apply, resume and
   const control = new Client({ connectionString: source.toString() }); await control.connect(); let created = false, db;
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'amber-legacy-answer-batch-'));
   try {
-    await control.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`); await control.query(`CREATE DATABASE ${name}`); created = true;
-    await promisify(execFile)(process.execPath, ['-e', "require('./src/db/run-migrations').runMigrations().then(()=>require('./src/db/pool').end()).catch(e=>{console.error(e);process.exitCode=1;});"],
-      { cwd: path.resolve(__dirname, '..'), env: { ...process.env, DATABASE_URL: target.toString() } });
+    await control.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`); await require('./harness').createTestDatabase(name); created = true;
+
     db = require('../src/db/pool');
     const gate = require('../src/services/full-product-cutover-gate'), c = require('../src/services/magento/binding-contract');
     const user = async (display, role) => {

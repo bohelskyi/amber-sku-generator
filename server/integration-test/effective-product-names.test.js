@@ -10,12 +10,12 @@ test('reviewed effective-name successor supports generated CREATE, exact full na
   await control.connect(); let db, appPool, created = false;
   try {
     assert.equal((await control.query('SELECT count(*)::int n FROM pg_database WHERE datname=$1', [name])).rows[0].n, 0);
-    await control.query(`CREATE DATABASE ${name}`); created = true;
+    await require('./harness').createTestDatabase(name); created = true;
     const target = new URL(source); target.pathname = `/${name}`;
     process.env.DATABASE_URL = target.toString(); process.env.MAGENTO_BASE_URL = ''; process.env.NBU_RATE_OVERRIDE = '40';
     require('../test/setup-env'); appPool = require('../src/db/pool');
     db = new Client({ connectionString: target.toString() }); await db.connect();
-    await require('../src/db/run-migrations').runMigrations();
+
     const actor = Number((await db.query("INSERT INTO application_users(status,display_name) VALUES('active','Effective names fixture') RETURNING id")).rows[0].id);
     await db.query("INSERT INTO user_role_assignments(application_user_id,role_id) SELECT $1,id FROM roles WHERE role_key='administrator'", [actor]);
     const config = { configured: true, baseUrl: 'https://effective-names.invalid', consumerKey: 'fixture', consumerSecret: 'fixture', accessToken: 'fixture', accessTokenSecret: 'fixture' };

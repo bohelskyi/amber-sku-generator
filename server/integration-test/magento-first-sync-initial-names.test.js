@@ -6,8 +6,6 @@ const { randomUUID, createHash } = require('node:crypto');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
-const { promisify } = require('node:util');
-const { execFile } = require('node:child_process');
 const { Pool, Client } = require('pg');
 const fixture = require('../test/fixtures/magento-bindings');
 const { insertProductFixture } = require('./product-fixture');
@@ -45,10 +43,9 @@ async function setup(t) {
     await control.end(); await fs.rm(dir, { recursive: true, force: true });
   });
   assert.equal((await control.query('SELECT count(*)::int n FROM pg_database WHERE datname=$1', [name])).rows[0].n, 0);
-  await control.query('CREATE DATABASE ' + name); created = true;
+  await require('./harness').createTestDatabase(name); created = true;
   const target = new URL(source); target.pathname = '/' + name;
-  await promisify(execFile)(process.execPath, ['-e', "require('./src/db/run-migrations').runMigrations().then(()=>require('./src/db/pool').end()).catch(e=>{console.error(e);process.exitCode=1;});"],
-    { cwd: serverRoot, env: { ...process.env, DATABASE_URL: target.toString() } });
+
   db = new Pool({ connectionString: target.toString(), max: 4 });
   readOnly = new Pool({ connectionString: target.toString(), max: 1, options: '-c default_transaction_read_only=on' });
   t.mock.method(globalThis, 'fetch', () => assert.fail('No live Magento or NBU HTTP in this synthetic fixture'));

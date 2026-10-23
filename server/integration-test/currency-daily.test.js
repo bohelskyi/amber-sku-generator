@@ -2,7 +2,7 @@ require('../test/setup-env');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const https = require('node:https');
-const { Pool, pool: controlPool, recreateTestDatabase, dropTestDatabase, runNodeInDatabase } = require('./harness');
+const { Pool, pool: controlPool, recreateTestDatabase, dropTestDatabase } = require('./harness');
 const { insertProductFixture } = require('./product-fixture');
 const currency = require('../src/services/currency.service');
 const { startCurrencyRefresh, refreshUsdRate } = require('../src/services/currency-refresh-runtime');
@@ -20,7 +20,7 @@ function deferred() {
 // only NBU responses and the clock are synthetic. No business HTTP is permitted.
 test('persisted daily currency refresh is shared, restart-safe and isolated from business writes', async t => {
   const name = `amber_currency_daily_${process.pid}_test`;
-  const url = await recreateTestDatabase(name);
+  const url = await recreateTestDatabase(name, { template: true });
   const db = new Pool({ connectionString: url, max: 3 });
   const workerA = new Pool({ connectionString: url, max: 1, application_name: 'currency_worker_a' });
   const workerB = new Pool({ connectionString: url, max: 1, application_name: 'currency_worker_b' });
@@ -58,7 +58,6 @@ test('persisted daily currency refresh is shared, restart-safe and isolated from
     return rows;
   };
   try {
-    await runNodeInDatabase(url, "require('./src/db/run-migrations').runMigrations().then(()=>require('./src/db/pool').end()).catch(e=>{console.error(e);process.exitCode=1})");
     await db.query("INSERT INTO categories(code,name) VALUES('NM','Currency test necklace')");
     const product = (await insertProductFixture(db, `INSERT INTO products(full_sku,category,weight,total_price_uah,details)
       VALUES('NM-DAILY-RATE','NM',5,1234.56,'{"answers":{},"manualPriceUah":1234.56}') RETURNING *`)).rows[0];

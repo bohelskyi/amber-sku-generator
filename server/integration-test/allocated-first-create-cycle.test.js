@@ -12,11 +12,11 @@ test('allocated first CREATE breaks only the proven birth-photo dependency on ow
   const previousFetch=globalThis.fetch;globalThis.fetch=()=>assert.fail('Live HTTP is forbidden');
   try {
     assert.equal((await control.query('SELECT count(*)::int n FROM pg_database WHERE datname=$1',[name])).rows[0].n,0);
-    await control.query(`CREATE DATABASE ${name}`);created=true;
+    await require('./harness').createTestDatabase(name);created=true;
     const target=new URL(source);target.pathname='/'+name;
     process.env.DATABASE_URL=target.toString();process.env.NBU_RATE_OVERRIDE='40';process.env.MAGENTO_BASE_URL='';
     require('../test/setup-env');appPool=require('../src/db/pool');
-    await require('../src/db/run-migrations').runMigrations();db=new Pool({connectionString:target.toString(),max:8});
+    db=new Pool({connectionString:target.toString(),max:8});
     const actor=Number((await db.query("INSERT INTO application_users(status,display_name) VALUES('active','Allocated birth fixture') RETURNING id")).rows[0].id);
     await db.query("INSERT INTO user_role_assignments(application_user_id,role_id) SELECT $1,id FROM roles WHERE role_key='administrator'",[actor]);
     await db.query("INSERT INTO categories(code,name,requires_weight) VALUES('NM','Native fixture',0)");
