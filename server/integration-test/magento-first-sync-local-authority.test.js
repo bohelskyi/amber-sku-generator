@@ -14,6 +14,19 @@ const seo=require('../src/services/magento/first-sync-seo-proof'),ledger=require
 const preview=require('../src/services/magento/sync-preview');
 const targets=['meta_title','meta_description'],template=(target,scope)=>'Active NM '+scope+' '+target;
 const name='amber_first_sync_local_authority_test';
+async function publicTableState(db,excluded=new Set()){
+  // Rediscover after migrations; compare every column and row, including empty tables.
+  const names=(await db.query("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename")).rows
+    .map(({tablename})=>{assert.match(tablename,/^[a-z_]+$/);return tablename;})
+    .filter(tablename=>!excluded.has(tablename));
+  if(!names.length)return {};
+  const rows=(await db.query(names.map((tablename,index)=>`SELECT $${index+1}::text AS tablename,
+    COALESCE(jsonb_agg(j ORDER BY j::text),'[]'::jsonb) AS rows
+    FROM (SELECT to_jsonb(t) j FROM public."${tablename}" t) entries`).join(' UNION ALL '),names)).rows;
+  const byName=new Map(rows.map(row=>[row.tablename,row.rows]));
+  assert.equal(byName.size,names.length);
+  return Object.fromEntries(names.map(tablename=>[tablename,byName.get(tablename)]));
+}
 async function setup({databaseName=name,numericLength=false}={}){
   const url=await recreateTestDatabase(databaseName),db=new Pool({connectionString:url});
   try{
@@ -109,9 +122,7 @@ async function setup({databaseName=name,numericLength=false}={}){
         return new Response(JSON.stringify(r),{headers:{'content-type':'application/json'}});
       }};
     async function fingerprint(){
-      const data={};for(const {tablename}of(await db.query("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename")).rows){
-        assert.match(tablename,/^[a-z_]+$/);data[tablename]=(await db.query(`SELECT COALESCE(jsonb_agg(j ORDER BY j::text),'[]'::jsonb) rows FROM (SELECT to_jsonb(t) j FROM public."${tablename}" t) entries`)).rows[0].rows;
-      }return c.hash(data);
+      return c.hash(await publicTableState(db));
     }
     return {db,url,actor,binding,schema,config,run,products,remotes,calls,create,fingerprint,readbackLengths,loseWrite:()=>{loseNextWrite=true;}};
   }catch(e){await db.end();throw e;}
@@ -429,12 +440,8 @@ test('canonical local authority and atomic batch decisions',async t=>{
    return {request:input,item:input.items[0],command,commandSha256:c.hash(command)};
   }
   async function nonCampaignState(){
-   const allowed=new Set(['audit_events','magento_first_sync_sessions','magento_first_sync_fields','magento_first_sync_progress']),data={};
-   for(const {tablename}of(await f.db.query("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename")).rows){
-    assert.match(tablename,/^[a-z_]+$/);if(allowed.has(tablename))continue;
-    data[tablename]=(await f.db.query(`SELECT COALESCE(jsonb_agg(j ORDER BY j::text),'[]'::jsonb) rows FROM (SELECT to_jsonb(t) j FROM public."${tablename}" t) entries`)).rows[0].rows;
-   }
-   return data;
+   const allowed=new Set(['audit_events','magento_first_sync_sessions','magento_first_sync_fields','magento_first_sync_progress']);
+   return publicTableState(f.db,allowed);
   }
   await t.test('campaign canonical callback rejects initial imports outside its write scope with no database changes',async subtest=>{
    forbidLiveFetch(subtest);
