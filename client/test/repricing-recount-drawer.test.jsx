@@ -299,3 +299,118 @@ it('an explicitly permitted request price override uses the request preview with
   expect(screen.queryByRole('dialog', { name: 'Передати товар на виправлення?' })).toBeNull();
   expect(writes()).toEqual([]);
 });
+
+function deferredResponse() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+async function openWithPendingPreview() {
+  const pendingPreview = deferredResponse();
+  const pendingApply = deferredResponse();
+  let confirmationPreviewCount = 0;
+  const original = api.post.getMockImplementation();
+  api.post.mockImplementation((url, ...args) => {
+    // Identify the actual confirmation phase; an earlier debounce may run before Continue.
+    if (url === '/recount/preview' && screen.queryByRole('dialog', { name: 'Застосувати переоблік?' })) {
+      confirmationPreviewCount += 1;
+      return pendingPreview.promise;
+    }
+    return url === '/recount/apply' ? pendingApply.promise : original(url, ...args);
+  });
+  const view = await openConfirmation();
+  await waitFor(() => expect(confirmationPreviewCount).toBe(1));
+  fireEvent.click(within(view.confirmation).getByRole('button', { name: 'Застосувати переоблік' }));
+  expect((await within(view.confirmation).findByRole('button', { name: 'Застосовуємо…' })).disabled).toBe(true);
+  return { ...view, pendingPreview, pendingApply };
+}
+
+function expectOriginalApply(view) {
+  expect(writes()).toEqual([['/recount/apply', {
+    sourceSku: 'LN1001', answers: {}, isCalibrated: null, weight: 11,
+    reason: 'Уточнена вага після перевірки виробу',
+    sourceStateSignature: 'reviewed-source-state', previewToken: 'reviewed-pricing-decision',
+    pricingDecision: { mode: 'system_auto' },
+  }]]);
+  expect(view.onApplied).not.toHaveBeenCalled();
+  expect(view.onRequestCreated).not.toHaveBeenCalled();
+}
+
+async function rejectPendingApply(view) {
+  await act(async () => view.pendingApply.reject({
+    response: { status: 403, data: { error: 'Право переобліку відкликано' } },
+  }));
+  expect((await within(view.confirmation).findByRole('alert')).textContent).toBe('Право переобліку відкликано');
+}
+
+async function resolveLatePreview(view) {
+  await act(async () => view.pendingPreview.resolve({ data: {
+    ...preview, previewToken: 'late-preview-token', priceDeltaUah: 300,
+    source: { ...preview.source, stateSignature: 'late-source-state' },
+    corrected: { ...preview.corrected, totalPriceUah: 1300, autoPriceUah: 1300 },
+  } }));
+  expect(await within(view.confirmation).findByText('1300 ₴', { exact: true })).toBeTruthy();
+}
+
+it.each(['success', 'failure'])('preserves the apply refusal after an older automatic preview returns %s', async (outcome) => {
+  const view = await openWithPendingPreview();
+  expectOriginalApply(view);
+  await rejectPendingApply(view);
+  await waitFor(() => expect(within(view.confirmation).getByRole('button', { name: 'Застосувати переоблік' }).disabled).toBe(false));
+  if (outcome === 'success') {
+    await resolveLatePreview(view);
+  } else {
+    await act(async () => view.pendingPreview.reject({ response: { status: 422, data: { error: 'Попередній розрахунок відхилено' } } }));
+    await waitFor(() => expect(within(view.confirmation).getByRole('button', { name: 'Застосувати переоблік' }).disabled).toBe(true));
+  }
+  expect(within(view.confirmation).getByRole('alert').textContent).toBe('Право переобліку відкликано');
+  expectOriginalApply(view);
+});
+
+it('displays the apply refusal when the automatic preview completes before the apply response', async () => {
+  const view = await openWithPendingPreview();
+  await resolveLatePreview(view);
+  expect(within(view.confirmation).getByRole('button', { name: 'Застосовуємо…' }).disabled).toBe(true);
+  expect(within(view.confirmation).queryByRole('alert')).toBeNull();
+  expectOriginalApply(view);
+  await rejectPendingApply(view);
+  expectOriginalApply(view);
+});
+
+it('clears an ordinary preview validation error after an explicit price edit obtains a valid preview', async () => {
+  const view = await openWithPendingPreview();
+  await rejectPendingApply(view);
+  await resolveLatePreview(view);
+  expect(within(view.confirmation).getByRole('alert').textContent).toBe('Право переобліку відкликано');
+
+  const invalidPreview = deferredResponse();
+  const refreshedPreview = deferredResponse();
+  const original = api.post.getMockImplementation();
+  api.post.mockImplementation((url, payload, ...args) => {
+    if (url === '/recount/preview' && payload.pricingDecision.mode === 'manual_uah') {
+      return payload.pricingDecision.manualPriceUah === '1400' ? refreshedPreview.promise : invalidPreview.promise;
+    }
+    return original(url, payload, ...args);
+  });
+  fireEvent.click(within(view.confirmation).getByRole('radio', { name: 'Ручна UAH' }));
+  await waitFor(() => expect(api.post.mock.calls.some(([url, payload]) => url === '/recount/preview'
+    && payload.pricingDecision.mode === 'manual_uah' && payload.pricingDecision.manualPriceUah === '')).toBe(true));
+  await act(async () => invalidPreview.reject({ response: { status: 422, data: { error: 'Вкажіть ціну' } } }));
+  await waitFor(() => expect(within(view.confirmation).getByRole('alert').textContent).toBe('Вкажіть коректну ціну для вибраного режиму.'));
+  fireEvent.change(within(view.confirmation).getByLabelText('Точна ціна UAH'), { target: { value: '1400' } });
+  await waitFor(() => expect(api.post.mock.calls.some(([url, payload]) => url === '/recount/preview'
+    && payload.pricingDecision.manualPriceUah === '1400')).toBe(true));
+  await act(async () => refreshedPreview.resolve({ data: {
+    ...preview, previewToken: 'refreshed-manual-preview', priceDeltaUah: 400,
+    corrected: { ...preview.corrected, totalPriceUah: 1400, manualPriceUah: 1400 },
+  } }));
+  expect(await within(view.confirmation).findByText('1400 ₴', { exact: true })).toBeTruthy();
+  expect(within(view.confirmation).queryByRole('alert')).toBeNull();
+  expect(within(view.confirmation).getByRole('button', { name: 'Застосувати переоблік' }).disabled).toBe(false);
+  expectOriginalApply(view);
+});

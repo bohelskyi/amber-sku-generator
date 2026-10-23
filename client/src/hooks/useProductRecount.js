@@ -50,6 +50,7 @@ export function useProductRecount({
   const [recountMarketingRounding, setRecountMarketingRounding] = useState(true);
   const [recountPreview, setRecountPreview] = useState(null);
   const [recountError, setRecountError] = useState('');
+  const recountSubmitErrorVersionRef = useRef(0);
   const [recountSuccess, setRecountSuccess] = useState('');
   const [isRecountLoading, setIsRecountLoading] = useState(false);
   const [isRecountApplying, setIsRecountApplying] = useState(false);
@@ -483,27 +484,34 @@ export function useProductRecount({
 
     const requestId = previewRequestGateRef.current.invalidate();
     previewRequestIdRef.current = requestId;
+    // A preview scheduled before a submit refusal may still refresh pricing,
+    // but it must not clear or replace that newer refusal or its field errors.
+    const submitErrorVersion = recountSubmitErrorVersionRef.current;
     const timerId = window.setTimeout(() => {
       api.post(previewPath, recountPreviewPayload)
         .then((res) => {
           if (requestId !== previewRequestIdRef.current
               || !previewRequestGateRef.current.isCurrent(requestId)) return;
           setRecountPreview(res.data);
-          setRecountError('');
           setIsRecountPreviewCurrent(true);
           setIsRecountPreviewUnavailable(false);
-          setRecountValidationActive(false);
-          setRecountValidationMessage('');
-          setRecountFieldErrors({});
+          if (submitErrorVersion === recountSubmitErrorVersionRef.current) {
+            setRecountError('');
+            setRecountValidationActive(false);
+            setRecountValidationMessage('');
+            setRecountFieldErrors({});
+          }
         })
         .catch((err) => {
           if (requestId !== previewRequestIdRef.current
               || !previewRequestGateRef.current.isCurrent(requestId)) return;
-          setRecountFieldErrors(err.response?.data?.fieldErrors || {});
           if (!isRecountConfirmOpen) setRecountPreview(null);
           setIsRecountPreviewCurrent(false);
           setIsRecountPreviewUnavailable(true);
-          if (isRecountConfirmOpen) setRecountError('Вкажіть коректну ціну для вибраного режиму.');
+          if (submitErrorVersion === recountSubmitErrorVersionRef.current) {
+            setRecountFieldErrors(err.response?.data?.fieldErrors || {});
+            if (isRecountConfirmOpen) setRecountError('Вкажіть коректну ціну для вибраного режиму.');
+          }
         })
         .finally(() => {
           if (requestId === previewRequestIdRef.current
@@ -846,6 +854,7 @@ export function useProductRecount({
         handleDecode(correctedLookupSku);
       })
       .catch((err) => {
+        recountSubmitErrorVersionRef.current += 1;
         setRecountError(err.response?.data?.error || err.message);
         setRecountFieldErrors(err.response?.data?.fieldErrors || {});
       })
