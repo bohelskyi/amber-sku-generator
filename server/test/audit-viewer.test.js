@@ -76,6 +76,21 @@ test('audit product search is literal, filter-bound and parameterized', async ()
     (error) => error.code === 'INVALID_CURSOR');
 });
 
+test('audit labels and article filtering keep the product primary key uncast', async () => {
+  const calls = [];
+  const databasePool = { query: async (sql, values) => {
+    calls.push({ sql, values }); return { rows: [] };
+  } };
+  await getAuditEvents({}, { databasePool });
+  await getAuditEvents({ article: 'AG-000001', subjectType: 'product', subjectId: '01' }, { databasePool });
+  for (const { sql } of calls) {
+    assert.doesNotMatch(sql, /\bp\.id\s*::/, 'Casting the indexed product ID causes a full scan per event');
+    assert.match(sql, /p\.id\s*=\s*CASE/, 'Only a guarded subject-side conversion may feed the PK lookup');
+  }
+  assert.deepEqual(calls[1].values, ['product', '01', '%AG-000001%', 51],
+    'The exact textual subject filter must not be normalized into a different identity');
+});
+
 test('audit viewer normalizes immutable snapshot actors and explicit missing profile attribution', () => {
   assert.deepEqual(normalizeAuditEvent(row(1)).actor, {
     status: 'recorded', id: 7, displayName: 'Historical Name', preferredUsername: 'historical.user',
