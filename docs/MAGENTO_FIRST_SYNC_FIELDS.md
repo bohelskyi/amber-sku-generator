@@ -34,6 +34,13 @@ receipt must match the current origin, public SKU and remote ID. Foreign origins
 changed/absent remote identities and malformed receipts remain explicit review
 blockers; they cannot fall through to adoption or CREATE. Complete same-identity
 predecessor history can carry the same exact receipt.
+A recount successor with a changed public article may also use the ordinary lane
+when its own current product carries that exact receipt and the only history
+issues are `SOURCE_CORRECTION_NOT_RECORDED` legacy pointers: the current product is
+active, normal and unexcluded, every predecessor is a corrected, retired link in
+the chain, and each missing pointer has exactly one recorded correction for that
+same edge. Any other lineage issue, a receipt only on a predecessor, or an
+incomplete field session keeps the history review blocker.
 Native ownership uses the server loader's private proof. An allocated native SKU
 without its own acknowledged remote identity remains a collision.
 

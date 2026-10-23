@@ -27,6 +27,34 @@ function externalDeliveryEvidence(receipts, {originHash,sku,remote}) {
   return {externalDelivery:true,issue:null};
 }
 
+// A recount successor delivered outside the API before source correction IDs were
+// recorded: the exact receipt is on the current product, every predecessor is a
+// retired correction source, and each missing pointer has exactly one recorded
+// correction for that same edge. Any other lineage issue stays history review.
+function externalLegacyLineage(history, productId, receipts, external) {
+  if (!external.externalDelivery || history?.complete !== true || history.productId !== productId
+    || !Array.isArray(history.products) || history.products.length < 2 || !Array.isArray(history.corrections)
+    || !Array.isArray(receipts) || !receipts.some(receipt => Number(receipt.productId) === productId)) return false;
+  const byId = new Map(history.products.map(product => [product.productId, product]));
+  const current = byId.get(productId);
+  if (byId.size !== history.products.length || !current || current.status !== 'active' || current.nextProductId != null
+    || current.route !== 'normal' || current.holdReason != null || current.businessExclusion !== 'none'
+    || current.compatibilityExcluded || current.independentExclusion || current.legacyExportExcluded) return false;
+  const edge = product => history.corrections.filter(v => v.successorProductId === product.productId);
+  for (const product of history.products) {
+    if (product.productId !== productId && (product.status !== 'corrected' || product.route !== 'retired'
+      || product.nextProductId == null || !byId.has(product.nextProductId))) return false;
+    if (product.previousProductId == null) continue;
+    const links = edge(product);
+    if (links.length !== 1 || links[0].sourceProductId !== product.previousProductId
+      || byId.get(product.previousProductId)?.nextProductId !== product.productId) return false;
+    if (product.sourceCorrectionId != null && product.sourceCorrectionId !== links[0].correctionId) return false;
+  }
+  return Array.isArray(history.issues) && history.issues.every(issue => issue?.code === 'SOURCE_CORRECTION_NOT_RECORDED'
+    && byId.has(issue.productId) && byId.get(issue.productId).sourceCorrectionId == null
+    && edge(byId.get(issue.productId)).some(v => v.correctionId === issue.correctionId));
+}
+
 function classifyFirstSyncEvidence(evidence) {
   const block = code => ({mode:'review', blockers:[{code}]});
   if (evidence.session && (!evidence.remote || Number(evidence.session.remote_product_id) !== evidence.remote.id
@@ -60,7 +88,8 @@ function classifyFirstSyncEvidence(evidence) {
   }
   // Ordinary delivery retains its existing job/recovery/dispatch protections.
   if (evidence.session?.completed_at || evidence.sameOriginAcknowledged) return {mode:'ordinary',blockers:[]};
-  if (!evidence.history.complete || (!evidence.historyAdmission && (evidence.history.issues.length || evidence.history.identityChanged)))
+  if (!evidence.history.complete || (!evidence.historyAdmission && !evidence.externalLegacyLineage
+    && (evidence.history.issues.length || evidence.history.identityChanged)))
     return block('FIRST_SYNC_HISTORY_REVIEW_REQUIRED');
   if (evidence.otherOrigin) return block('FIRST_SYNC_ORIGIN_REVIEW_REQUIRED');
   // A reviewed recount admits field review only, never ordinary delivery.
@@ -130,6 +159,7 @@ async function readFirstSyncEligibility(client, config, observation, {jobId = nu
     acknowledgedRemoteId:facts.acknowledged_remote_id,
     previousDelivery:facts.previous_delivery||external.externalDelivery,
     sameOriginAcknowledged:facts.previous_delivery,externalDelivery:external.externalDelivery,externalDeliveryIssue:external.issue,
+    externalLegacyLineage:externalLegacyLineage(history,product.id,facts.external_delivery_receipts,external),
     otherOrigin:facts.other_origin,protectedWork:facts.protected_work,
     historicalEvidence:facts.historical_evidence||facts.snapshot_evidence||history.hasRecount};
   let classification=classifyFirstSyncEvidence(evidence);
@@ -154,4 +184,4 @@ async function readFirstSyncEligibility(client, config, observation, {jobId = nu
       session:progress?.session,fields:progress?.fields})};
 }
 
-module.exports={classifyFirstSyncEvidence,readFirstSyncEligibility,externalDeliveryEvidence};
+module.exports={classifyFirstSyncEvidence,readFirstSyncEligibility,externalDeliveryEvidence,externalLegacyLineage};
