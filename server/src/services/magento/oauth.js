@@ -7,6 +7,15 @@ function percentEncode(value) {
 }
 
 function compare(a, b) { return a < b ? -1 : a > b ? 1 : 0; }
+// Magento verifies against the Laminas-normalized request path, which decodes
+// escaped unreserved characters and `:@&=+$,/;%` once (a legacy `KL3/...` article
+// arrives as `%2F` but is signed as `/`). Other escapes stay as sent.
+function signedPath(pathname) {
+  return pathname.replace(/%([0-9A-Fa-f]{2})/g, (escape, hex) => {
+    const character = String.fromCharCode(parseInt(hex, 16));
+    return /[A-Za-z0-9\-_.~:@&=+$,/;%]/.test(character) ? character : escape;
+  });
+}
 
 // Only closed wrappers below select a method. JSON bodies are not OAuth parameters.
 function signRequest(method, urlString, credentials, {
@@ -33,7 +42,7 @@ function signRequest(method, urlString, credentials, {
       .map(([key, value]) => [percentEncode(key), percentEncode(value)])
       .sort((a, b) => compare(a[0], b[0]) || compare(a[1], b[1]))
       .map(([key, value]) => `${key}=${value}`).join('&');
-    const baseString = [method, `${url.origin}${url.pathname}`, parameters].map(percentEncode).join('&');
+    const baseString = [method, `${url.origin}${signedPath(url.pathname)}`, parameters].map(percentEncode).join('&');
     const key = `${percentEncode(credentials.consumerSecret)}&${percentEncode(credentials.accessTokenSecret)}`;
     oauth.oauth_signature = createHmac('sha256', key).update(baseString).digest('base64');
     return `OAuth ${Object.entries(oauth).sort(([a], [b]) => compare(a, b))
@@ -136,4 +145,4 @@ function signExistingProductUpdateRequest(url, credentials, sku, expectedId, opt
   }
   return signRequest('PUT', url, credentials, options);
 }
-module.exports = { percentEncode, signGetRequest, signCategoryCreateRequest, signSyncRequest, signTestDeleteRequest, signOptionCreateRequest, signScopedOptionLabelRequest, signAttributeCreateRequest, signProductMediaRequest, signProductVisibilityRequest, signExistingProductUpdateRequest };
+module.exports = { percentEncode, signedPath, signGetRequest, signCategoryCreateRequest, signSyncRequest, signTestDeleteRequest, signOptionCreateRequest, signScopedOptionLabelRequest, signAttributeCreateRequest, signProductMediaRequest, signProductVisibilityRequest, signExistingProductUpdateRequest };
