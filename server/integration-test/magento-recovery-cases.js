@@ -106,6 +106,65 @@ module.exports = async function recoveryCases({ t, suite, scenario, config }) {
     const restricted = await read(config, s.product.id, { databasePool: pool, canRecoverJobs: false, canReconcileLifecycle: true });
     assert.equal(restricted.job, null); assert.equal(restricted.actions.jobRecovery, false);
   });
+  await t.test('a reviewed supersede retires an uncertain category removal only when its outcome is observed exactly', async () => {
+    async function stuckRemoval() {
+      const s = await scenario({ initialLinks: [{ category_id: '375', position: 0 }] }); const job = await s.enqueue();
+      s.hooks.noCategoryMutation = true;
+      assert.equal((await s.apply(job)).state, 'uncertain'); s.hooks.noCategoryMutation = false;
+      assert.deepEqual(s.writes.map((w) => w.method), ['POST', 'DELETE']);
+      return { s, job };
+    }
+    const steps = async (id) => (await pool.query('SELECT ordinal,state FROM magento_sync_steps WHERE job_id=$1 ORDER BY ordinal', [id])).rows
+      .map((v) => [v.ordinal, v.state]);
+    const jobState = async (id) => (await pool.query('SELECT state FROM magento_sync_jobs WHERE id=$1', [id])).rows[0].state;
+    // The database refuses retirement outside the reviewed transaction.
+    const { s, job } = await stuckRemoval();
+    await assert.rejects(pool.query("UPDATE magento_sync_jobs SET state='superseded' WHERE id=$1", [job.id]), /requires reconciliation/);
+    await pool.query(`INSERT INTO magento_product_sync_requests(product_id,public_product_identity_id,desired_generation,active_job_id,
+      active_generation,state,reason_code) VALUES($1,$2,1,$3,1,'needs_attention','reconciliation_required')
+      ON CONFLICT(public_product_identity_id) DO UPDATE SET active_job_id=EXCLUDED.active_job_id,active_generation=1,
+        state='needs_attention',reason_code='reconciliation_required'`, [s.product.id, job.public_product_identity_id, job.id]);
+    // The removal provably did not apply: links are exactly the state it required.
+    // An unrelated later Magento edit does not matter for retirement.
+    s.remote().price = 999;
+    const review = await recovery.inspectSupersede(config, job.id, s.options);
+    assert.equal(review.canSupersede, true, JSON.stringify(review.blockers));
+    assert.deepEqual(review.review.steps.map((v) => [v.domain, v.state, v.outcome]),
+      [['coreProduct', 'verified', null], ['categoryLinkDelete', 'dispatched', 'not_applied'], ['categoryLinkSave', 'not_sent', null],
+        ['websites', 'not_sent', null], ['storeViews', 'not_sent', null]]);
+    await assert.rejects(recovery.supersede(config, job.id, { ...request(review), reviewHash: 'f'.repeat(64) }, s.options));
+    s.remote().extension_attributes.category_links.push({ category_id: '778', position: 0 });
+    await assert.rejects(recovery.supersede(config, job.id, request(review), s.options), { code: 'MAGENTO_RECOVERY_REVIEW_STALE' });
+    s.remote().extension_attributes.category_links.pop();
+    assert.equal(await jobState(job.id), 'uncertain'); assert.equal(s.writes.length, 2);
+    const done = await recovery.supersede(config, job.id, request(review), s.options);
+    assert.equal(done.job.state, 'superseded'); assert.equal(done.remoteWrites, 0); assert.equal(s.writes.length, 2);
+    assert.deepEqual(await steps(job.id), [[0, 'verified'], [1, 'verified']]);
+    const queued = (await pool.query('SELECT * FROM magento_product_sync_requests WHERE public_product_identity_id=$1', [job.public_product_identity_id])).rows[0];
+    assert.equal(queued.active_job_id, null); assert.equal(queued.state, 'pending'); assert.equal(queued.reason_code, null);
+    const repeated = await recovery.supersede(config, job.id, request(review), { ...s.options, fetchImpl: () => assert.fail('stored receipt must not read Magento') });
+    assert.equal(repeated.alreadyApplied, true);
+    assert.equal((await pool.query("SELECT count(*)::int n FROM audit_events WHERE event_key='magento_sync.recovery_superseded' AND subject_id=$1",
+      [review.reviewHash])).rows[0].n, 1);
+    // A third remote state is neither the removal's effect nor its precondition.
+    const other = await stuckRemoval();
+    other.s.remote().extension_attributes.category_links = [{ category_id: '375', position: 0 }, { category_id: '777', position: 0 }];
+    const blocked = await recovery.inspectSupersede(config, other.job.id, other.s.options);
+    assert.equal(blocked.canSupersede, false);
+    assert.deepEqual(blocked.blockers.map((b) => b.code), ['MAGENTO_SYNC_PREVIOUS_DISPATCH_UNRESOLVED']);
+    await assert.rejects(recovery.supersede(config, other.job.id, request(blocked), other.s.options));
+    assert.equal(await jobState(other.job.id), 'uncertain');
+    // An operator-applied removal is observed as applied, even with an unrelated preserved-field change.
+    other.s.remote().extension_attributes.category_links = [];
+    other.s.remote().custom_attributes = other.s.remote().custom_attributes.filter((a) => a.attribute_code !== 'unknown_attribute');
+    const applied = await recovery.inspectSupersede(config, other.job.id, other.s.options);
+    assert.equal(applied.review.steps[1].outcome, 'applied', JSON.stringify(applied.blockers));
+    assert.equal((await recovery.supersede(config, other.job.id, request(applied), other.s.options)).job.state, 'superseded');
+    // Nothing dispatched means nothing for this review to resolve.
+    const fresh = await scenario(); const queuedJob = await fresh.enqueue();
+    const idle = await recovery.inspectSupersede(config, queuedJob.id, fresh.options);
+    assert.equal(idle.canSupersede, false); assert.deepEqual(idle.blockers.map((b) => b.code), ['MAGENTO_SYNC_JOB_NOT_UNCERTAIN']);
+  });
   await t.test('an externally appeared CREATE counterpart cannot be adopted without the original durable dispatch marker', async () => {
     const s = await scenario({ create: true }); const job = await s.enqueue();
     // Simulate another writer only inside the disposable fake Magento fixture.

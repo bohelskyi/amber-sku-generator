@@ -534,4 +534,22 @@ test('Magento sync durable jobs: real PostgreSQL persistence, dispatch races and
       assert.equal(rows[1].state, 'succeeded'); assert.equal(rows[1].binding_revision_id, current.id);
     } finally { await pool.query('UPDATE magento_auto_sync_activation SET enabled=FALSE'); }
   });
+  await t.test('a reviewed supersede retires an uncertain job bound to an older publication under the current one', async () => {
+    const recovery = require('../src/services/magento/sync-job-recovery');
+    const latest = async () => (await pool.query("SELECT id FROM magento_binding_revisions WHERE installation_key=$1 AND state='published' ORDER BY version_number DESC LIMIT 1", [installationKey])).rows[0].id;
+    const bound = await latest();
+    const s = await scenario({ initialLinks: [{ category_id: '375', position: 0 }] });
+    const job = await enqueue(config, { ...s.input, bindingRevisionId: bound }, s.options);
+    s.hooks.noCategoryMutation = true; assert.equal((await s.apply(job)).state, 'uncertain'); s.hooks.noCategoryMutation = false;
+    const newer = await makeDraft();
+    await bindings.publishDraft(newer.id, { expectedRevision: newer.revision, expectedCurrentId: bound }, mutations);
+    await assert.rejects(require('../src/services/magento/sync-job-recovery').inspect(config, job.id, s.options),
+      { code: 'MAGENTO_SYNC_PUBLISHED_CURRENT_BINDING_REQUIRED' });
+    s.remote().extension_attributes.category_links = [];
+    const review = await recovery.inspectSupersede(config, job.id, s.options);
+    assert.equal(review.canSupersede, true, JSON.stringify(review.blockers));
+    const done = await recovery.supersede(config, job.id,
+      { review: review.review, reviewHash: review.reviewHash, reason: 'Видалення з категорії перевірено вручну' }, s.options);
+    assert.equal(done.job.state, 'superseded'); assert.equal(s.writes.length, 2);
+  });
 });

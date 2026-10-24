@@ -151,5 +151,103 @@ async function continueJob(config, id, input, options = {}) {
   const job = await jobs.applyJob(config, id, { ...options, apply: true, recoveryReview: input.review, recoveryReason: input.reason.trim() });
   return { job: await get(config, job.id, options), reviewHash: input.reviewHash };
 }
-module.exports = { FORMAT, summary, get, inspect, reconcile, continueJob,
+// An uncertain job may be retired (superseded) without any Magento write when
+// every dispatched step is a category-link step whose outcome is observed exactly: its
+// effect is present, or the links are exactly the state it required before dispatch.
+// Later Amber edits, a newer binding publication or manual Magento edits elsewhere do
+// not matter here: the worker replans the next job from a fresh observation under the
+// current publication. Any other dispatched domain stays for ordinary reconciliation.
+const SUPERSEDE_FORMAT = 'magento-job-supersede-v1';
+const LINK_STEPS = ['categoryLinkDelete', 'categoryLinkSave'];
+function dispatchedOutcome(job, operation, observation) {
+  if (!LINK_STEPS.includes(operation.domain)) return null;
+  if (plan.matches(operation, observation)) return 'applied';
+  try { plan.precondition(job, operation, observation); return 'not_applied'; } catch { return null; }
+}
+async function currentBinding(job, options) {
+  const row = (await options.databasePool.query(`SELECT id FROM magento_binding_revisions WHERE installation_key=$1
+    AND state='published' ORDER BY version_number DESC LIMIT 1`, [job.installation_key])).rows[0];
+  if (!row) fail('MAGENTO_SYNC_PUBLISHED_CURRENT_BINDING_REQUIRED');
+  return row.id;
+}
+async function supersedeInside(config, job, steps, state, options) {
+  const blockers = [];
+  let observation = null, checked = [];
+  try {
+    if (job.state !== 'uncertain') fail('MAGENTO_SYNC_JOB_NOT_UNCERTAIN');
+    if (String(job.public_product_identity_id) !== String(state.publicIdentityId) || job.sku !== state.publicSku)
+      fail('MAGENTO_SYNC_REMOTE_IDENTITY_CHANGED');
+    if (c.hash(job.intent) !== job.plan_hash) fail('MAGENTO_SYNC_PLAN_INTEGRITY');
+    ({ observation } = await jobs.recoveryBoundary.observe(config, { sku: job.sku, bindingRevisionId: state.revision.id },
+      { ...options, fetchImpl: boundedGet(options.fetchImpl) }));
+    const remoteId = Number(job.remote_product_id || job.baseline.raw?.id);
+    if (!observation.raw || observation.raw.sku !== job.sku || !Number.isSafeInteger(remoteId) || observation.raw.id !== remoteId)
+      fail('MAGENTO_SYNC_REMOTE_IDENTITY_CHANGED');
+    if (observation.categoryFailures?.length) fail('MAGENTO_SYNC_CATEGORY_READ_FAILED');
+    checked = job.intent.operations.map((op, ordinal) => {
+      const stepState = steps.find((s) => s.ordinal === ordinal)?.state || 'not_sent';
+      return { ordinal, domain: op.domain, state: stepState,
+        outcome: stepState === 'dispatched' ? dispatchedOutcome(job, op, observation) : null };
+    });
+    if (!checked.some((s) => s.state === 'dispatched')) fail('MAGENTO_SYNC_NO_DISPATCH_TO_RESOLVE');
+    if (checked.some((s) => s.state === 'dispatched' && !s.outcome)) blockers.push({ code: 'MAGENTO_SYNC_PREVIOUS_DISPATCH_UNRESOLVED' });
+  } catch (cause) {
+    blockers.push({ code: /^(MAGENTO|ADMIN|EXPORT)_[A-Z_]+$/.test(cause.code || '') ? cause.code : 'MAGENTO_SYNC_READ_FAILED' });
+  }
+  const review = { format: SUPERSEDE_FORMAT, jobId: job.id, planHash: job.plan_hash, jobFingerprint: fingerprint(job, steps),
+    remoteFingerprint: observation ? remoteFingerprint(observation) : null, steps: checked, blockers };
+  return { job: summary(job, steps), review, reviewHash: c.hash(review), blockers, canSupersede: !blockers.length && !!observation };
+}
+async function inspectSupersede(config, id, options = {}) {
+  options = optionsFor(options); const { job } = await readJob(id, options);
+  if (!config.configured || job.origin_hash !== c.originHash(config.baseUrl)) fail('MAGENTO_SYNC_INSTALLATION_MISMATCH');
+  return jobs.recoveryBoundary.guard(config, { sku: job.sku, bindingRevisionId: await currentBinding(job, options) },
+    { ...options, recoveryInspectionOnly: true }, async (state) => {
+      const fresh = await readJob(id, options);
+      return supersedeInside(config, fresh.job, fresh.steps, state, options);
+    }, true);
+}
+async function supersede(config, id, input, options = {}) {
+  c.command(input, ['review', 'reviewHash', 'reason']); c.identity(id);
+  if (typeof input.reason !== 'string' || input.reason.trim().length < 3 || input.reason.length > 2000) c.invalid();
+  c.safeData(input.review);
+  if (input.review?.format !== SUPERSEDE_FORMAT || input.review.jobId !== id || c.hash(input.review) !== input.reviewHash) fail();
+  options = optionsFor(options); const { job } = await readJob(id, options);
+  if (!config.configured || job.origin_hash !== c.originHash(config.baseUrl)) fail('MAGENTO_SYNC_INSTALLATION_MISMATCH');
+  const previous = (await options.databasePool.query(`SELECT details FROM audit_events
+    WHERE event_key='magento_sync.recovery_superseded' AND subject_id=$1`, [input.reviewHash])).rows[0];
+  if (previous) return { ...previous.details.result, alreadyApplied: true };
+  return jobs.recoveryBoundary.guard(config, { sku: job.sku, bindingRevisionId: await currentBinding(job, options) }, options, async (state) => {
+    const fresh = await readJob(id, options);
+    const checked = await supersedeInside(config, fresh.job, fresh.steps, state, options);
+    if (checked.reviewHash !== input.reviewHash || !checked.canSupersede) fail();
+    const updated = await jobs.recoveryBoundary.ledger(options.databasePool, options.actorUserId, 'superseded', async (client) => {
+      await assertActorStillAuthorized(client, options.actorUserId, 'export_templates.publish', c.error);
+      const locked = (await client.query('SELECT * FROM magento_sync_jobs WHERE id=$1 FOR UPDATE', [id])).rows[0];
+      const lockedSteps = (await client.query('SELECT * FROM magento_sync_steps WHERE job_id=$1 ORDER BY ordinal', [id])).rows;
+      if (locked?.state !== 'uncertain' || fingerprint(locked, lockedSteps) !== checked.review.jobFingerprint) fail();
+      // Every dispatch marker is resolved by this exact observation (the audit keeps
+      // whether its effect was applied or provably absent); the job is never resumed.
+      for (const item of checked.review.steps.filter((s) => s.outcome)) {
+        await client.query(`UPDATE magento_sync_steps SET state='verified',verified_at=CURRENT_TIMESTAMP
+          WHERE job_id=$1 AND ordinal=$2 AND state='dispatched'`, [id, item.ordinal]);
+      }
+      await client.query("SELECT set_config('amber.reviewed_job_supersede',$1,true)", [id]);
+      const row = (await client.query(`UPDATE magento_sync_jobs SET state='superseded',updated_at=CURRENT_TIMESTAMP,
+        failure=$2::jsonb WHERE id=$1 AND state='uncertain' RETURNING *`,
+      [id, JSON.stringify({ code: 'MAGENTO_SYNC_REVIEWED_SUPERSEDED', reconciliationOnly: true })])).rows[0];
+      await client.query(`UPDATE magento_product_sync_requests SET active_job_id=NULL,active_generation=NULL,state='pending',
+        reason_code=NULL,next_attempt_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
+        WHERE active_job_id=$1 AND reason_code='reconciliation_required'`, [id]);
+      const steps = (await client.query('SELECT * FROM magento_sync_steps WHERE job_id=$1 ORDER BY ordinal', [id])).rows;
+      const result = { job: summary(row, steps), remoteWrites: 0, reviewHash: input.reviewHash };
+      await writeAuditEvent(client, { mutationContext: { actorUserId: options.actorUserId, requestId: options.mutationContext?.requestId },
+        eventKey: 'magento_sync.recovery_superseded', subjectType: 'magento_sync_recovery', subjectId: input.reviewHash,
+        details: { jobId: id, reason: input.reason.trim(), steps: checked.review.steps, result } });
+      return row;
+    });
+    return { job: await get(config, updated.id, options), remoteWrites: 0, reviewHash: input.reviewHash, alreadyApplied: false };
+  }, true);
+}
+module.exports = { FORMAT, SUPERSEDE_FORMAT, summary, get, inspect, reconcile, continueJob, inspectSupersede, supersede,
   assertReviewedJob, assertReviewedRemote, fingerprint, remoteFingerprint };

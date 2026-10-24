@@ -22,9 +22,10 @@ router.get(`${root}/products/:id`, requireAnyPermission(['export_templates.publi
   lifecycle.productRecovery(config, productId(req), { ...options(req),
     canRecoverJobs: req.permissions.includes('export_templates.publish'), canReconcileLifecycle: req.permissions.includes('exports.reconcile') })));
 router.get(`${root}/jobs/:id`, requirePermission('export_templates.publish'), handle((req) => jobs.get(config, req.params.id, options(req))));
-for (const [path, operation] of [['inspect', jobs.inspect], ['reconcile', jobs.reconcile], ['continue', jobs.continueJob]]) {
+for (const [path, operation] of [['inspect', jobs.inspect], ['reconcile', jobs.reconcile], ['continue', jobs.continueJob],
+  ['supersede-inspect', jobs.inspectSupersede], ['supersede', jobs.supersede]]) {
   router.post(`${root}/jobs/:id/${path}`, requirePermission('export_templates.publish'), handle((req) => {
-    if (path === 'inspect') { c.command(req.body, []); return operation(config, req.params.id, options(req)); }
+    if (path.endsWith('inspect')) { c.command(req.body, []); return operation(config, req.params.id, options(req)); }
     return operation(config, req.params.id, req.body, options(req));
   }));
 }

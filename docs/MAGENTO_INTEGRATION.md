@@ -322,7 +322,7 @@ returns a separate history-review step, rather than prematurely offering resync.
 
 The separate `/api/admin/magento-recovery` router preserves the authenticated
 active-user and synchronizer-token CSRF boundaries. No browser calls Magento.
-No migration, role grant or replacement of durable jobs is introduced.
+No role grant or replacement of durable jobs is introduced; migration 084 adds only the reviewed retirement described below.
 
 | Endpoint | Authority and effect |
 | --- | --- |
@@ -331,6 +331,7 @@ No migration, role grant or replacement of durable jobs is introduced.
 | POST `/jobs/:id/inspect` | Same capability; bounded remote GET evidence only, no dispatch or acknowledgement. |
 | POST `/jobs/:id/reconcile` | Same capability; rechecks reviewed local/remote fingerprints and records only verified results, with an audit receipt; no remote mutation. |
 | POST `/jobs/:id/continue` | Same capability; separate explicit reviewed continuation of remaining original steps through the existing guarded job executor. |
+| POST `/jobs/:id/supersede-inspect`, `/jobs/:id/supersede` | Same capability; reviewed retirement of an `uncertain` job (migration 084), see below. GET evidence only; no remote mutation. |
 | POST `/products/:id/lifecycle-preview`, `/lifecycle-apply` | `exports.reconcile`; exact exposure/stable-recount, explicitly reviewed historical recount, or eligible compatibility reconciliation, never a blanket hold release. |
 | POST `/products/:id/history-inspect` | `exports.reconcile`; bounded GET-only observations of the exact public articles in local correction history; no repair token, job, acknowledgement or mutation. |
 
@@ -340,6 +341,21 @@ budget. Local history changes mark observations stale; Magento errors remain
 unavailable evidence and cannot be interpreted as absence. Local versions and the
 report remain available when observation fails. This evidence never authorizes an
 apply and does not acknowledge old files or predecessor delivery.
+
+Reviewed retirement (`supersede`) is the exit for an `uncertain` job that ordinary
+reconciliation cannot finish, for example after a newer binding publication, a later
+Amber edit or an operator's manual Magento correction changed its bound evidence. It
+is allowed only when every dispatched step is a category-link step whose outcome the
+fresh observation (under the current publication, same public identity, SKU and
+remote ID) shows exactly: its effect is present, or the links equal the exact state it
+required before dispatch. Any other dispatched domain or a third link state stays
+blocked. The review is hash-bound; apply re-observes, locks the job, resolves each
+dispatch marker as verified, sets the job `superseded` (failure
+`MAGENTO_SYNC_REVIEWED_SUPERSEDED`) only inside a transaction naming that job, returns
+its `reconciliation_required` request to `pending`, and writes a
+`magento_sync.recovery_superseded` audit with each step's `applied`/`not_applied`
+outcome. Unsent steps are never sent; the worker replans the next job from fresh
+evidence. Outside that transaction the database still refuses the transition.
 
 Inspection is not a generic retry. Dispatched but unverified steps must match exact
 GET evidence before acknowledgement. A partially reconciled job stays uncertain,

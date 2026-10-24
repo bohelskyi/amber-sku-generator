@@ -10,7 +10,7 @@ Checksums canonicalize CRLF and lone CR to LF before hashing, so Windows and Lin
 
 ## Forward-only rule
 
-Checked-in migrations now span `000`–`083`. Migrations `000`–`083` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
+Checked-in migrations now span `000`–`084`. Migrations `000`–`084` are immutable history. Never edit any already-applied migration; add a forward migration. Whether each has been applied in a particular deployment must be checked in that database's `schema_migrations` table:
 
 - never edit, reorder, rename, or replace an applied migration;
 - add the next lexically ordered forward migration;
@@ -156,6 +156,7 @@ New paths touching these resources must follow existing lock order and final-sta
 | `081_first_sync_magento_managed_seo.sql` | Automatic `remote_retained` receipt for derived SEO with an approved `magento_managed` policy. See [FIRST_SYNC_CH_DECISIONS](FIRST_SYNC_CH_DECISIONS.md). |
 | `082_retained_export_dispositions.sql` | Permanent reviewed disposition of a retained legacy export file for first-sync history admission. See [RETAINED_EXPORT_DISPOSITION](RETAINED_EXPORT_DISPOSITION.md). |
 | `083_canonical_weight_magento_readback.sql` | Reviewed Magento `decor_weight` readback source for zero canonical SV weight. See [CANONICAL_WEIGHT_REPAIR](CANONICAL_WEIGHT_REPAIR.md#magento-readback-source). |
+| `084_reviewed_uncertain_job_supersede.sql` | Reviewed retirement of an uncertain sync job once every dispatch is resolved. See [MAGENTO_INTEGRATION](MAGENTO_INTEGRATION.md#controlled-product-recovery). |
 
 ## Test deletion migration
 
@@ -528,3 +529,13 @@ and the product-delta assertion (Magento receipts may change only `weight` and
 is unchanged; its receipt exception covers both changed inputs. It writes no product,
 receipt or delivery data; 072/079 checksums are unchanged. See
 [Magento readback source](CANONICAL_WEIGHT_REPAIR.md#magento-readback-source).
+
+## 084 — reviewed retirement of an uncertain sync job
+
+[084_reviewed_uncertain_job_supersede.sql](../server/migrations/084_reviewed_uncertain_job_supersede.sql)
+replaces `guard_magento_sync_supersession` with the same 044 protection and the same
+068 standard-reactivation cancellation, plus one new exception: an `uncertain` job may
+become `superseded` only when it has no remaining `dispatched` step and the
+transaction-local setting `amber.reviewed_job_supersede` names that exact job. Only
+`sync-job-recovery.supersede` sets it, after an exact fresh observation has resolved
+every dispatch marker. It writes no job, step, request or product data.
