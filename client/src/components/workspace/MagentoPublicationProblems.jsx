@@ -7,6 +7,7 @@ import { withRepairContext } from '../../lib/magento-repair-context.js';
 import { Notice } from '../app/UiPrimitives.jsx';
 import MagentoDetails from './MagentoDetails.jsx';
 import { problemTitle } from '../attention/sync-problem-presentation.js';
+import { domainPolicyGuidance } from '../../lib/magento-domain-policy.js';
 
 const categoryNames = { BR: 'Браслети', NM: 'Намиста', KL: 'Кулони', CH: 'Чотки', AR: 'Картини', SV: 'Сувеніри' };
 const reasons = {
@@ -72,7 +73,10 @@ export default function MagentoPublicationProblems({ review, revision, currentPu
     const category = blocker.category || source?.category || product?.group || routeKey?.split(/[.:]/)[0];
     const target = attribute?.target || blocker.target;
     const integrationIssues = product?.blockers?.filter((item) => ['integration_configuration', 'integration_preparation'].includes(item.resolution)) || [];
-    const productFields = integrationIssues.flatMap((issue) => revision.bindings?.attributes?.filter((item) => item.routeKey === routeKey && item.target === (issue.target || issue.field))
+    const domainIssues = product?.blockers?.map(problem => ({ problem, guidance: domainPolicyGuidance(problem,
+      { review, revision, currentPublishedId, productId: blocker.productId, repairContext }) })).filter(item => item.guidance) || [];
+    const domainOnly = domainIssues.length > 0 && domainIssues.length === product.blockers.length;
+    const productFields = integrationIssues.filter(issue => issue.code !== 'DOMAIN_POLICY_REVIEW_REQUIRED').flatMap((issue) => revision.bindings?.attributes?.filter((item) => item.routeKey === routeKey && item.target === (issue.target || issue.field))
       .map((item) => ({ category, field: item.target, rowId: item.rowId, routeKey })) || []);
     const fields = blocker.sourceId && definition ? fieldsForSource(definition, blocker.sourceId, true).map((field) => ({
       category: definition.groups[field.groupIndex].route, field: field.column,
@@ -86,29 +90,40 @@ export default function MagentoPublicationProblems({ review, revision, currentPu
       value && `значення «${value}»`, blocker.path].filter(Boolean).join(' → ');
     const isSource = blocker.code.startsWith('SOURCE_REFERENCE_');
     const productNeedsAttention = !product?.blockers?.length || integrationIssues.length !== product.blockers.length;
-    const reason = blocker.code === 'AFFECTED_CURRENT_PREVIEW_BLOCKED' && fields.length
+    const reason = domainOnly ? 'Для цього товару потрібно перевірити правила передавання полів.' : blocker.code === 'AFFECTED_CURRENT_PREVIEW_BLOCKED' && fields.length
       ? 'Перевірка товару виявила проблему в підготовленому правилі. Виправте вказане поле цієї підготовки.'
       : reasons[blocker.code] || (isSource ? sourceReasons[blocker.requirement] || 'Джерело характеристики не пройшло перевірку. Перевірте правило поля.'
       : 'Перевірка налаштувань не пройдена. Точну причину наведено в деталях нижче; її можна скопіювати для виправлення.');
-    return { blocker, category, fields, context, reason, article, product, productNeedsAttention };
+    return { blocker, category, fields, context, reason, article, product, productNeedsAttention, domainIssues, domainOnly };
   });
   const report = JSON.stringify({ bindingRevisionId: revision.id, expectedRevision: revision.revision, expectedCurrentId: currentPublishedId,
     blockers: review.blockers, checked: review.checked.filter((item) => review.blockers.some((blocker) => blocker.productId && blocker.productId === item.productId)),
   }, null, 2);
   return <section aria-label="Що блокує застосування" className="space-y-3"><Notice tone="warning">
     <p className="font-semibold">Зміни ще не застосовано. Що потрібно виправити:</p>
-    <ul className="space-y-3">{items.map(({ blocker, category, fields, context, reason, article, product, productNeedsAttention }, index) => <li key={index}>
+    <ul className="space-y-3">{items.map(({ blocker, category, fields, context, reason, article, product, productNeedsAttention, domainIssues, domainOnly }, index) => <li key={index}>
       {context && <p className="font-semibold break-words">{context}</p>}
       <p>{reason}{!compact && blocker.routeKey ? ` · ${blocker.routeKey}` : ''}</p>
       {blocker.unresolvedValueIds?.length > 0 && <p>Непідтверджені значення: {blocker.unresolvedValueIds.join(', ')}.</p>}
       {blocker.productId && <><p>Товар: {article || `№${blocker.productId}`}.</p>
-        {product?.blockers?.length > 0 && <ul>{product.blockers.map((item, i) => <li key={i}>{typeof item === 'string' ? reasons[item] || item : problemTitle(item)}</li>)}</ul>}
-        {(productNeedsAttention || !fields.length) && <Link className="underline" to={`/attention?problem=${encodeURIComponent(blocker.productId)}`}>Відкрити проблему цього товару</Link>}
+        {product?.blockers?.length > 0 && <ul>{product.blockers.map((item, i) => {
+          const guidance = domainIssues.find(entry => entry.problem === item)?.guidance;
+          return <li key={i}>{guidance ? <><p>{guidance.message}</p><Link className="underline" to={guidance.href}>{guidance.linkLabel}</Link></>
+            : typeof item === 'string' ? reasons[item] || item : problemTitle(item)}</li>;
+        })}</ul>}
+        {!domainOnly && (productNeedsAttention || !fields.length) && <Link className="underline" to={`/attention?problem=${encodeURIComponent(blocker.productId)}`}>Відкрити проблему цього товару</Link>}
       </>}
       {blocker.code === 'REPRESENTATIVE_CREATE_REQUIRED' && onExample && category && <button type="button" className="btn btn-outline btn-compact-md" onClick={() => onExample(category)}>Перевірити приклад нового товару: {categoryName(category)}</button>}
       {fields.map((field, fieldIndex) => <p key={fieldIndex}><Link className="underline" to={fieldLink(field)}>Перевірити поле: {categoryName(field.category)} → {fieldName(field.field)} · {field.rowId === 'english' ? 'EN' : 'UA'}</Link></p>)}
       {!fields.length && category && !blocker.productId && blocker.code !== 'REPRESENTATIVE_CREATE_REQUIRED' && <Link className="underline" to={fieldLink({ category })}>Перевірити налаштування: {categoryName(category)}</Link>}
-      <MagentoDetails summary="Точна причина перевірки">{() => <pre className="text-xs whitespace-pre-wrap break-words">{JSON.stringify(blocker, null, 2)}</pre>}</MagentoDetails>
+      <MagentoDetails summary="Точна причина перевірки">{() => <>
+        {domainIssues.map(({ problem, guidance }, i) => <div key={i} className="space-y-2">
+          <dl><dt>Операція</dt><dd>{guidance.operationLabel}</dd><dt>Поле</dt><dd>{guidance.fieldLabel}</dd>
+            <dt>Мова</dt><dd>{guidance.scopeLabel}</dd><dt>Потрібна поведінка</dt><dd>{guidance.policyLabel}</dd></dl>
+          <pre className="text-xs whitespace-pre-wrap break-words">{JSON.stringify(problem, null, 2)}</pre>
+        </div>)}
+        <pre className="text-xs whitespace-pre-wrap break-words">{JSON.stringify(blocker, null, 2)}</pre>
+      </>}</MagentoDetails>
     </li>)}</ul>
     <p className="mt-3 text-sm">Після виправлення поверніться до застосування й повторіть перевірку впливу на товари.</p>
   </Notice>
