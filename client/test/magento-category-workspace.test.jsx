@@ -7,6 +7,7 @@ import MagentoCategoryWorkspace from '../src/components/workspace/MagentoCategor
 import MagentoWorkspaceReview from '../src/components/workspace/MagentoWorkspaceReview.jsx';
 import MagentoIntegrationPage from '../src/pages/MagentoIntegrationPage.jsx';
 import { assertCategoryScope, changedFields, decisionKey, routeLabel, uniqueOptionSuggestions } from '../src/lib/magento-category-workspace.js';
+import * as policyLabels from '../src/lib/magento-policy-labels.js';
 
 vi.mock('../src/lib/api.js', () => ({ api: { get: vi.fn(), post: vi.fn(), put: vi.fn() } }));
 const permissions = ['export_templates.view', 'export_templates.manage', 'export_templates.publish', 'exports.view', 'exports.create'];
@@ -82,6 +83,40 @@ function saveDraft() {
 }
 beforeEach(() => { vi.resetAllMocks(); mocks(); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+
+it('reads the field-editor policy label from the shared presenter and retains the saved-name explanation', async () => {
+  const label = vi.spyOn(policyLabels, 'deliveryPolicyLabel').mockReturnValue('Спільний підпис політики');
+  mount(); await textFields(); fireEvent.click(await screen.findByRole('button', { name: 'Назва' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Поле Magento' });
+  expect(await within(dialog).findByText('Спільний підпис політики')).toBeTruthy();
+  expect(label).toHaveBeenCalledWith('authoritative_create_update');
+  expect(within(dialog).getByText('Нове правило формує назви нових товарів. Збережені назви чинних товарів залишаються закріпленими; їх застосування потребує окремого підтвердження Адміністратора.')).toBeTruthy();
+  expect(api.post).not.toHaveBeenCalled(); expect(api.put).not.toHaveBeenCalled();
+});
+
+it('uses the shared primary-review policy label while submitting the unchanged enum and explicit review', async () => {
+  const original = policyLabels.deliveryPolicyLabel;
+  const label = vi.spyOn(policyLabels, 'deliveryPolicyLabel').mockImplementation((policy) => policy === 'initialize_create_only' ? 'Спільний підпис політики' : original(policy));
+  const policy = { ...entry, id: 'policy:color-binding:all', kind: 'policy', source: undefined, evaluated: undefined,
+    label: 'all', identity: 'initialize_create_only' };
+  api.get.mockResolvedValue({ data: { revision: { ...draft, schema: { attributeSets: [], attributes: [] }, bindings: { attributes: [] } },
+    entries: [policy], validation: { diagnostics: [] } } });
+  api.post.mockResolvedValue({ data: { ...draft, revision: '2' } }); const changed = vi.fn();
+  render(<MagentoWorkspaceReview revision={draft} categoryCode="BR" questions={questions} selections={{}} onChanged={changed} />);
+  const select = await screen.findByLabelText('Відповідність: Колір · UA');
+  expect(within(select).getByRole('option', { name: 'Спільний підпис політики' }).value).toBe('initialize_create_only');
+  expect(label).toHaveBeenCalledWith('initialize_create_only');
+  expect(select.value).toBe('');
+  fireEvent.change(select, { target: { value: 'initialize_create_only' } });
+  expect(screen.getByRole('button', { name: 'Підтвердити' }).disabled).toBe(true);
+  fireEvent.change(screen.getByLabelText('Пояснення перевірки'), { target: { value: 'Свідомо зберігати чинні значення' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Підтвердити' }));
+  await waitFor(() => expect(changed).toHaveBeenCalledWith({ ...draft, revision: '2' }));
+  expect(api.post).toHaveBeenCalledExactlyOnceWith('/admin/magento-integration/bindings/isolated/decision', {
+    expectedRevision: '1', binding: 'policy:color-binding:all', action: 'approve', acceptReview: true,
+    reason: 'Свідомо зберігати чинні значення', policy: 'initialize_create_only',
+  });
+});
 
 it('reuses the exact initial base category read while preserving a different language baseline', async () => {
   mount(); await storeFields(); await screen.findByRole('button', { name: 'Матеріал' });

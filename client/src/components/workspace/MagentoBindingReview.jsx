@@ -5,6 +5,7 @@ import { useAuth } from '../../auth/auth-context.js';
 import { LoadingState, Notice, StatusBadge } from '../app/UiPrimitives.jsx';
 import MagentoDetails from './MagentoDetails.jsx';
 import { withRepairContext } from '../../lib/magento-repair-context.js';
+import { deliveryPolicyLabel, disabledProductInitializationHint } from '../../lib/magento-policy-labels.js';
 
 const root = '/admin/magento-integration';
 const kinds = { route: 'Набір атрибутів', attribute: 'Атрибут', option: 'Значення', category: 'Категорія Magento', policy: 'Правило доставки' };
@@ -37,7 +38,7 @@ function Decision({ entry, revision, busy, act }) {
     {choices.length > 0 && <div className="flex flex-wrap items-end gap-2"><label className="text-sm">Кандидат<select className="input" value={identity} disabled={busy} onChange={(event) => setIdentity(event.target.value)}><option value="">Оберіть точну відповідність</option>{choices.map((choice) => <option key={choice.id} value={choice.id}>{choice.label} / {choice.id}</option>)}</select></label>
       <button type="button" className="btn btn-outline btn-compact-md" disabled={busy || !identity || (entry.kind === 'option' && !entry.evaluated)} onClick={() => act('select', { ...base, identity: entry.kind === 'route' ? Number(identity) : identity })}>Вибрати кандидата</button></div>}
     {entry.kind === 'policy' && <label className="block text-sm">Доставка поля<select className="input" value={policy} disabled={busy} onChange={(event) => setPolicy(event.target.value)}>
-      <option value="">Оберіть правило доставки</option><option value="authoritative_create_update">Створення та оновлення</option><option value="initialize_create_only">Лише під час створення{entry.target === 'product_online' ? ' · вимкнений товар' : ''}</option><option value="magento_managed">Зберігати значення Magento</option>
+      <option value="">Оберіть правило доставки</option><option value="authoritative_create_update">{deliveryPolicyLabel('authoritative_create_update')}</option><option value="initialize_create_only">{deliveryPolicyLabel('initialize_create_only')}{entry.target === 'product_online' ? disabledProductInitializationHint : ''}</option><option value="magento_managed">{deliveryPolicyLabel('magento_managed')}</option>
     </select></label>}
     <label className="block text-sm">Пояснення перевірки<input className="input" maxLength={2000} value={reason} disabled={busy} onChange={(event) => setReason(event.target.value)} /></label>
     <div className="flex flex-wrap gap-2"><button type="button" className="btn btn-outline btn-compact-md" disabled={busy || !entry.identity || (!entry.exact && !reason.trim()) || (entry.kind === 'policy' && !policies.includes(policy))} onClick={() => act('decision', { ...base, action: 'approve', acceptReview: true, ...(reason ? { reason } : {}), ...(entry.kind === 'policy' ? { policy, ...(entry.target === 'product_online' && entry.row === 'base' && policy === 'initialize_create_only' ? { createValue: '2' } : {}) } : {}) })}>Підтвердити зв’язок</button>

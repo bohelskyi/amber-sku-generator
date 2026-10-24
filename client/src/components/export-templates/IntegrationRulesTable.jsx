@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { fieldLabels, protectedCells } from '../../lib/export-template-editor.js';
 import { sourceLabel, summary } from '../../lib/export-template-presentation.js';
+import { deliveryPolicyLabel } from '../../lib/magento-policy-labels.js';
 import './export-template-editor.css';
 
 // Presentation of persisted expressions only. Product results are calculated by
@@ -20,8 +21,7 @@ function policyText(revision, route, column, rowId) {
   const keys = (revision.bindings?.attributes || []).filter((item) => item.routeKey.split(/[.:]/)[0] === route
     && item.target === column && item.rowId === rowId).map((item) => item.bindingKey);
   const policies = (revision.bindings?.policies || []).filter((item) => keys.includes(item.bindingKey) && item.reviewState === 'approved');
-  const labels = { authoritative_create_update: 'Amber створює та оновлює', initialize_create_only: 'Amber задає лише при створенні', magento_managed: 'Значенням керує Magento' };
-  return [...new Set(policies.map((item) => labels[item.policy] || 'Правило потребує перевірки'))].join('; ') || 'Поведінку ще не підтверджено';
+  return [...new Set(policies.map((item) => deliveryPolicyLabel(item.policy) || 'Правило потребує перевірки'))].join('; ') || 'Поведінку ще не підтверджено';
 }
 
 export function IntegrationRulesTable({ definition, groupIndex, registry, revision, onSelect, readOnly, onCreate }) {

@@ -7,6 +7,7 @@ import { api } from '../src/lib/api.js';
 import MagentoBindingReview from '../src/components/workspace/MagentoBindingReview.jsx';
 import { DefinitionEditor } from '../src/components/export-templates/DefinitionEditor.jsx';
 import { addIntegrationCategory } from '../src/lib/integration-template.js';
+import * as policyLabels from '../src/lib/magento-policy-labels.js';
 const require = createRequire(import.meta.url);
 const { definition } = require('../../server/test/fixtures/magento-v4');
 const { compileDefinition } = require('../../server/src/services/export-templates/definition');
@@ -95,6 +96,9 @@ it.each(['magento_managed','initialize_create_only','blocked'])('uses the actual
   api.get.mockResolvedValue({data:reviewData([entry])});api.post.mockResolvedValue({data:{...draft,revision:'4'}});
   shell();const select=await screen.findByLabelText('Доставка поля');
   expect(select.value).toBe(identity==='blocked'?'':identity);
+  expect(within(select).getByRole('option', { name: 'Оновлюється з менеджера' }).value).toBe('authoritative_create_update');
+  expect(within(select).getByRole('option', { name: 'Лише під час створення · вимкнений товар' }).value).toBe('initialize_create_only');
+  expect(within(select).getByRole('option', { name: 'Зберігати значення Magento' }).value).toBe('magento_managed');
   fireEvent.change(screen.getByLabelText('Пояснення перевірки'),{target:{value:'Перевірене правило'}});
   const approve=screen.getByRole('button',{name:'Підтвердити зв’язок'});
   if(identity==='blocked'){
@@ -104,6 +108,25 @@ it.each(['magento_managed','initialize_create_only','blocked'])('uses the actual
   fireEvent.click(approve);
   expect(api.post).toHaveBeenCalledWith('/admin/magento-integration/bindings/draft/decision',expect.objectContaining({expectedRevision:'3',binding:'policy:field:all',action:'approve',policy:identity==='blocked'?'magento_managed':identity}));
   if(identity==='initialize_create_only')expect(api.post.mock.calls[0][1].createValue).toBe('2');
+});
+it('uses shared advanced-review labels and retains the disabled-product hint without sending a base-only create value for English', async () => {
+  const original = policyLabels.deliveryPolicyLabel;
+  const label = vi.spyOn(policyLabels, 'deliveryPolicyLabel').mockImplementation((policy) => policy === 'initialize_create_only' ? 'Спільний підпис політики' : original(policy));
+  const entry = { id: 'policy:field:en', kind: 'policy', group: 'SV', row: 'english', target: 'product_online', label: 'en',
+    reviewState: 'review_required', identity: 'initialize_create_only', exact: false, evidence: {} };
+  api.get.mockResolvedValue({ data: reviewData([entry]) }); api.post.mockResolvedValue({ data: { ...draft, revision: '4' } });
+  const changed = vi.fn(); shell({ onChanged: changed });
+  const select = await screen.findByLabelText('Доставка поля');
+  expect(within(select).getByRole('option', { name: 'Спільний підпис політики · вимкнений товар' }).value).toBe('initialize_create_only');
+  expect(label).toHaveBeenCalledWith('initialize_create_only');
+  expect(screen.getByRole('button', { name: 'Підтвердити зв’язок' }).disabled).toBe(true);
+  fireEvent.change(screen.getByLabelText('Пояснення перевірки'), { target: { value: 'Перевірене правило EN' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Підтвердити зв’язок' }));
+  await vi.waitFor(() => expect(changed).toHaveBeenCalled());
+  expect(api.post).toHaveBeenCalledExactlyOnceWith('/admin/magento-integration/bindings/draft/decision', {
+    expectedRevision: '3', binding: 'policy:field:en', action: 'approve', acceptReview: true,
+    reason: 'Перевірене правило EN', policy: 'initialize_create_only',
+  });
 });
 it('successor mode requires the current publication and keeps fresh observation separate from an exact clone',async()=>{
   const publication={...draft,id:'active',state:'published'};
