@@ -16,16 +16,21 @@ function approvedManifest(event, hash, database) {
 // resolved since (an audited operator decision); everything else stays exact.
 const heldCurrent = m => m.product.status === 'active' && m.product.corrected_to_product_id == null
   && m.product.corrected_from_product_id != null && m.lifecycle?.route === 'hold';
+// A later recount retires that successor; it keeps the same baseline identity, so its
+// released policy and its reviewed confirmation stay valid as recorded while current.
+const retiredSuccessor = m => m.product.status === 'corrected' && m.product.corrected_from_product_id != null
+  && m.product.corrected_to_product_id != null && m.lifecycle?.route === 'retired';
+const successor = m => heldCurrent(m) || retiredSuccessor(m);
 // After its reviewed historical exposure confirmation the held current keeps the
 // exact cutover evidence as priorEvidence, so the same proof stays valid.
 function baselineEvidence(m) {
   const e = m.lifecycle?.evidence;
-  return heldCurrent(m) && e?.origin === 'reconciliation' && e.action === 'magento_historical_recount_prior_exposure'
+  return successor(m) && e?.origin === 'reconciliation' && e.action === 'magento_historical_recount_prior_exposure'
     && e.priorEvidence?.origin === 'cutover' ? e.priorEvidence : e;
 }
 function matchesBaseline(member, entry) {
   const { product: p, lifecycle: f } = member, before = entry?.before, after = entry?.after;
-  const current = heldCurrent(member);
+  const current = successor(member);
   return entry?.productId === p.id && entry.sku === p.full_sku && entry.action === 'hold'
     && before?.evidence?.origin === 'migration_039' && before.evidence.coverage === 'unresolved_historical'
     && before.revision === '1' && before.confirmed_revision === '0' && before.source_correction_id === null

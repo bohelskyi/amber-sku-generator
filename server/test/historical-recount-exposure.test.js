@@ -68,3 +68,31 @@ test('a held current successor keeps its missing pointer only with its own verif
   other[3].cutoverBaseline = { productId: 5, manifestHash: 'a'.repeat(64), evidenceHash: digest(other[4].lifecycle.evidence) };
   assert.ok(service.lineageBlockers(other, corrections, 5).includes('CORRECTION_LINEAGE_CONFLICT'));
 });
+
+test('a later recount of a confirmed or released held successor keeps its baseline pointer through its own proof', () => {
+  // KL production shape: migration-039 ancestors -> the formerly held current (cutover
+  // baseline, released, maybe confirmed) -> a new recount current with a recorded pointer.
+  for (const confirmed of [false, true]) {
+    const { members, corrections } = fixture(), former = members[3];
+    former.lifecycle.source_correction_id = null; former.lifecycle.business_exclusion_state = 'none';
+    former.lifecycle.repair_manifest_hash = 'a'.repeat(64);
+    const cutover = { origin: 'cutover', decision: 'hold' };
+    former.lifecycle.evidence = confirmed ? { origin: 'reconciliation', action: 'magento_historical_recount_prior_exposure',
+      priorEvidence: cutover, magentoPriorExposure: { planHash: 'p'.repeat(64) } } : cutover;
+    assert.ok(service.lineageBlockers(members, corrections, 5).length, 'unproven former current is never legacy');
+    former.cutoverBaseline = { productId: 4, manifestHash: 'a'.repeat(64), evidenceHash: digest(cutover) };
+    assert.deepEqual(service.lineageBlockers(members, corrections, 5), [], String(confirmed));
+    const wrong = structuredClone(members); wrong[3].lifecycle.business_exclusion_state = 'excluded';
+    assert.ok(service.lineageBlockers(wrong, corrections, 5).includes('EXCLUSION_OR_UNKNOWN_POLICY'));
+  }
+});
+
+test('an archived predecessor counts as retired only when it was already recounted into the chain', () => {
+  const { members, corrections } = fixture();
+  members[0].product.status = 'archived';
+  assert.deepEqual(service.lineageBlockers(members, corrections, 5), []);
+  members[0].product.corrected_to_product_id = null;
+  assert.ok(service.lineageBlockers(members, corrections, 5).includes('PREDECESSOR_NOT_RETIRED'));
+  const live = fixture(); live.members[0].lifecycle.route = 'normal'; live.members[0].product.status = 'archived';
+  assert.ok(service.lineageBlockers(live.members, live.corrections, 5).includes('PREDECESSOR_NOT_RETIRED'));
+});
