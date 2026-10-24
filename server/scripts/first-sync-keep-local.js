@@ -10,7 +10,7 @@ const path = require('node:path');
 const { createRequire } = require('node:module');
 
 const TARGETS = new Set(['price', 'vaha_vyrobu', 'decor_weight', 'dovzhyna_namystyny', 'diametr_namystyny',
-  'dovzhyna_vyrobu', 'rozmir_kameniu']);
+  'dovzhyna_vyrobu', 'rozmir_kameniu', 'rozmir_iuvelirnoho_vyrobu']);
 const WEIGHTS = new Set(['vaha_vyrobu', 'decor_weight']);
 const { schemaReadCache, parseSeconds } = require('./magento-schema-read-cache');
 const HELP = 'node first-sync-keep-local.js --mode preview|apply --server-root /app --input input.json '

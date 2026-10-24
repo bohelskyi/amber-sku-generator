@@ -42,6 +42,20 @@ source key `policy: initialize_create_only`. New products created from Amber rec
 the template value; existing ones keep their Magento SEO until the policy is changed
 to `authoritative_create_update`. `magento_managed` receipts keep their exact shape.
 
+## KL jewelry size: decimal point like weight
+
+Catalog owner decision from 2026-10-24: pendant size (`rozmir_iuvelirnoho_vyrobu`,
+the KL `pedant_size`/`exact_size` answer) uses a decimal point, the same as weight.
+Magento historically stores many sizes with a decimal comma (`3/1,8`).
+
+- The KL base derived output carries `localAuthority: kl-jewelry-size-decimal-point-v1`.
+- `DERIVED_FORWARD_MISMATCH` offers `keep_local` only when the Amber value has no comma
+  and Magento's value becomes exactly Amber's after replacing its commas with points
+  (`3/1,8` -> `3/1.8`). Any other difference (`3-1.5` vs `3/1,5`, other digits, an empty
+  Magento value) or a policy other than `authoritative_create_update` stays a review.
+- Magento is never imported into the answers. Ordinary guarded delivery writes the
+  Amber value and the exact readback records `outward_verified`.
+
 ## Batch keep_local
 
 `server/scripts/first-sync-keep-local.js` records the approved "Amber wins" choices
@@ -56,7 +70,8 @@ node scripts/first-sync-keep-local.js --mode preview|apply --server-root /app \
 
 - Input: `{ "bindingRevisionId": "...", "items": [{ "sku": "..." }] }`, up to 2000 SKUs.
 - Targets are limited to `price`, `vaha_vyrobu`, `decor_weight`, `dovzhyna_namystyny`,
-  `diametr_namystyny`, `dovzhyna_vyrobu` and `rozmir_kameniu`. A field is chosen only
+  `diametr_namystyny`, `dovzhyna_vyrobu`, `rozmir_kameniu` and the KL
+  `rozmir_iuvelirnoho_vyrobu` (see below). A field is chosen only
   when the fresh canonical review offers `keep_local`. Weights are chosen only when
   Magento holds the historical whole-gram rounding of the Amber weight; others are
   reported as `notRounding`.

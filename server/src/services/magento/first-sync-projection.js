@@ -31,6 +31,7 @@ const NM_EXACT_LENGTH_COMPARISON = 'nm-exact-length-cm-v1';
 const CH_DECIMALS = Object.freeze({ dovzhyna_namystyny: 'bead_length', diametr_namystyny: 'bead_width',
   dovzhyna_vyrobu: 'rosary_length' });
 const CH_LOCAL_AUTHORITY = 'ch-bead-dimensions-v1';
+const KL_SIZE_LOCAL_AUTHORITY = 'kl-jewelry-size-decimal-point-v1';
 const MAGENTO_MANAGED_SEO = new Set(['meta_title', 'meta_description']);
 const MAGENTO_MANAGED_SEO_RETENTION = 'magento-managed-seo-v1';
 const present = value => value !== null && value !== undefined
@@ -474,6 +475,7 @@ function projectFirstSyncFields(input) {
         localAuthority = CH_LOCAL_AUTHORITY;
       } else if (direct) reason ||= 'CANONICAL_SOURCE_SETTER_UNSUPPORTED';
       if (!direct && category === 'CH' && scope === 'all' && target === 'rozmir_kameniu') localAuthority = CH_LOCAL_AUTHORITY;
+      if (!direct && category === 'KL' && scope === 'all' && target === 'rozmir_iuvelirnoho_vyrobu') localAuthority = KL_SIZE_LOCAL_AUTHORITY;
       prospective = output;
       if (expected?.strategy?.endsWith('_option') && prospective.verified && present(prospective.value)) {
         const matches = bindings.options.filter(option => option.bindingKey === expected.bindingKey
