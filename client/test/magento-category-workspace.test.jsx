@@ -779,7 +779,8 @@ it('wide field context and keyboard tabs retain one staged rule and exact Magent
   const rules = mappedRuleFixture(); const before = JSON.stringify(rules); useLocalRuleFixture(rules);
   mount(); fireEvent.click(await screen.findByRole('button', { name: 'Колір Magento' }));
   const dialog = await screen.findByRole('dialog', { name: 'Поле Magento' });
-  expect(within(dialog).getByText(/Браслети ·/).textContent).toContain('UA · українською');
+  // The dialog shell can open while the field and its source registry are still loading.
+  expect((await within(dialog).findByText(/Браслети ·/)).textContent).toContain('UA · українською');
   const text = await within(dialog).findByLabelText('Значення для Magento: Нуль');
   fireEvent.change(text, { target: { value: '  Ручне значення  ' } });
   const ruleTab = within(dialog).getByRole('tab', { name: 'Формування значення' });
@@ -833,7 +834,7 @@ it('long field names and visible If/Then rules preserve the condition, fallback,
   rules.groups[0].rows[0].cells.description = { op: 'when', if: condition, then: { op: 'literal', value: 'Довгий початковий текст для картини. '.repeat(20) }, else: { op: 'literal', value: 'Збережений результат інакше' } };
   const before = JSON.stringify(rules); useLocalRuleFixture(rules, title);
   mount('/admin/catalog?category=BR&view=text'); fireEvent.click(await screen.findByRole('button', { name: title }));
-  const dialog = await screen.findByRole('dialog', { name: 'Поле Magento' }); expect(within(dialog).getByRole('heading', { name: title })).toBeTruthy();
+  const dialog = await screen.findByRole('dialog', { name: 'Поле Magento' }); expect(await within(dialog).findByRole('heading', { name: title })).toBeTruthy();
   const row = within(dialog).getByRole('region', { name: 'Умова 1' });
   expect(within(row).getByText('Якщо')).toBeTruthy(); expect(within(row).getByText('Тоді →')).toBeTruthy();
   const fallback = within(dialog).getByRole('region', { name: 'Інакше' }); expect(within(fallback).getByLabelText('Текст для магазину').value).toBe('Збережений результат інакше');
