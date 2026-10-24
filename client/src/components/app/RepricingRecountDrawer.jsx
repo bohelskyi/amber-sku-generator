@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ClipboardList, RefreshCw, ScanSearch, X } from 'lucide-react';
 import { DecodeErrorPanel, DecodeWorkspace } from './HomeDashboard';
 import { RecountConfirmDialog } from './RecountConfirmDialog';
+import { ConfirmDialog, Notice } from '../ui';
 import { useDialogAccessibility } from '../../hooks/useDialogAccessibility';
 import { useProductRecount } from '../../hooks/useProductRecount';
 
@@ -46,7 +47,7 @@ export function RepricingRecountDrawer({
     closeDisabled: recount.isRecountApplying,
     containerRef: drawerRef,
     initialFocusRef: closeButtonRef,
-    isInteractionEnabled: !recount.isRecountConfirmOpen,
+    isInteractionEnabled: !recount.isRecountConfirmOpen && !recount.isInformationConfirmOpen,
     isOpen: true,
     onClose,
   });
@@ -203,6 +204,21 @@ export function RepricingRecountDrawer({
         onCancel={recount.handleCancelRecountConfirmation}
         onConfirm={recount.handleConfirmRecount}
       />
+      <ConfirmDialog
+        open={recount.isInformationConfirmOpen}
+        title="Оновити інформаційні характеристики?"
+        description={recount.informationPreview?.publicSku
+          ? `Артикул ${recount.informationPreview.publicSku}. SKU, ціна та стан товару не зміняться.`
+          : 'Артикул недоступний. SKU, ціна та стан товару не зміняться.'}
+        confirmLabel="Оновити характеристики"
+        busy={recount.isRecountApplying}
+        confirmDisabled={typeof recount.informationPreview?.previewToken !== 'string'
+          || !recount.informationPreview.previewToken.trim()}
+        onClose={recount.handleCancelInformationConfirmation}
+        onConfirm={recount.handleConfirmInformationUpdate}
+      >
+        {recount.recountError && <Notice tone="error">{recount.recountError}</Notice>}
+      </ConfirmDialog>
     </div>
   );
 }
