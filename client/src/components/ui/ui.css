@@ -29,6 +29,7 @@
 .ui-close-button { display: inline-flex; flex: none; align-items: center; justify-content: center; width: var(--control-height); height: var(--control-height); border-radius: var(--radius-sm); color: var(--text-muted); }
 .ui-close-button:hover:not(:disabled) { color: var(--navy-900); background: var(--surface-muted); }
 .ui-dialog-backdrop, .ui-drawer-backdrop { position: fixed; inset: 0; z-index: 90; display: flex; background: rgb(13 21 41 / 48%); }
+.ui-dialog-backdrop[hidden] { display: none; }
 .ui-dialog-backdrop { align-items: center; justify-content: center; padding: 16px; }
 .ui-dialog-surface { display: flex; width: 100%; max-height: min(90vh, 900px); max-height: min(90dvh, 900px); flex-direction: column; overflow: hidden; border: 1px solid var(--border); border-radius: 14px; background: white; box-shadow: var(--shadow-md); }
 .ui-dialog-surface.is-sm { max-width: 480px; }.ui-dialog-surface.is-md { max-width: 640px; }.ui-dialog-surface.is-lg { max-width: 900px; }.ui-dialog-surface.is-xl { max-width: 1200px; }

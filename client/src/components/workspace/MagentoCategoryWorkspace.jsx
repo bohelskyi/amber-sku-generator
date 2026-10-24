@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
-import { Link, useLocation, useNavigationType, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useNavigationType, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api.js';
 import { useAuth } from '../../auth/auth-context.js';
 import { isActualAdministrator } from '../../auth/auth-model.js';
@@ -10,6 +10,7 @@ import { COLUMN_CONTRACT, columnChange, columnSourceChoices } from '../../lib/ex
 import { at, summary } from '../../lib/export-template-presentation.js';
 import { assertCategoryScope, changedFields, decisionKey, deliveryPolicies, deliveryPolicyEffect, localValueLabel, matchesRepairValue, reviewScopeSummary, routeLabel, rulesIdentity, uniqueOptionSuggestions } from '../../lib/magento-category-workspace.js';
 import { repairContext } from '../../lib/magento-repair-context.js';
+import { closePolicyReviewUrl, parsePolicyReview, policyReviewUrl } from '../../lib/magento-policy-navigation.js';
 import { characteristicUses } from '../../lib/catalog-characteristics.js';
 import { ColumnInspector } from '../export-templates/ColumnInspector.jsx';
 import { NewColumnDialog } from '../export-templates/ColumnForm.jsx';
@@ -34,7 +35,7 @@ const root = '/admin/magento-integration';
 const date = (value) => value ? new Date(value).toLocaleString('uk-UA') : 'Спостереження відсутнє';
 const messages = { unmapped: 'Не передається', connected: 'Підключено', review: 'Потребує перевірки', empty: 'Не заповнюємо', excluded: 'Передавання виключено' };
 const fail = (cause) => cause.response?.data?.error || cause.message || 'Дію не завершено. Введені зміни збережено у формі.';
-const scopeParams = ['category', 'binding', 'source', 'ruleDraft', 'route', 'language', 'field', 'view', 'reviewField', 'tab', 'path', 'productId', 'question', 'value', 'optionId', 'returnTo', 'action', 'catalogTask'];
+const scopeParams = ['category', 'binding', 'source', 'ruleDraft', 'route', 'language', 'field', 'view', 'reviewField', 'review', 'reviewEntry', 'reviewStore', 'tab', 'path', 'productId', 'question', 'value', 'optionId', 'returnTo', 'action', 'catalogTask'];
 const scopeIdentity = (categoryCode, params) => JSON.stringify([categoryCode, ...scopeParams.map((key) => params.get(key))]);
 
 function FieldSurface({ children, busy, suspended, onClose }) {
@@ -81,6 +82,9 @@ function FieldMappings({ active = true, rulePending = false, field, questions, s
 
 function CategoryEditor({ initial, baseline, categories, activePublication, onPublished, onScopeCommit, localConfig, onLocalSaved }) {
   const auth = useAuth(); const [params, setParams] = useSearchParams();
+  const location = useLocation(); const navigate = useNavigate();
+  const policyIntent = parsePolicyReview(params, initial.category.code);
+  const policyMode = Boolean(policyIntent);
   const entryContext = repairContext(params);
   const repairTargets = [...new Set((initial.questions.find((question) => question.id === entryContext.question)?.uses || []).filter((use) => use.rowId === (params.get('language') === 'english' ? 'english' : 'base')).map((use) => use.target))];
   const requestedField = params.get('field') || (!params.get('action') && repairTargets.length === 1 ? initial.attributes.find((attribute) => attribute.target === repairTargets[0])?.code : '') || '';
@@ -92,9 +96,11 @@ function CategoryEditor({ initial, baseline, categories, activePublication, onPu
   const [registry, setRegistry] = useState(null); const [error, setError] = useState(''); const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false); const [pending, setPending] = useState(false); const [discardPanel, setDiscardPanel] = useState(null);
   const [reviewPending, setReviewPending] = useState(false);
-  const [reviewOpen, setReviewOpen] = useState(initial.revision.state === 'draft' && !requestedField);
+  const [reviewOpen, setReviewOpen] = useState(initial.revision.state === 'draft' && !requestedField && !policyMode && params.get('review') !== 'closed');
   const [showReview, setShowReview] = useState(false);
   const [publicationBusy, setPublicationBusy] = useState(false);
+  const [policyBusy, setPolicyBusy] = useState(false);
+  const [policyTarget, setPolicyTarget] = useState(null);
   const [field, setField] = useState(requestedField); const [loadedField, setLoadedField] = useState(null); const [fieldError, setFieldError] = useState('');
   const [search, setSearch] = useState(''); const [filter, setFilter] = useState('all'); const [page, setPage] = useState(0);
   const [rowId, setRowId] = useState(params.get('language') === 'english' ? 'english' : 'base');
@@ -110,7 +116,7 @@ function CategoryEditor({ initial, baseline, categories, activePublication, onPu
   const [applied, setApplied] = useState(false);
   const [activeDeletionReview, setActiveDeletionReview] = useState(null);
   const [reviewScope, setReviewScope] = useState(initial.reviewScope || null);
-  const [localEditor, setLocalEditor] = useState(() => ['new-question', 'edit-question', 'new-option', 'edit-option'].includes(params.get('action')) ? { questionKey: params.get('question'), initialAction: params.get('action'), optionValue: params.get('value'), optionId: params.get('optionId') } : null);
+  const [localEditor, setLocalEditor] = useState(() => !policyMode && ['new-question', 'edit-question', 'new-option', 'edit-option'].includes(params.get('action')) ? { questionKey: params.get('question'), initialAction: params.get('action'), optionValue: params.get('value'), optionId: params.get('optionId') } : null);
   const [localDirty, setLocalDirty] = useState(false); const [localBusy, setLocalBusy] = useState(false);
   const [placementRow, setPlacementRow] = useState(null);
   const [connection, setConnection] = useState(null); const [newField, setNewField] = useState(null);
@@ -134,7 +140,7 @@ function CategoryEditor({ initial, baseline, categories, activePublication, onPu
   const fieldKey = JSON.stringify([field, revision.id, revision.revision, routeKey, rowId]);
   const fieldData = loadedField?.key === fieldKey ? loadedField.data : null;
   const loadSource = useCallback((descriptor, signal) => templates.sourceDetails(descriptor, signal), []);
-  const navigation = useDirtyNavigation({ dirty: dirty || pending || selectionDirty || reviewPending || localDirty || localBusy || previewBusy || publicationBusy, busy:busy || localBusy || previewBusy || publicationBusy || Boolean(activeDeletionReview),
+  const navigation = useDirtyNavigation({ dirty: dirty || pending || selectionDirty || reviewPending || localDirty || localBusy || previewBusy || publicationBusy, busy:busy || policyBusy || localBusy || previewBusy || publicationBusy || Boolean(activeDeletionReview),
     discard: () => { setDefinition(savedDefinition); setPending(false); setSelections({}); setSelectionDirty(false); setFieldSelections(null); setField(''); setLocalEditor(null); setLocalDirty(false); setNewField(null); },
     shouldBlock: ({ currentLocation, nextLocation }) => currentLocation.pathname !== nextLocation.pathname || scopeParams.some((key) => new URLSearchParams(currentLocation.search).get(key) !== new URLSearchParams(nextLocation.search).get(key)) });
   useEffect(() => { urlParams.current = params; }, [params]);
@@ -170,13 +176,13 @@ function CategoryEditor({ initial, baseline, categories, activePublication, onPu
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
-    if (!field || !currentField?.configured) return undefined;
+    if (policyMode || !field || !currentField?.configured) return undefined;
     const controller = new AbortController(); const ticket = ++fieldSequence.current;
     api.get(`${root}/categories/${categoryCode}/fields/${encodeURIComponent(field)}`, { signal: controller.signal, params: { bindingRevisionId: revision.id, ...(routeKey ? { routeKey } : {}), rowId } }).then(({ data }) => {
       if (!controller.signal.aborted && ticket === fieldSequence.current) { setLoadedField({ key: fieldKey, data }); setFieldError(''); }
     }).catch((cause) => { if (!controller.signal.aborted && ticket === fieldSequence.current) setFieldError(fail(cause)); });
     return () => controller.abort();
-  }, [categoryCode, currentField?.configured, field, fieldKey, revision.id, revision.revision, routeKey, rowId]);
+  }, [policyMode, categoryCode, currentField?.configured, field, fieldKey, revision.id, revision.revision, routeKey, rowId]);
 
   async function run(operation) {
     if (flight.current || pending || reviewPending || stale) return;
@@ -206,8 +212,9 @@ function CategoryEditor({ initial, baseline, categories, activePublication, onPu
     if (alive.current) { setSavedDefinition(next.draft.definition); }
     return next;
   }
-  async function prepare() {
-    setReviewOpen(true); setShowReview(false);
+  async function prepare(destination = 'review') {
+    const policyScope = destination === 'policies' ? policyTarget : null;
+    setReviewOpen(destination !== 'policies'); setShowReview(false);
     let versionId = base.revision.templateVersionId;
     if (changed.length || family) {
       const next = await save();
@@ -221,8 +228,10 @@ function CategoryEditor({ initial, baseline, categories, activePublication, onPu
     const preparation = (await api.post(`${root}/successor/prepare`, request)).data;
     let draft = (await api.post(`${root}/successor/apply`, { ...request, previewToken: preparation.previewToken })).data;
     if (!alive.current) return;
-    setRevision(draft); setRepresentatives([]); setReviewReady(false); setCheckRequested(true);
-    replaceParams({ binding: draft.id, source: base.revision.id });
+    setRevision(draft); setRepresentatives([]); setReviewReady(false); setCheckRequested(destination !== 'policies');
+    // A successor has new row IDs: retain its exact tuple, never the old ID.
+    replaceParams({ binding: draft.id, source: base.revision.id, ...(destination === 'policies' ? { review: 'policies', reviewEntry: null,
+      ...(policyScope ? { route: policyScope.routeKey, language: policyScope.row, reviewField: policyScope.target, reviewStore: policyScope.label } : {}) } : {}) });
     // Store explicitly selected IDs in the isolated draft. Approval remains a separate action.
     if (selectionDirty) {
       const { data } = await api.get(`${root}/bindings/${draft.id}`);
@@ -236,7 +245,7 @@ function CategoryEditor({ initial, baseline, categories, activePublication, onPu
       } finally { if (alive.current) setRevision(draft); }
     }
     const result = (await api.get(`${root}/categories/${categoryCode}`, { params: { bindingRevisionId: draft.id, ...(routeKey ? { routeKey } : {}), rowId } })).data;
-    if (alive.current) { setProjection(result); setSelections({}); setSelectionDirty(false); setMessage('Підготовку збережено. Перевірте відповідності й вплив перед застосуванням.'); }
+    if (alive.current) { setProjection(result); setSelections({}); setSelectionDirty(false); setMessage(destination === 'policies' ? 'Чернетку правил підготовлено. Зміна поведінки й підтвердження залишаються окремими діями.' : 'Підготовку збережено. Перевірте відповідності й вплив перед застосуванням.'); }
   }
   const chooseField = (next) => {
     if (busy || localBusy || previewBusy) return;
@@ -282,6 +291,17 @@ function CategoryEditor({ initial, baseline, categories, activePublication, onPu
     && `${a.label} ${a.code} ${a.sources.map((s) => s.label).join(' ')}`.toLocaleLowerCase('uk').includes(search.trim().toLocaleLowerCase('uk')));
   const currentPage = Math.min(page, Math.max(0, Math.ceil(displayed.length / 30) - 1));
   const prepared = revision.state === 'draft' && !dirty && !pending && rulesIdentity(definition) === rulesIdentity(projection.template.definition);
+  const policyNavigationBusy = busy || policyBusy || localBusy || previewBusy || publicationBusy || Boolean(activeDeletionReview);
+  const policyReadonly = !prepared || !canManage || stale || params.has('ruleDraft') && !family;
+  const canPreparePolicies = policyIntent?.valid && policyIntent.binding === revision.id && canManage && canPublish
+    && revision.state === 'published' && revision.id === base.revision.id && revision.id === activePublication?.id
+    && !stale && !params.has('ruleDraft') && !family && !dirty && !pending && !selectionDirty && !reviewPending
+    && (policyIntent.kind === 'general' || Boolean(policyTarget));
+  const rulesUrl = policyReviewUrl(location.pathname, params, { category: categoryCode, binding: revision.id, source: base.revision.id });
+  const currentPolicies = fieldData?.revision?.id === revision.id && fieldData.revision.revision === revision.revision
+    ? fieldData.entries.filter((entry) => entry.kind === 'policy' && entry.group === categoryCode && entry.routeKey === routeKey && entry.row === rowId && entry.target === currentField?.target) : [];
+  const fieldRulesUrl = currentPolicies.length === 1 ? policyReviewUrl(location.pathname, params, { category: categoryCode, binding: revision.id, source: base.revision.id, entry: currentPolicies[0] }) : null;
+  const closePolicies = () => { if (!policyNavigationBusy) navigate(closePolicyReviewUrl(location.pathname, params)); };
   useEffect(() => {
     if (prepared && !busy && revealReview.current && reviewPanel.current) {
       revealReview.current = false;
@@ -406,7 +426,15 @@ function CategoryEditor({ initial, baseline, categories, activePublication, onPu
       {canManage && <MagentoDetails summary="Підготувати зміну структури">{() => <div className="mc-actions">{[['subcategory', 'Розділ магазину'], ['attribute', 'Характеристика'], ['option', 'Значення характеристики'], ['connect', 'Підключення категорії']].map(([intent, label]) => <Link key={intent} className="mc-field-link" to={`/admin/catalog?${new URLSearchParams({ ...context, category: categoryCode, catalogTask: 'resource', intent })}`}>{label}</Link>)}</div>}</MagentoDetails>}
       {canUpgradeNative && <MagentoDetails summary="Підтримка характеристик нових товарів">{() => <div className="space-y-3"><p>Підготуйте підтримку збережених характеристик товарів, створених без старої SKU-схеми. Це збереже окрему чернетку; правила інших категорій і чинна доставка зміняться лише після перевірки та застосування всього пакета.</p><button type="button" className="btn btn-outline" disabled={Boolean(disabledReason)} onClick={() => run(async () => { const next = await save(); const updated = (await templates.upgrade(next.id, { expectedRevision: next.draft.revision, expectedDefinitionHash: next.draft.definitionHash, targetContract: nativeUpgrade.targetContract })).data; setFamily({ ...next, draft: updated }); setDefinition(updated.definition); setSavedDefinition(updated.definition); setReviewReady(false); setMessage('Підтримку нових товарів збережено у чернетці. Перевірте й застосуйте зміни пакета.'); })}>Підготувати підтримку характеристик нових товарів</button></div>}</MagentoDetails>}
 
-      {prepared && reviewOpen && <WorkspaceDialog title="Перевірка та застосування" className="mc-review-dialog" busy={busy || reviewPending || publicationBusy} onClose={() => { setReviewOpen(false); setCheckRequested(false); }}>
+      {policyMode && <WorkspaceDialog title="Правила передавання полів" className="mc-review-dialog mc-policy-review-dialog" busy={policyNavigationBusy} suspended={navigation.blocked} onClose={closePolicies}>
+        <header className="mc-task-heading"><h2>Правила передавання полів</h2><button type="button" className="btn btn-outline" disabled={policyNavigationBusy} onClick={closePolicies}>{params.get('field') ? 'До поля' : 'До категорії'}</button></header>
+        <p>{policyReadonly ? 'Збережені правила доступні для перегляду. Відкриття таблиці не змінює інтеграцію.' : 'Редагуємо цю збережену чернетку. Вибір і підтвердження поведінки не застосовують пакет правил.'}</p>
+        {params.has('ruleDraft') && !family && <p>Збережена чернетка правил ще не прочитана. Редагування недоступне.</p>}
+        {error && <Notice tone="error">{error}</Notice>}{message && <p role="status">{message}</p>}
+        {canPreparePolicies && <button type="button" className="btn btn-primary" disabled={policyNavigationBusy} onClick={() => { if (canPreparePolicies && !policyNavigationBusy) run(() => prepare('policies')); }}>Підготувати редагування правил</button>}
+        <MagentoWorkspaceReview revision={revision} categoryCode={categoryCode} categories={categories} questions={projection.questions} selections={selections} policyIntent={policyIntent} readOnly={policyReadonly} disabled={policyNavigationBusy} onBusyChange={setPolicyBusy} onPolicyEntryChange={setPolicyTarget} onPendingChange={setReviewPending} onChanged={reviewChanged} />
+      </WorkspaceDialog>}
+      {!policyMode && prepared && reviewOpen && <WorkspaceDialog title="Перевірка та застосування" className="mc-review-dialog" busy={busy || reviewPending || publicationBusy} onClose={() => { setReviewOpen(false); setCheckRequested(false); }}>
         <header className="mc-task-heading"><h2>{reviewReady && !showReview ? 'Вплив і застосування' : 'Перевірка відповідностей'}</h2><button type="button" className="btn btn-outline" disabled={busy || reviewPending || publicationBusy} onClick={() => { setReviewOpen(false); setCheckRequested(false); }}>До редагування</button></header>
         <p>Категорії, які перевіряються разом: {packageCategories.join(', ')}.</p>
         {scopeDetails}
@@ -424,13 +452,13 @@ function CategoryEditor({ initial, baseline, categories, activePublication, onPu
           api.get(`${root}/categories/${categoryCode}`, { params: { bindingRevisionId: next.id, ...(routeKey ? { routeKey } : {}), rowId } }).then(({ data }) => { if (alive.current) setProjection(data); }).catch((cause) => { if (alive.current) setError(fail(cause)); });
         }} /></div> : <p className="mc-help">Підтвердьте відповідності вище. Після цього тут з’явиться перевірка впливу та застосування змін.</p>}
       </WorkspaceDialog>}
-      {durableResult && <MagentoDetails summary="Результат застосування">{() => <MagentoPublicationActions compact revision={revision} currentPublishedId={activePublication?.id} repairContext={context} onPublished={onPublished} />}</MagentoDetails>}
+      {!policyMode && durableResult && <MagentoDetails summary="Результат застосування">{() => <MagentoPublicationActions compact revision={revision} currentPublishedId={activePublication?.id} repairContext={context} onPublished={onPublished} />}</MagentoDetails>}
       {tab === 'text' && revision.state === 'published' && isActualAdministrator(auth) && canPublish && auth.permissions.includes('exports.create') && <section className="space-y-3"><button type="button" className="btn btn-outline" onClick={() => setNamesOpen(!namesOpen)}>Застосувати назви до чинних товарів</button>{namesOpen && <MagentoControlledActions revision={revision} currentPublishedId={activePublication?.id} categoryCode={categoryCode} kind="name_rule" onApplied={() => onPublished?.(revision)} />}</section>}
       {busy && <LoadingState compact label="Зберігаємо й перевіряємо підготовку…" />}
       {!reviewOpen && scopeDetails}
-      <MagentoDetails summary="Дані Magento та додаткові налаштування">{() => <div className="space-y-3"><p>Структура Magento: {date(projection.observedAt)}{projection.liveObservation && ' · щойно прочитано'}</p><div className="mc-actions"><button type="button" className="btn btn-outline" disabled={busy || pending || stale} onClick={() => run(async () => { const { data } = await api.post(`${root}/categories/${categoryCode}/observation`, { bindingRevisionId: revision.id, ...(routeKey ? { routeKey } : {}), rowId }); setProjection(data); setMessage('Дані Magento оновлено. Перегляньте нові поля та зміни, що потребують перевірки.'); })}>{busy ? 'Читаємо Magento…' : 'Оновити структуру Magento'}</button><Link className="text-sm underline" to={`/admin/magento/categories/${categoryCode}?tab=placement`}>Розміщення в магазині</Link>{canManage && canPublish && !hasChanges && !prepared && <button type="button" className="btn btn-outline" disabled={busy || pending || stale} onClick={() => run(prepare)}>Змінити поведінку передавання полів</button>}</div></div>}</MagentoDetails>
+      <MagentoDetails summary="Дані Magento та додаткові налаштування">{() => <div className="space-y-3"><p>Структура Magento: {date(projection.observedAt)}{projection.liveObservation && ' · щойно прочитано'}</p><div className="mc-actions"><button type="button" className="btn btn-outline" disabled={busy || pending || stale} onClick={() => run(async () => { const { data } = await api.post(`${root}/categories/${categoryCode}/observation`, { bindingRevisionId: revision.id, ...(routeKey ? { routeKey } : {}), rowId }); setProjection(data); setMessage('Дані Magento оновлено. Перегляньте нові поля та зміни, що потребують перевірки.'); })}>{busy ? 'Читаємо Magento…' : 'Оновити структуру Magento'}</button><Link className="text-sm underline" to={`/admin/magento/categories/${categoryCode}?tab=placement`}>Розміщення в магазині</Link>{rulesUrl && <Link className="btn btn-outline" aria-disabled={policyNavigationBusy} onClick={(event) => { if (policyNavigationBusy) event.preventDefault(); }} to={rulesUrl}>Змінити поведінку передавання полів</Link>}</div></div>}</MagentoDetails>
     </section>
-    {field && <FieldSurface busy={busy || previewBusy || Boolean(activeDeletionReview)} suspended={Boolean(discardPanel)} onClose={() => chooseField('')}>
+    {!policyMode && field && <FieldSurface busy={busy || previewBusy || Boolean(activeDeletionReview)} suspended={Boolean(discardPanel) || navigation.blocked} onClose={() => chooseField('')}>
       {fieldError && <Notice tone="error">{fieldError}</Notice>}{currentField?.configured && !fieldData && !fieldError && <LoadingState compact label="Читаємо поле…" />}
       {currentField && <>
         {currentField.state === 'review' && <section className="mc-field-task space-y-3" aria-label="Що виправити в полі"><h3 className="font-semibold">Чому поле потребує перевірки</h3>
@@ -448,11 +476,13 @@ function CategoryEditor({ initial, baseline, categories, activePublication, onPu
           initialPanel={context.question && context.value !== undefined ? 'mapping' : 'rule'}
           extraPanel={fieldData?.entries.some((entry) => entry.kind === 'option') ? { title: 'Відповідність у Magento', pending: mappingPending,
             render: ({ active, rulePending }) => <FieldMappings active={active} rulePending={rulePending} field={{ ...fieldData, attribute: currentField }} questions={projection.questions} context={context} selections={fieldSelections ?? selections} setSelections={setLocalSelections} disabled={!canManage || busy || Boolean(activeDeletionReview) || stale || !currentField.editable} deletionContext={deletionContext} /> } : undefined}
-          suspended={busy || Boolean(activeDeletionReview) || Boolean(discardPanel)} readOnly={!canManage || stale || !currentField.editable}
+          suspended={busy || Boolean(activeDeletionReview) || Boolean(discardPanel) || navigation.blocked} readOnly={!canManage || stale || !currentField.editable}
           onPendingChange={setPending} onRequestClose={() => chooseField('')} onCancel={() => chooseField('')}
           onApply={(next, base) => { if (previewBusy || base !== definition) return false; assertCategoryScope(definition, next, categoryCode, rowId); setDefinition(next); if (mappingPending) { setSelections(fieldSelections); setSelectionDirty(true); } setFieldSelections(null); setPending(false); setField(''); replaceParams({ field: null }); return true; }} />}
         {fieldData && <MagentoDetails summary="Архівування та видалення">{() => <CatalogDeletionEntry {...deletionContext} field={{...fieldData,attribute:currentField}} questions={projection.questions}/>}</MagentoDetails>}
         {currentField.policy && <div className="mc-help"><p>{deliveryPolicies[currentField.policy]}</p><p>{deliveryPolicyEffect(currentField.policy, currentField.target)}</p></div>}
+        {fieldRulesUrl ? <Link className="mc-field-link" aria-disabled={policyNavigationBusy} onClick={(event) => { if (policyNavigationBusy) event.preventDefault(); }} to={fieldRulesUrl}>Переглянути правило передавання</Link>
+          : fieldData && <p className="mc-help">Точне правило передавання для цього поля не визначено однозначно.</p>}
         {!fieldConfigured && <MagentoDetails>{() => <p>Код: {currentField.code} · {currentField.inputType || 'службове поле'}</p>}</MagentoDetails>}
         {!fieldConfigured && <button type="button" className="btn btn-outline" onClick={() => chooseField('')}>Закрити поле</button>}
       </>}
