@@ -2,15 +2,18 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../../lib/api.js';
 import { deliveryPolicies, deliveryPolicyEffect, localValueLabel, matchesRepairValue, decisionKey } from '../../lib/magento-category-workspace.js';
 import { fieldLabels } from '../../lib/export-template-editor.js';
+import { resolvePolicyEntry } from '../../lib/magento-policy-navigation.js';
 import { LoadingState, Notice } from '../app/UiPrimitives.jsx';
 import MagentoDetails from './MagentoDetails.jsx';
 
 const root = '/admin/magento-integration';
 const kinds = { route: 'Набір атрибутів', attribute: 'Поле', option: 'Значення', policy: 'Поведінка поля', category: 'Розміщення' };
+const policyStates = { approved: 'Підтверджено', proposed: 'Запропоновано', review_required: 'Потрібна перевірка', blocked: 'Заблоковано', not_applicable: 'Не застосовується' };
 
 // Explicit bounded decisions through the original CAS/authorization endpoints.
 // A partial failure leaves the saved original draft available for a fresh read.
-export default function MagentoWorkspaceReview({ revision, categoryCode, categories = [], questions, selections, focusTarget, onChanged, disabled, onPendingChange, onReadyChange, onProgressChange, onScopeChange, repairContext }) {
+export default function MagentoWorkspaceReview({ revision, categoryCode, categories = [], questions, selections, focusTarget, onChanged, disabled, onPendingChange, onBusyChange, onReadyChange, onProgressChange, onScopeChange, repairContext, policyIntent, readOnly = false, onPolicyEntryChange }) {
+  const policyMode = Boolean(policyIntent);
   const [data, setData] = useState(null); const [error, setError] = useState('');
   const [loadedKey, setLoadedKey] = useState('');
   const [busy, setBusy] = useState(false); const [reason, setReason] = useState('');
@@ -18,6 +21,7 @@ export default function MagentoWorkspaceReview({ revision, categoryCode, categor
   const [editPolicies, setEditPolicies] = useState(false);
   const [showOtherFields, setShowOtherFields] = useState(false);
   const sequence = useRef(0); const flight = useRef(false);
+  const focusedRow = useRef(null); const locatedIntent = useRef(null); const focusedIntent = useRef(null);
   const readKey = `${revision.id}:${revision.revision}`;
   const fresh = loadedKey === readKey;
   useEffect(() => {
@@ -31,20 +35,43 @@ export default function MagentoWorkspaceReview({ revision, categoryCode, categor
     onPendingChange?.(busy || Boolean(reason.trim()) || Object.keys(choices).length > 0);
     return () => onPendingChange?.(false);
   }, [busy, choices, reason, onPendingChange]);
+  useEffect(() => { onBusyChange?.(busy); return () => onBusyChange?.(false); }, [busy, onBusyChange]);
   const unresolved = fresh ? data?.entries.filter((e) => !['approved', 'not_applicable', 'blocked'].includes(e.reviewState)) || [] : [];
   useEffect(() => { onScopeChange?.(fresh && data ? { unresolved: data.entries.filter((entry) => !['approved', 'not_applicable', 'blocked'].includes(entry.reviewState)) } : null); }, [fresh, data, onScopeChange]);
   const ready = Boolean(fresh && data && data.revision.revision === revision.revision && !unresolved.length);
   useEffect(() => { onReadyChange?.(ready); }, [ready, onReadyChange]);
-  const entries = [...unresolved, ...(editPolicies ? data?.entries.filter((e) => e.kind === 'policy' && e.group === categoryCode && e.reviewState === 'approved') || [] : [])];
+  const policyResponseMatches = data?.revision.id === revision.id && policyIntent?.binding === revision.id;
+  const entries = policyMode ? policyResponseMatches ? data.entries.filter((e) => e.kind === 'policy' && e.group === categoryCode) : []
+    : [...unresolved, ...(editPolicies ? data?.entries.filter((e) => e.kind === 'policy' && e.group === categoryCode && e.reviewState === 'approved') || [] : [])];
   const focused = (e) => !focusTarget || showOtherFields || e.target === focusTarget || e.kind === 'route';
   const local = unresolved.filter((e) => e.group === categoryCode);
-  const focusComplete = Boolean(focusTarget && !editPolicies && !local.some(focused));
+  const focusComplete = Boolean(!policyMode && focusTarget && !editPolicies && !local.some(focused));
   const remainingFields = focusComplete && local.length > 0;
   const remainingCategories = focusComplete && !local.length && unresolved.length > 0;
-  const scoped = entries.filter((e) => remainingCategories || (all || e.group === categoryCode) && (remainingFields || focused(e))).sort((a, b) => Number(matchesRepairValue(b, repairContext)) - Number(matchesRepairValue(a, repairContext)));
+  const scoped = entries.filter((e) => policyMode || remainingCategories || (all || e.group === categoryCode) && (remainingFields || focused(e))).sort((a, b) => Number(matchesRepairValue(b, repairContext)) - Number(matchesRepairValue(a, repairContext)));
   const otherFields = entries.filter((e) => e.group === categoryCode && !focused(e));
   const currentPage = Math.min(page, Math.max(0, Math.ceil(scoped.length / 30) - 1));
   const visible = scoped.slice(currentPage * 30, (currentPage + 1) * 30);
+  const exactEntry = fresh ? resolvePolicyEntry(policyIntent, data) : null;
+  useEffect(() => { onPolicyEntryChange?.(exactEntry); return () => onPolicyEntryChange?.(null); }, [exactEntry, onPolicyEntryChange]);
+  const intentKey = JSON.stringify(policyIntent);
+  const exactIndex = exactEntry ? scoped.findIndex((entry) => entry === exactEntry) : -1;
+  const policyReadonly = policyMode && (readOnly || !policyIntent.valid || !fresh || data?.revision.id !== revision.id
+    || data?.revision.revision !== revision.revision || data?.revision.state !== 'draft' || revision.state !== 'draft');
+  const entryReadonly = (entry) => policyReadonly || policyMode && ['blocked', 'not_applicable'].includes(entry.reviewState);
+  useEffect(() => {
+    if (exactIndex < 0 || locatedIntent.current === intentKey) return;
+    locatedIntent.current = intentKey; setPage(Math.floor(exactIndex / 30));
+  }, [exactIndex, intentKey]);
+  useEffect(() => {
+    if (exactIndex < 0 || Math.floor(exactIndex / 30) !== currentPage || focusedIntent.current === intentKey) return undefined;
+    const timer = setTimeout(() => {
+      if (!focusedRow.current) return;
+      focusedIntent.current = intentKey;
+      focusedRow.current.scrollIntoView?.({ block: 'nearest' }); focusedRow.current.focus({ preventScroll: true });
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [exactIndex, currentPage, intentKey]);
   const placementReview = focusTarget === 'categories' && !showOtherFields;
   const categoryName = (code) => categories.find((category) => category.code === code)?.name || code;
   const progress = !fresh ? '' : data?.revision.revision !== revision.revision ? 'Підготовка змінилася. Натисніть «Перечитати підготовку» нижче.' : ready ? 'Відповідності підтверджено. Перевірте вплив на товари й застосуйте зміни.'
@@ -68,7 +95,7 @@ export default function MagentoWorkspaceReview({ revision, categoryCode, categor
   };
   const chosen = (entry) => choices[entry.id] ?? selections[decisionKey(entry)] ?? (entry.kind === 'policy' && entry.reviewState !== 'approved' ? '' : entry.identity == null ? '' : String(entry.identity));
   async function approve(list) {
-    if (flight.current || disabled || !data || data.revision.revision !== revision.revision) return;
+    if (flight.current || disabled || policyReadonly || policyMode && list.some(entryReadonly) || !data || data.revision.revision !== revision.revision) return;
     flight.current = true; setBusy(true); setError('');
     const ticket = sequence.current; let current = data.revision;
     try {
@@ -90,13 +117,17 @@ export default function MagentoWorkspaceReview({ revision, categoryCode, categor
   }
   const eligible = (entry) => chosen(entry) !== '' && (entry.reviewState !== 'approved' || chosen(entry) !== String(entry.identity)) && (entry.exact && String(entry.identity) === chosen(entry) && entry.kind !== 'policy' || reason.trim().length >= 3);
   return <section className="mc-review space-y-3" aria-label="Перевірка підготовлених відповідностей">
-    <h3 className="font-semibold">{ready && !editPolicies ? 'Відповідності перевірено' : remainingCategories ? 'Підтвердьте відповідності інших категорій' : remainingFields ? 'Підтвердьте решту полів категорії' : placementReview ? 'Підтвердьте розділи магазину' : 'Перевірте ці відповідності'}</h3>
+    <h3 className="font-semibold">{policyMode ? 'Поведінка передавання полів' : ready && !editPolicies ? 'Відповідності перевірено' : remainingCategories ? 'Підтвердьте відповідності інших категорій' : remainingFields ? 'Підтвердьте решту полів категорії' : placementReview ? 'Підтвердьте розділи магазину' : 'Перевірте ці відповідності'}</h3>
     {error && <Notice tone="error">{error}</Notice>}{!fresh && !error && <LoadingState label="Оновлюємо підтвердження…" compact />}
     {(data && fresh || error) && <>
+      {policyMode && fresh && (!policyIntent.valid || policyIntent.kind !== 'general' && !exactEntry) && <Notice tone="warning">Точний рядок за цим посиланням не знайдено однозначно. Перевірте адресу правила; інший рядок не вибрано.</Notice>}
+      {policyMode && fresh && !policyResponseMatches && <Notice tone="warning">Відповідь не належить вибраній версії правил. Редагування недоступне.</Notice>}
       {fresh && data?.revision.revision !== revision.revision && <Notice tone="warning">Чернетка змінилася. Перечитайте збережену підготовку перед підтвердженням.</Notice>}
       <div className="mc-actions">{(error || fresh && data?.revision.revision !== revision.revision) && <button type="button" className="btn btn-outline" disabled={busy || disabled} onClick={async () => {
         if (flight.current) return; flight.current = true; setBusy(true);
-        try { const { data: latest } = await api.get(`${root}/bindings/${revision.id}`); setData(latest); setLoadedKey(`${latest.revision.id}:${latest.revision.revision}`); onChanged(latest.revision); setError(''); }
+        try { const { data: latest } = await api.get(`${root}/bindings/${revision.id}`);
+          if (policyMode && (latest.revision.id !== revision.id || latest.revision.state !== revision.state)) throw new Error('Policy binding response mismatch');
+          setData(latest); setLoadedKey(`${latest.revision.id}:${latest.revision.revision}`); onChanged(latest.revision); setError(''); }
         catch (cause) { setError(cause.response?.data?.error || 'Не вдалося перечитати підготовку. Введення залишено у формі.'); }
         finally { flight.current = false; setBusy(false); }
       }}>Перечитати підготовку</button>}{(reason || Object.keys(choices).length > 0) && <button type="button" className="btn btn-outline" disabled={busy} onClick={() => { setReason(''); setChoices({}); }}>Відкинути незбережені рішення</button>}</div>
@@ -109,19 +140,19 @@ export default function MagentoWorkspaceReview({ revision, categoryCode, categor
             : 'Розділи цієї категорії підтверджено. Наступний крок — «Показати також інші категорії» нижче.'
         : 'Спочатку показано вибране поле й набір характеристик. Для застосування всієї підготовки потрібно вирішити також решту питань.'}</p>}
       {focusTarget && !remainingFields && (otherFields.length > 0 || showOtherFields) && <button className="btn btn-outline" disabled={busy} onClick={() => { setShowOtherFields(!showOtherFields); setPage(0); }}>{showOtherFields ? 'Лише вибране поле' : `Показати решту полів категорії (${otherFields.length})`}</button>}
-      <MagentoDetails summary="Поведінка передавання полів">{() => <button type="button" className="btn btn-outline" disabled={busy || disabled} onClick={() => { setEditPolicies(!editPolicies); setPage(0); }}>{editPolicies ? 'Сховати поведінку підключених полів' : 'Змінити поведінку підключених полів'}</button>}</MagentoDetails>
+      {!policyMode && <MagentoDetails summary="Поведінка передавання полів">{() => <button type="button" className="btn btn-outline" disabled={busy || disabled} onClick={() => { setEditPolicies(!editPolicies); setPage(0); }}>{editPolicies ? 'Сховати поведінку підключених полів' : 'Змінити поведінку підключених полів'}</button>}</MagentoDetails>}
       {!remainingCategories && entries.some((e) => e.group !== categoryCode) && <button className="btn btn-outline" type="button" onClick={() => { setAll(!all); setPage(0); }}>{all ? 'Лише поточна категорія' : 'Показати також інші категорії'}</button>}
-      {(reason || visible.some((e) => !e.exact || e.kind === 'policy' || chosen(e) !== String(e.identity))) && <label className="mc-label">Пояснення перевірки<input className="input" maxLength={2000} disabled={busy || disabled} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Чому обрано цю відповідність або поведінку" /></label>}
-      {visible.length > 0 && <div className="mc-table-scroll"><table><thead><tr><th>Поле / значення менеджера</th><th>Відповідність Magento</th><th>Підтвердження</th></tr></thead><tbody>{visible.map((entry) => <tr key={entry.id} className={matchesRepairValue(entry, repairContext) ? 'is-repair-target' : undefined}>
-        <td>{entry.group !== categoryCode && <strong className="block">{categoryName(entry.group)}</strong>}{label(entry)}<small>{kinds[entry.kind]} · {entry.row === 'english' ? 'EN' : 'UA'}</small></td>
-        <td>{['policy', 'route', 'option', 'category'].includes(entry.kind) ? <select className="input" aria-label={`Відповідність: ${label(entry)}`} value={chosen(entry)} disabled={busy || disabled} onChange={(e) => setChoices({ ...choices, [entry.id]: e.target.value })}><option value="">Оберіть явно</option>{options(entry).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select> : entry.label || entry.target}{entry.kind === 'policy' && chosen(entry) && <small>{deliveryPolicyEffect(chosen(entry), entry.target)}</small>}</td>
-        <td><button type="button" className="btn btn-outline" disabled={busy || disabled || !eligible(entry)} onClick={() => approve([entry])}>Підтвердити</button></td>
+      {!policyReadonly && (reason || visible.some((e) => !entryReadonly(e) && (!e.exact || e.kind === 'policy' || chosen(e) !== String(e.identity)))) && <label className="mc-label">Пояснення перевірки<input className="input" maxLength={2000} disabled={busy || disabled} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Чому обрано цю відповідність або поведінку" /></label>}
+      {visible.length > 0 && <div className="mc-table-scroll"><table><thead><tr><th>Поле / значення менеджера</th><th>Відповідність Magento</th><th>Підтвердження</th></tr></thead><tbody>{visible.map((entry) => <tr key={entry.id} ref={entry === exactEntry ? focusedRow : undefined} tabIndex={entry === exactEntry ? -1 : undefined} className={entry === exactEntry || matchesRepairValue(entry, repairContext) ? 'is-repair-target' : undefined}>
+        <td>{entry.group !== categoryCode && <strong className="block">{categoryName(entry.group)}</strong>}{label(entry)}<small>{kinds[entry.kind]} · {entry.row === 'english' ? 'EN' : 'UA'}</small>{entry === exactEntry && <small>Рядок, відкритий за посиланням</small>}</td>
+        <td>{entryReadonly(entry) ? <>{Object.hasOwn(deliveryPolicies, entry.identity) ? deliveryPolicies[entry.identity] : entry.identity || 'Не визначено'}{Object.hasOwn(deliveryPolicies, entry.identity) && <small>{deliveryPolicyEffect(entry.identity, entry.target)}</small>}</> : <>{['policy', 'route', 'option', 'category'].includes(entry.kind) ? <select className="input" aria-label={`Відповідність: ${label(entry)}`} value={chosen(entry)} disabled={busy || disabled} onChange={(e) => setChoices({ ...choices, [entry.id]: e.target.value })}><option value="">Оберіть явно</option>{options(entry).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select> : entry.label || entry.target}{entry.kind === 'policy' && chosen(entry) && <small>{deliveryPolicyEffect(chosen(entry), entry.target)}</small>}</>}</td>
+        <td>{entryReadonly(entry) ? (Object.hasOwn(policyStates, entry.reviewState) ? policyStates[entry.reviewState] : 'Стан невідомий') : <button type="button" className="btn btn-outline" disabled={busy || disabled || !eligible(entry)} onClick={() => approve([entry])}>Підтвердити</button>}</td>
       </tr>)}</tbody></table></div>}
-      {!visible.length && <p>{otherFields.length ? 'Вибране поле підтверджено. Відкрийте решту полів цієї категорії, щоб завершити перевірку.' : entries.length ? 'Питання цієї категорії підтверджено. Перевірте також інші категорії.' : 'Усі необхідні відповідності підтверджено.'}</p>}
+      {!visible.length && <p>{policyMode ? policyResponseMatches ? 'У цій версії немає збережених правил передавання для категорії.' : 'Правила вибраної версії ще недоступні.' : otherFields.length ? 'Вибране поле підтверджено. Відкрийте решту полів цієї категорії, щоб завершити перевірку.' : entries.length ? 'Питання цієї категорії підтверджено. Перевірте також інші категорії.' : 'Усі необхідні відповідності підтверджено.'}</p>}
       {visible.length > 1 && visible.some((e) => e.exact && e.kind !== 'policy') && <MagentoDetails summary="Однозначні підказки">{() => <button type="button" className="btn btn-outline" disabled={busy || disabled} onClick={() => approve(visible.filter((e) => e.exact && e.kind !== 'policy' && String(e.identity) === chosen(e)))}>Прийняти однозначні підказки на цій сторінці</button>}</MagentoDetails>}
-      {visible.length > 1 && <button type="button" className="btn btn-primary" disabled={busy || disabled || !visible.every(eligible)} onClick={() => approve(visible)}>Підтвердити показані відповідності</button>}
+      {!policyReadonly && visible.length > 1 && !visible.some(entryReadonly) && <button type="button" className="btn btn-primary" disabled={busy || disabled || !visible.every(eligible)} onClick={() => approve(visible)}>Підтвердити показані відповідності</button>}
       {scoped.length > 30 && <nav aria-label="Сторінки перевірки" className="mc-actions"><button className="btn btn-outline" disabled={!currentPage || busy} onClick={() => setPage(currentPage - 1)}>Назад</button><span>{currentPage + 1} / {Math.ceil(scoped.length / 30)}</span><button className="btn btn-outline" disabled={(currentPage + 1) * 30 >= scoped.length || busy} onClick={() => setPage(currentPage + 1)}>Далі</button></nav>}
-      {data && fresh && <MagentoDetails summary="Технічна перевірка">{() => <p>Невирішених структурних питань: {data.validation.diagnostics.length}. Чернетка {revision.revision}.</p>}</MagentoDetails>}
+      {data && fresh && <MagentoDetails summary="Технічна перевірка">{() => <p>Невирішених структурних питань: {data.validation.diagnostics.length}. {policyMode ? 'Версія' : 'Чернетка'} {revision.revision}.</p>}</MagentoDetails>}
     </>}
   </section>;
 }

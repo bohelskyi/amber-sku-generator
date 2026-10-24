@@ -49,6 +49,8 @@
 .mc-work-state { font-size: 13px; font-weight: 600; }
 .mc-workspace tr.is-repair-target { background: var(--surface-muted); box-shadow: inset 3px 0 var(--amber-500); }
 .mc-workspace tr.is-repair-target:focus { outline: 2px solid var(--navy-800); outline-offset: -2px; }
+.mc-policy-review-dialog tr.is-repair-target { background: var(--surface-muted); box-shadow: inset 3px 0 var(--amber-500); }
+.mc-policy-review-dialog tr.is-repair-target:focus { outline: 2px solid var(--navy-800); outline-offset: -2px; }
 .mc-publication-command { position: sticky; bottom: 12px; z-index: 5; border: 1px solid var(--border-strong); border-left: 3px solid var(--amber-500); background: var(--surface); padding: 14px; box-shadow: var(--shadow-sm); font-size: 13px; }
 .mc-publication-command p { margin-bottom: 8px; }
 .mc-review select { min-width: 130px; }
