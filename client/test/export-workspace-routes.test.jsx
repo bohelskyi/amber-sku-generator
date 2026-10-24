@@ -243,14 +243,24 @@ it('template URLs open table/check/versions and system read-only without publish
 it('publishing subcategory rules hands off the new exact version with the original repair context', async () => {
   family.versions = [{ id: 'old-rules', versionNumber: '1', definition: family.draft.definition }];
   const nextVersion = { id: 'new-subcategory-rules', versionNumber: '2', definition: family.draft.definition };
-  templates.publish.mockResolvedValue(response(nextVersion));
+  const publication = deferred();
+  templates.publish.mockReturnValue(publication.promise);
   const remoteCommand = vi.spyOn(api, 'post').mockResolvedValue(response({}));
   const repair = { category: 'BR', field: 'categories', productId: '41', path: 'Default Category/Браслети/Нові', returnTo: '/attention?category=BR&problem=41' };
   const query = new URLSearchParams({ ...repair, intent: 'subcategory', templateVersion: 'old-rules' });
   const { router } = mount('/admin/magento/rules/family-a/versions?' + query, admin);
   await screen.findByRole('heading', { name: 'Версії шаблону' });
-  button('Зафіксувати версію правил');
-  button('Підтвердити публікацію');
+  const opener = screen.getByRole('button', { name: 'Зафіксувати версію правил', exact: true });
+  await waitFor(() => expect(opener.disabled).toBe(false));
+  fireEvent.click(opener);
+  const review = await screen.findByRole('dialog', { name: 'Перегляд публікації' });
+  const confirm = within(review).getByRole('button', { name: 'Підтвердити публікацію', exact: true });
+  await waitFor(() => expect(confirm.disabled).toBe(false));
+  await act(async () => { fireEvent.click(confirm); });
+  expect(templates.publish).toHaveBeenCalledWith(family.id, { expectedRevision: '9', expectedDefinitionHash: 'saved-hash' });
+  expect(templates.publish).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole('link', { name: 'Перевірити ці правила для інтеграції' })).toBeNull();
+  await act(async () => { publication.resolve(response(nextVersion)); });
   const handoff = await screen.findByRole('link', { name: 'Перевірити ці правила для інтеграції' });
   const destination = new URL(handoff.getAttribute('href'), 'http://localhost');
   expect(destination.pathname).toBe('/admin/magento/prepare');
