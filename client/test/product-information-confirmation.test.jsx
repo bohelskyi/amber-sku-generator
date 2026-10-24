@@ -29,6 +29,7 @@ function Harness() {
     <button type="button" onClick={() => recount.handleRecountAnswer('braclet_size', 2)}>Змінити розмір</button>
     <button type="button" onClick={recount.handleApplyRecount}>Продовжити</button>
     <button type="button" onClick={recount.handleConfirmInformationUpdate}>Підтвердити оновлення</button>
+    <output aria-label="Завантажений товар">{recount.decodeData?.product?.id ?? ''}</output>
     <output aria-label="Відкрита перевірка">{String(recount.isInformationConfirmOpen)}</output>
     <output aria-label="Результат">{recount.recountSuccess}</output>
   </>;
@@ -48,6 +49,7 @@ it('separates authoritative information preview from apply and reports only the 
   render(<Harness />);
   fireEvent.click(screen.getByRole('button', { name: 'Відкрити' }));
   await waitFor(() => expect(api.post).toHaveBeenCalledWith('/decode', { sku: decoded.publicSku }));
+  await waitFor(() => expect(screen.getByLabelText('Завантажений товар').textContent).toBe('41'));
   fireEvent.click(screen.getByRole('button', { name: 'Почати' }));
   fireEvent.click(screen.getByRole('button', { name: 'Змінити розмір' }));
   fireEvent.click(screen.getByRole('button', { name: 'Продовжити' }));

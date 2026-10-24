@@ -29,10 +29,14 @@ it('mounts technical evidence only after the operator opens it', () => {
 });
 
 it('copies the supplied authoritative value and announces completion', async () => {
+  let resolveClipboard;
+  navigator.clipboard.writeText.mockImplementationOnce(() => new Promise((resolve) => { resolveClipboard = resolve; }));
   render(<CopyAction value="AG-000042" label="Копіювати артикул" buttonLabel="Копіювати артикул" />);
   fireEvent.click(screen.getByRole('button', { name: 'Копіювати артикул' }));
   await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledWith('AG-000042'));
-  expect(screen.getByRole('status').textContent).toBe('Скопійовано');
+  expect(screen.getByRole('status').textContent).toBe('');
+  await act(async () => resolveClipboard());
+  await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Скопійовано'));
 });
 
 it('shows clipboard failure beside an icon-only copy action', async () => {

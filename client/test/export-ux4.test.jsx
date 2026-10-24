@@ -126,8 +126,15 @@ it('UX4 uncertain transport retry retains original revision and attempt after ne
   api.get.mockResolvedValue(response({ ...own, currentAttemptId: attempt.id, attempt })); api.generate.mockRejectedValue(new Error('uncertain transport'));
   mount(); await open(); click('Перевірити товари'); await screen.findByText('Current'); click('Створити файли'); await screen.findByText('uncertain transport');
   const original = api.generate.mock.calls[0];
-  api.get.mockResolvedValue(response({ ...own, configurationRevision: '2', currentAttemptId: 'attempt-new', attempt: { ...attempt, id: 'attempt-new' } }));
+  const refreshedSession = response({ ...own, configurationRevision: '2', currentAttemptId: 'attempt-new', attempt: { ...attempt, id: 'attempt-new' } });
+  const refreshRead = deferred();
+  api.get.mockResolvedValue(refreshedSession).mockReturnValueOnce(refreshRead.promise);
   click('Оновити стан із сервера'); await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2));
+  await act(async () => refreshRead.resolve(refreshedSession));
+  await waitFor(() => {
+    expect(screen.queryByText('Current')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Перевірити товари' }).disabled).toBe(false);
+  });
   api.preview.mockResolvedValue(response({ ...preview, configurationRevision: '2', tableFingerprint: 'newer' }));
   click('Перевірити товари'); await screen.findByText('Current'); click('Повторити створення цього експорту');
   await waitFor(() => expect(api.generate).toHaveBeenCalledTimes(2)); expect(api.generate.mock.calls[1]).toEqual(original); expect(api.prepare).not.toHaveBeenCalled();

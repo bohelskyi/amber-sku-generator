@@ -42,7 +42,9 @@ it('creates a local characteristic while Magento is unavailable and connects onl
   expect(post.mock.calls[0][1]).not.toHaveProperty('key');
   expect(post.mock.calls[0][1]).not.toHaveProperty('include_in_sku');
   expect(callbacks.onConnect).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: 'Налаштувати передавання' }));
+  const connect = await screen.findByRole('button', { name: 'Налаштувати передавання' });
+  await waitFor(() => expect(connect.disabled).toBe(false));
+  fireEvent.click(connect);
   await waitFor(() => expect(callbacks.onConnect).toHaveBeenCalledExactlyOnceWith({ questionKey: key }));
   expect(get.mock.calls.every(([url]) => url === '/admin/config')).toBe(true);
 });
@@ -58,7 +60,9 @@ it('retains the exact newly created value and the local receipt after a failed s
   fireEvent.change(screen.getByRole('textbox', { name: /Назва англійською/ }), { target: { value: 'Second label' } });
   fireEvent.click(screen.getByRole('button', { name: 'Зберегти значення' }));
   await waitFor(() => expect(callbacks.onSaved).toHaveBeenCalledWith(expect.objectContaining({ optionId: 89, valueId: 204, questionKey: 'color' })));
-  fireEvent.click(screen.getByRole('button', { name: 'Налаштувати передавання' }));
+  const connect = await screen.findByRole('button', { name: 'Налаштувати передавання' });
+  await waitFor(() => expect(connect.disabled).toBe(false));
+  fireEvent.click(connect);
   await screen.findByText(/Налаштування магазину недоступні/);
   expect(callbacks.onConnect).toHaveBeenCalledExactlyOnceWith({ questionKey: 'color', valueId: 204 });
   expect(screen.getByText('Second label')).toBeTruthy();
@@ -71,7 +75,7 @@ it('edits semantic zero by the exact row ID while preserving encoded fields and 
   fireEvent.change(await screen.findByRole('textbox', { name: 'Назва українською' }), { target: { value: 'Без відтінку' } });
   fireEvent.click(screen.getByRole('button', { name: 'Зберегти зміни' }));
   await waitFor(() => expect(put).toHaveBeenCalledExactlyOnceWith('/admin/option', expect.objectContaining({ id: 31, value_id: '0', sku_code: '0', label: 'Без відтінку', label_en: 'No color' })));
-  expect(callbacks.onSaved).toHaveBeenCalledWith(expect.objectContaining({ optionId: 31, valueId: 0 }));
+  await waitFor(() => expect(callbacks.onSaved).toHaveBeenCalledWith(expect.objectContaining({ optionId: 31, valueId: 0 })));
 });
 
 it('does not substitute another option when the requested semantic value is missing', async () => {
@@ -96,6 +100,7 @@ it('preserves dirty input when cancelling dismissal and blocks duplicate writes 
   const callbacks = open();
   const input = await screen.findByRole('textbox', { name: 'Назва характеристики' });
   fireEvent.change(input, { target: { value: 'Колір прикраси' } });
+  await waitFor(() => expect(callbacks.onDirtyChange).toHaveBeenLastCalledWith(true));
   fireEvent.click(screen.getByRole('button', { name: 'Готово' }));
   const dialog = await screen.findByRole('dialog', { name: 'Відкинути незбережені зміни?' });
   fireEvent.click(within(dialog).getByRole('button', { name: 'Скасувати' }));
@@ -104,9 +109,9 @@ it('preserves dirty input when cancelling dismissal and blocks duplicate writes 
   await waitFor(() => expect(callbacks.onBusyChange).toHaveBeenLastCalledWith(true));
   fireEvent.click(screen.getByRole('button', { name: 'Зберегти зміни' }));
   expect(post).toHaveBeenCalledTimes(1);
-  resolveSave({ data: { success: true, key: 'color' } });
+  await act(async () => resolveSave({ data: { success: true, key: 'color' } }));
   await waitFor(() => expect(callbacks.onBusyChange).toHaveBeenLastCalledWith(false));
-  expect(callbacks.onDirtyChange).toHaveBeenLastCalledWith(false);
+  await waitFor(() => expect(callbacks.onDirtyChange).toHaveBeenLastCalledWith(false));
 });
 
 it('keeps successful local archive distinct from a failed refresh and does not dispatch Magento', async () => {
@@ -114,12 +119,13 @@ it('keeps successful local archive distinct from a failed refresh and does not d
   const callbacks = open();
   await screen.findByRole('textbox', { name: 'Назва характеристики' });
   fireEvent.click(screen.getByRole('button', { name: 'Зберегти зміни' }));
-  await screen.findByRole('button', { name: 'Архівувати характеристику' });
+  const archive = await screen.findByRole('button', { name: 'Архівувати характеристику' });
+  await waitFor(() => expect(archive.disabled).toBe(false));
   get.mockRejectedValueOnce(Error('refresh unavailable'));
-  fireEvent.click(screen.getByRole('button', { name: 'Архівувати характеристику' }));
+  fireEvent.click(archive);
   await screen.findByText('Характеристику перенесено в архів, але дані не оновлено');
   expect(patch).toHaveBeenCalledExactlyOnceWith('/admin/question/84/archive', { archived: true });
-  expect(callbacks.onSaved).toHaveBeenLastCalledWith(expect.objectContaining({ action: 'archived', questionId: 84 }));
+  await waitFor(() => expect(callbacks.onSaved).toHaveBeenLastCalledWith(expect.objectContaining({ action: 'archived', questionId: 84 })));
   expect(callbacks.onConnect).not.toHaveBeenCalled();
 });
 
