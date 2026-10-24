@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { api } from '../../lib/api.js';
 import { deliveryPolicies, deliveryPolicyEffect, localValueLabel, matchesRepairValue, decisionKey } from '../../lib/magento-category-workspace.js';
 import { fieldLabels } from '../../lib/export-template-editor.js';
+import { confirmationHint } from '../../lib/magento-review-confirmation.js';
 import { LoadingState, Notice } from '../app/UiPrimitives.jsx';
 import MagentoDetails from './MagentoDetails.jsx';
 
@@ -10,13 +11,14 @@ const kinds = { route: 'Набір атрибутів', attribute: 'Поле', o
 
 // Explicit bounded decisions through the original CAS/authorization endpoints.
 // A partial failure leaves the saved original draft available for a fresh read.
-export default function MagentoWorkspaceReview({ revision, categoryCode, categories = [], questions, selections, focusTarget, onChanged, disabled, onPendingChange, onReadyChange, onProgressChange, onScopeChange, repairContext }) {
+export default function MagentoWorkspaceReview({ revision, categoryCode, categories = [], questions, selections, focusTarget, onChanged, disabled, disabledReason, onPendingChange, onReadyChange, onProgressChange, onScopeChange, repairContext }) {
   const [data, setData] = useState(null); const [error, setError] = useState('');
   const [loadedKey, setLoadedKey] = useState('');
   const [busy, setBusy] = useState(false); const [reason, setReason] = useState('');
   const [choices, setChoices] = useState({}); const [all, setAll] = useState(false); const [page, setPage] = useState(0);
   const [editPolicies, setEditPolicies] = useState(false);
   const [showOtherFields, setShowOtherFields] = useState(false);
+  const descriptionPrefix = useId();
   const sequence = useRef(0); const flight = useRef(false);
   const readKey = `${revision.id}:${revision.revision}`;
   const fresh = loadedKey === readKey;
@@ -89,6 +91,13 @@ export default function MagentoWorkspaceReview({ revision, categoryCode, categor
     }
   }
   const eligible = (entry) => chosen(entry) !== '' && (entry.reviewState !== 'approved' || chosen(entry) !== String(entry.identity)) && (entry.exact && String(entry.identity) === chosen(entry) && entry.kind !== 'policy' || reason.trim().length >= 3);
+  const rowHint = (entry) => !busy && !disabled && eligible(entry) ? '' : confirmationHint({ busy, externalDisabled: disabled, externalReason: disabledReason,
+    reasonCode: entry.reviewState === 'approved' && chosen(entry) === String(entry.identity) ? 'saved' : chosen(entry) === ''
+      ? entry.kind === 'policy' ? 'policy' : ['route', 'option', 'category'].includes(entry.kind) && options(entry).length ? 'mapping' : 'missing_mapping' : 'reason_three' });
+  const rowHintId = (entry) => `${descriptionPrefix}-${encodeURIComponent(entry.id)}`;
+  const bulkHint = busy || disabled || !visible.every(eligible) ? confirmationHint({ busy, externalDisabled: disabled, externalReason: disabledReason, reasonCode: 'rows', count: visible.filter((entry) => !eligible(entry)).length }) : '';
+  const reasonInput = (reason || visible.some((e) => !e.exact || e.kind === 'policy' || chosen(e) !== String(e.identity))) && <label className="mc-label">Пояснення перевірки<input className="input" maxLength={2000} disabled={busy || disabled} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Чому обрано цю відповідність або поведінку"
+    aria-describedby={visible.length === 1 ? rowHint(visible[0]) ? rowHintId(visible[0]) : undefined : visible.length > 1 ? `${descriptionPrefix}-shared` : undefined} /></label>;
   return <section className="mc-review space-y-3" aria-label="Перевірка підготовлених відповідностей">
     <h3 className="font-semibold">{ready && !editPolicies ? 'Відповідності перевірено' : remainingCategories ? 'Підтвердьте відповідності інших категорій' : remainingFields ? 'Підтвердьте решту полів категорії' : placementReview ? 'Підтвердьте розділи магазину' : 'Перевірте ці відповідності'}</h3>
     {error && <Notice tone="error">{error}</Notice>}{!fresh && !error && <LoadingState label="Оновлюємо підтвердження…" compact />}
@@ -111,15 +120,15 @@ export default function MagentoWorkspaceReview({ revision, categoryCode, categor
       {focusTarget && !remainingFields && (otherFields.length > 0 || showOtherFields) && <button className="btn btn-outline" disabled={busy} onClick={() => { setShowOtherFields(!showOtherFields); setPage(0); }}>{showOtherFields ? 'Лише вибране поле' : `Показати решту полів категорії (${otherFields.length})`}</button>}
       <MagentoDetails summary="Поведінка передавання полів">{() => <button type="button" className="btn btn-outline" disabled={busy || disabled} onClick={() => { setEditPolicies(!editPolicies); setPage(0); }}>{editPolicies ? 'Сховати поведінку підключених полів' : 'Змінити поведінку підключених полів'}</button>}</MagentoDetails>
       {!remainingCategories && entries.some((e) => e.group !== categoryCode) && <button className="btn btn-outline" type="button" onClick={() => { setAll(!all); setPage(0); }}>{all ? 'Лише поточна категорія' : 'Показати також інші категорії'}</button>}
-      {(reason || visible.some((e) => !e.exact || e.kind === 'policy' || chosen(e) !== String(e.identity))) && <label className="mc-label">Пояснення перевірки<input className="input" maxLength={2000} disabled={busy || disabled} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Чому обрано цю відповідність або поведінку" /></label>}
+      {visible.length !== 1 && reasonInput && <div className="space-y-2">{visible.length > 1 && <p className="mc-help" id={`${descriptionPrefix}-shared`}>Одне пояснення для показаних відповідностей.</p>}{reasonInput}</div>}
       {visible.length > 0 && <div className="mc-table-scroll"><table><thead><tr><th>Поле / значення менеджера</th><th>Відповідність Magento</th><th>Підтвердження</th></tr></thead><tbody>{visible.map((entry) => <tr key={entry.id} className={matchesRepairValue(entry, repairContext) ? 'is-repair-target' : undefined}>
         <td>{entry.group !== categoryCode && <strong className="block">{categoryName(entry.group)}</strong>}{label(entry)}<small>{kinds[entry.kind]} · {entry.row === 'english' ? 'EN' : 'UA'}</small></td>
         <td>{['policy', 'route', 'option', 'category'].includes(entry.kind) ? <select className="input" aria-label={`Відповідність: ${label(entry)}`} value={chosen(entry)} disabled={busy || disabled} onChange={(e) => setChoices({ ...choices, [entry.id]: e.target.value })}><option value="">Оберіть явно</option>{options(entry).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select> : entry.label || entry.target}{entry.kind === 'policy' && chosen(entry) && <small>{deliveryPolicyEffect(chosen(entry), entry.target)}</small>}</td>
-        <td><button type="button" className="btn btn-outline" disabled={busy || disabled || !eligible(entry)} onClick={() => approve([entry])}>Підтвердити</button></td>
+        <td className="space-y-2">{visible.length === 1 && reasonInput}<button type="button" className="btn btn-outline" disabled={busy || disabled || !eligible(entry)} aria-describedby={rowHint(entry) ? rowHintId(entry) : undefined} onClick={() => approve([entry])}>Підтвердити</button>{rowHint(entry) && <p className="mc-help" id={rowHintId(entry)}>{rowHint(entry)}</p>}</td>
       </tr>)}</tbody></table></div>}
       {!visible.length && <p>{otherFields.length ? 'Вибране поле підтверджено. Відкрийте решту полів цієї категорії, щоб завершити перевірку.' : entries.length ? 'Питання цієї категорії підтверджено. Перевірте також інші категорії.' : 'Усі необхідні відповідності підтверджено.'}</p>}
       {visible.length > 1 && visible.some((e) => e.exact && e.kind !== 'policy') && <MagentoDetails summary="Однозначні підказки">{() => <button type="button" className="btn btn-outline" disabled={busy || disabled} onClick={() => approve(visible.filter((e) => e.exact && e.kind !== 'policy' && String(e.identity) === chosen(e)))}>Прийняти однозначні підказки на цій сторінці</button>}</MagentoDetails>}
-      {visible.length > 1 && <button type="button" className="btn btn-primary" disabled={busy || disabled || !visible.every(eligible)} onClick={() => approve(visible)}>Підтвердити показані відповідності</button>}
+      {visible.length > 1 && <div className="space-y-2"><button type="button" className="btn btn-primary" disabled={busy || disabled || !visible.every(eligible)} aria-describedby={bulkHint ? `${descriptionPrefix}-bulk` : undefined} onClick={() => approve(visible)}>Підтвердити показані відповідності</button>{bulkHint && <p className="mc-help" id={`${descriptionPrefix}-bulk`}>{bulkHint}</p>}</div>}
       {scoped.length > 30 && <nav aria-label="Сторінки перевірки" className="mc-actions"><button className="btn btn-outline" disabled={!currentPage || busy} onClick={() => setPage(currentPage - 1)}>Назад</button><span>{currentPage + 1} / {Math.ceil(scoped.length / 30)}</span><button className="btn btn-outline" disabled={(currentPage + 1) * 30 >= scoped.length || busy} onClick={() => setPage(currentPage + 1)}>Далі</button></nav>}
       {data && fresh && <MagentoDetails summary="Технічна перевірка">{() => <p>Невирішених структурних питань: {data.validation.diagnostics.length}. Чернетка {revision.revision}.</p>}</MagentoDetails>}
     </>}
