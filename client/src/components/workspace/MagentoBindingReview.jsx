@@ -5,6 +5,8 @@ import { useAuth } from '../../auth/auth-context.js';
 import { LoadingState, Notice, StatusBadge } from '../app/UiPrimitives.jsx';
 import MagentoDetails from './MagentoDetails.jsx';
 import { withRepairContext } from '../../lib/magento-repair-context.js';
+import { deliveryPolicies } from '../../lib/magento-category-workspace.js';
+import { policyReviewConstraint, policyReviewChoice, canConfirmPolicy } from '../../lib/magento-policy-options.js';
 
 const root = '/admin/magento-integration';
 const kinds = { route: 'Набір атрибутів', attribute: 'Атрибут', option: 'Значення', category: 'Категорія Magento', policy: 'Правило доставки' };
@@ -24,7 +26,8 @@ function Evidence({ entry }) {
 
 function Decision({ entry, revision, busy, act }) {
   const [reason, setReason] = useState(''); const [identity, setIdentity] = useState('');
-  const [policy, setPolicy] = useState(() => policies.includes(entry.identity) ? entry.identity : '');
+  const [policy, setPolicy] = useState(() => policyReviewChoice(entry, policies.includes(entry.identity) ? entry.identity : ''));
+  const constraint = policyReviewConstraint(entry);
   const attribute = revision.bindings.attributes.find((item) => item.bindingKey === entry.id.split(':')[1]);
   const remote = revision.schema.attributes.find((item) => item.attribute_code === attribute?.attributeCode);
   const choices = entry.kind === 'route' ? revision.schema.attributeSets.map((set) => ({ id: set.attribute_set_id, label: set.attribute_set_name }))
@@ -36,11 +39,20 @@ function Decision({ entry, revision, busy, act }) {
     {entry.evaluated && <p className="text-sm">Значення за правилом Amber: {entry.evaluated}</p>}
     {choices.length > 0 && <div className="flex flex-wrap items-end gap-2"><label className="text-sm">Кандидат<select className="input" value={identity} disabled={busy} onChange={(event) => setIdentity(event.target.value)}><option value="">Оберіть точну відповідність</option>{choices.map((choice) => <option key={choice.id} value={choice.id}>{choice.label} / {choice.id}</option>)}</select></label>
       <button type="button" className="btn btn-outline btn-compact-md" disabled={busy || !identity || (entry.kind === 'option' && !entry.evaluated)} onClick={() => act('select', { ...base, identity: entry.kind === 'route' ? Number(identity) : identity })}>Вибрати кандидата</button></div>}
-    {entry.kind === 'policy' && <label className="block text-sm">Доставка поля<select className="input" value={policy} disabled={busy} onChange={(event) => setPolicy(event.target.value)}>
-      <option value="">Оберіть правило доставки</option><option value="authoritative_create_update">Створення та оновлення</option><option value="initialize_create_only">Лише під час створення{entry.target === 'product_online' ? ' · вимкнений товар' : ''}</option><option value="magento_managed">Зберігати значення Magento</option>
+    {constraint && <div className="mc-help"><p>Збережене правило: {Object.hasOwn(deliveryPolicies, entry.identity) ? deliveryPolicies[entry.identity] : entry.identity || 'Не визначено'}</p>
+      <p>{constraint.kind === 'scope' ? 'Мову або область цього правила не підтверджено. Підтвердження недоступне.'
+        : constraint.kind === 'control' ? entry.identity === 'magento_managed'
+          ? `Системне поле EN. Значення не змінюється через англійську версію. ${entry.reviewState === 'approved' ? 'Збережене правило вже підтверджено.' : ['proposed', 'review_required'].includes(entry.reviewState) ? 'Збережене правило ще потрібно підтвердити.' : 'Підтвердження для цього стану недоступне.'}`
+          : `Системне поле EN потребує збереженого правила «${deliveryPolicies.magento_managed}». Поточне правило не можна підтвердити тут.`
+          : `Для англійської версії цього поля підтримується лише «${deliveryPolicies.authoritative_create_update}».`}</p></div>}
+    {entry.kind === 'policy' && (!constraint || constraint.kind === 'content') && <label className="block text-sm">Доставка поля<select className="input" value={policy} disabled={busy} onChange={(event) => setPolicy(event.target.value)}>
+      <option value="">Оберіть правило доставки</option>{constraint ? <option value="authoritative_create_update">{deliveryPolicies.authoritative_create_update}</option> : <><option value="authoritative_create_update">Створення та оновлення</option><option value="initialize_create_only">Лише під час створення{entry.target === 'product_online' ? ' · вимкнений товар' : ''}</option><option value="magento_managed">Зберігати значення Magento</option></>}
     </select></label>}
     <label className="block text-sm">Пояснення перевірки<input className="input" maxLength={2000} value={reason} disabled={busy} onChange={(event) => setReason(event.target.value)} /></label>
-    <div className="flex flex-wrap gap-2"><button type="button" className="btn btn-outline btn-compact-md" disabled={busy || !entry.identity || (!entry.exact && !reason.trim()) || (entry.kind === 'policy' && !policies.includes(policy))} onClick={() => act('decision', { ...base, action: 'approve', acceptReview: true, ...(reason ? { reason } : {}), ...(entry.kind === 'policy' ? { policy, ...(entry.target === 'product_online' && entry.row === 'base' && policy === 'initialize_create_only' ? { createValue: '2' } : {}) } : {}) })}>Підтвердити зв’язок</button>
+    <div className="flex flex-wrap gap-2"><button type="button" className="btn btn-outline btn-compact-md" disabled={busy || !entry.identity || (!entry.exact && !reason.trim()) || (entry.kind === 'policy' && !policies.includes(policy)) || !canConfirmPolicy(entry, policy)} onClick={() => {
+      if (!canConfirmPolicy(entry, policy)) return;
+      act('decision', { ...base, action: 'approve', acceptReview: true, ...(reason ? { reason } : {}), ...(entry.kind === 'policy' ? { policy, ...(entry.target === 'product_online' && entry.row === 'base' && policy === 'initialize_create_only' ? { createValue: '2' } : {}) } : {}) });
+    }}>Підтвердити зв’язок</button>
       <button type="button" className="btn btn-outline btn-compact-md" disabled={busy || !reason.trim()} onClick={() => act('decision', { ...base, action: 'block', reason })}>Відмовити з поясненням</button></div>
     <Evidence entry={entry} />
   </article>;
