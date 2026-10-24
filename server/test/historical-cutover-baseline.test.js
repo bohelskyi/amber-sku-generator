@@ -122,3 +122,26 @@ test('after the reviewed historical confirmation the held current keeps the same
     assert.equal((await baseline.read(changed.client, [changed.member])).size, 0, change.toString());
   }
 });
+
+test('a later recount keeps the proof of a released or confirmed former held successor, never of a plain retired source', async () => {
+  const successor = (f, confirmed) => {
+    Object.assign(f.member.product, { status: 'corrected', corrected_from_product_id: 2, corrected_to_product_id: 9 });
+    Object.assign(f.member.lifecycle, { route: 'retired', business_exclusion_state: 'none' });
+    if (confirmed) f.member.lifecycle.evidence = { origin: 'reconciliation', action: 'magento_historical_recount_prior_exposure',
+      priorEvidence: structuredClone(f.member.lifecycle.evidence), magentoPriorExposure: { planHash: 'p'.repeat(64) } };
+  };
+  const reference = fixture(); const expected = (await baseline.read(reference.client, [reference.member])).get(3);
+  for (const confirmed of [false, true]) {
+    const f = fixture(); successor(f, confirmed);
+    const proof = (await baseline.read(f.client, [f.member])).get(3);
+    assert.deepEqual(proof, expected, String(confirmed));
+    assert.equal(baseline.verified({ ...f.member, cutoverBaseline: proof }), true);
+  }
+  for (const change of [
+    f => { f.member.product.corrected_from_product_id = null; }, f => { f.member.product.corrected_to_product_id = null; },
+    f => { f.member.lifecycle.business_exclusion_state = 'excluded'; }, f => { f.member.lifecycle.evidence.priorEvidence.decision = 'x'; },
+  ]) {
+    const f = fixture(); successor(f, true); change(f);
+    assert.equal((await baseline.read(f.client, [f.member])).size, 0, change.toString());
+  }
+});

@@ -275,6 +275,14 @@ reviewed `release_exclusion` action. After confirmation the same proof stays val
 through the reconciliation `priorEvidence`, so the admitted first-sync history is
 unchanged. Any other missing modern pointer remains a blocker.
 
+A later Amber recount retires that successor (status `corrected`, with both its
+predecessor and its successor links). It keeps the same proof: its released `none`
+policy and, when it was confirmed, its `priorEvidence` remain exactly as recorded
+while it was current, so the new current product (with its own recorded pointer) can
+use the same reviewed historical recipe. A plain retired source never gains a resolved
+policy this way. An `archived` predecessor counts as retired only when it was already
+recounted into the chain (it has a successor link and a `retired` route).
+
 Canonical cutover may have replaced a then-current migration baseline's evidence
 with `origin: cutover` before a later recount retired it. Such a retired ancestor
 qualifies only when its immutable approved cutover manifest and applied batch

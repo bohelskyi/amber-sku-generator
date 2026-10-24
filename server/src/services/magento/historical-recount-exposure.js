@@ -18,7 +18,9 @@ function lineageBlockers(members, corrections, currentId) {
     || component.productIds.length !== members.length || c.hash(graph.terminals(currentId)) !== c.hash([currentId])) out.push('CORRECTION_LINEAGE_CONFLICT');
   for (const member of members) {
     const { product: p, lifecycle: f, reservation } = member;
-    const retired = p.id !== currentId && p.status === 'corrected' && f?.route === 'retired';
+    // An archived row that was already recounted (it has a successor) is retired too.
+    const retired = p.id !== currentId && f?.route === 'retired'
+      && (p.status === 'corrected' || p.status === 'archived' && p.corrected_to_product_id != null);
     if (!reservation || reservation.first_product_id !== p.id) out.push('SKU_RESERVATION_CONFLICT');
     if (p.id !== currentId && !retired) out.push('PREDECESSOR_NOT_RETIRED');
     const unknownBaseline = retired && legacy(member) && f.business_exclusion_state === 'unknown';
