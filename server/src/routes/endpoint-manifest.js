@@ -31,7 +31,7 @@ const ENDPOINT_MANIFEST = Object.freeze([
     additionalPermissions:Object.freeze(['products.archive','history.view','export_templates.manage','export_templates.publish','products.recount','exports.create'])})),
   endpoint('GET', '/admin/magento-recovery/products/:id', ['export_templates.publish', 'exports.reconcile']),
   endpoint('GET', '/admin/magento-recovery/jobs/:id', 'export_templates.publish'),
-  ...['inspect', 'reconcile', 'continue'].map((action) => endpoint('POST', `/admin/magento-recovery/jobs/:id/${action}`, 'export_templates.publish')),
+  ...['inspect', 'reconcile', 'continue', 'supersede-inspect', 'supersede'].map((action) => endpoint('POST', `/admin/magento-recovery/jobs/:id/${action}`, 'export_templates.publish')),
   ...['lifecycle-preview', 'lifecycle-apply'].map((action) => endpoint('POST', `/admin/magento-recovery/products/:id/${action}`, 'exports.reconcile')),
   endpoint('POST', '/admin/magento-recovery/products/:id/history-inspect', 'exports.reconcile'),
   endpoint('GET', '/admin/magento-integration', 'export_templates.view'),

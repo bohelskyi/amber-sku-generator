@@ -10,7 +10,7 @@ test('Magento recovery HTTP boundaries require authenticated active users, CSRF 
   const calls = [
     [`${root}/products/2147483647`, 'GET', null],
     [`${root}/jobs/${id}`, 'GET', 'export_templates.publish'],
-    ...['inspect', 'reconcile', 'continue'].map((action) => [`${root}/jobs/${id}/${action}`, 'POST', 'export_templates.publish']),
+    ...['inspect', 'reconcile', 'continue', 'supersede-inspect', 'supersede'].map((action) => [`${root}/jobs/${id}/${action}`, 'POST', 'export_templates.publish']),
     ...['lifecycle-preview', 'lifecycle-apply'].map((action) => [`${root}/products/2147483647/${action}`, 'POST', 'exports.reconcile']),
     [`${root}/products/2147483647/history-inspect`, 'POST', 'exports.reconcile'],
   ];

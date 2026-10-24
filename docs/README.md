@@ -22,7 +22,7 @@ contracts and procedures. Archived records are dated history, not current behavi
 | [Export templates](EXPORT_TEMPLATES.md) | Template API, editor, immutable publications, template-level catalog fixes. |
 | [Shared export sessions](SHARED_EXPORT_SESSIONS.md) | Private/shared workflows, invitations, attempts and recovery. |
 | [Authentication and RBAC](AUTH_RBAC.md) | OIDC, sessions, active-user/CSRF boundary, permissions. |
-| [Database and migrations](DATABASE_MIGRATIONS.md) | Runner, forward-only rule, lock order, migration inventory 000–083. |
+| [Database and migrations](DATABASE_MIGRATIONS.md) | Runner, forward-only rule, lock order, migration inventory 000–084. |
 | [Operations](OPERATIONS.md) | Topology, deployments, health, shutdown, backup/restore, audit. |
 | [Application UX](APPLICATION_UX.md) | Navigation, shared UI primitives, terminology, acceptance boundaries. |
 
