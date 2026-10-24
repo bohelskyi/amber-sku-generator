@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { AuthContext } from '../src/auth/auth-context.js';
 import { api } from '../src/lib/api.js';
@@ -156,13 +156,22 @@ it('pages and searches values by either language while editing the exact selecte
 
 it('empty hide conditions say never hide and preserve semantic zero when a condition is chosen', async () => {
   config.questions.BR.push({ ...originalQuestion, id: 'source', q_db_id: 85, label: 'Інша характеристика' });
+  let resolveConfig;
+  get.mockImplementationOnce(() => new Promise((resolve) => { resolveConfig = resolve; }));
   open({ initialAction: 'edit-option', optionValue: 0 });
+  await waitFor(() => expect(get).toHaveBeenCalledWith('/admin/config'));
+  expect(screen.getByText('Завантажуємо каталог…')).toBeTruthy();
+  // Settle option initialization and the condition builder's prop synchronization before editing.
+  await act(async () => resolveConfig({ data: structuredClone(config) }));
+  expect((await screen.findByRole('textbox', { name: 'Назва українською' })).value).toBe('Без кольору');
   fireEvent.click(await screen.findByText('Умови показу значення'));
   const hide = screen.getByRole('combobox', { name: 'Приховувати значення' });
   expect(hide.selectedOptions[0].textContent).toBe('Не приховувати');
-  fireEvent.change(hide, { target: { value: 'conditional' } });
+  await act(async () => fireEvent.change(hide, { target: { value: 'conditional' } }));
   const condition = hide.closest('.mb-3');
-  fireEvent.click(within(condition).getByRole('button', { name: 'Без кольору' }));
+  const zero = await within(condition).findByRole('button', { name: 'Без кольору' });
+  expect(hide.value).toBe('conditional');
+  fireEvent.click(zero);
   expect(within(condition).getByRole('button', { name: 'Без кольору' }).getAttribute('aria-pressed')).toBe('true');
   put.mockResolvedValue({ data: { success: true } });
   fireEvent.click(screen.getByRole('button', { name: 'Зберегти зміни' }));

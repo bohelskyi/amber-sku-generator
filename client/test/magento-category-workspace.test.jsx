@@ -511,9 +511,22 @@ it('retains the stored schema and date when explicit Magento observation fails',
 
 it('uses a modal for the whole field on a narrow screen and preserves literal English separately', async () => {
   vi.stubGlobal('matchMedia', () => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+  let resolveEnglish;
+  const get = api.get.getMockImplementation();
+  api.get.mockImplementation((url, config) => url === '/admin/magento-integration/categories/BR' && config?.params?.rowId === 'english'
+    ? new Promise((resolve) => { resolveEnglish = resolve; }) : get(url, config));
   mount(); await textFields(); await screen.findByRole('button', { name: 'Опис' });
   fireEvent.change(screen.getByLabelText('Мова полів'), { target: { value: 'english' } });
   await waitFor(() => expect(api.get.mock.calls.some(([, config]) => config?.params?.rowId === 'english')).toBe(true));
+  expect(screen.getByLabelText('Мова полів').disabled).toBe(true);
+  // The old field remains visible while scope() reads English; its busy guard rejects this click.
+  fireEvent.click(screen.getByRole('button', { name: 'Опис' }));
+  expect(screen.queryByRole('dialog', { name: 'Поле Magento' })).toBeNull();
+  await act(async () => resolveEnglish({ data: projection(active, definition, 'english') }));
+  await waitFor(() => {
+    expect(screen.getByLabelText('Мова полів').value).toBe('english');
+    expect(screen.getByLabelText('Мова полів').disabled).toBe(false);
+  });
   fireEvent.click(screen.getByRole('button', { name: 'Опис' }));
   const dialog = await screen.findByRole('dialog', { name: 'Поле Magento' });
   expect((await within(dialog).findByLabelText('Текст для магазину')).value).toBe('Old description');
@@ -574,11 +587,22 @@ it('checks product impact after the single explicit check and waits for a separa
     return result;
   });
   const post = api.post.getMockImplementation();
-  api.post.mockImplementation(async (url, body) => url.endsWith('/publication/preview') ? { data: { previewToken: 'impact-proof', blockers: [], affected: [], preservedNames: [], lostProducts: [], lostRoutes: [], totalProducts: 12 } } : post(url, body));
+  let resolvePreview;
+  api.post.mockImplementation((url, body) => url.endsWith('/publication/preview')
+    ? new Promise((resolve) => { resolvePreview = resolve; }) : post(url, body));
   mount(); await textFields(); fireEvent.click(await screen.findByRole('button', { name: 'Опис' }));
   fireEvent.change(await screen.findByLabelText('Текст для магазину'), { target: { value: 'Новий опис' } });
   fireEvent.click(screen.getByRole('button', { name: 'Готово' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Перевірити зміни' }));
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Перевірити зміни' })));
+  const dialog = await screen.findByRole('dialog', { name: 'Перевірка та застосування' });
+  await waitFor(() => {
+    expect(resolvePreview).toBeTypeOf('function');
+    expect(within(dialog).getByText('Перевіряємо вплив усього пакета на товари…')).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: 'До редагування' }).disabled).toBe(true);
+  });
+  expect(screen.queryByRole('button', { name: 'Застосувати правила' })).toBeNull();
+  expect(api.post.mock.calls.some(([url]) => url.endsWith('/publication/apply'))).toBe(false);
+  await act(async () => resolvePreview({ data: { previewToken: 'impact-proof', blockers: [], affected: [], preservedNames: [], lostProducts: [], lostRoutes: [], totalProducts: 12 } }));
   const apply = await screen.findByRole('button', { name: 'Застосувати правила' });
   expect(apply.disabled).toBe(false);
   expect(api.post.mock.calls.filter(([url]) => url.endsWith('/publication/preview'))).toHaveLength(1);
@@ -599,7 +623,9 @@ it('keeps the focused review task open while publication checking is in flight',
     ? new Promise((resolve) => { resolvePreview = resolve; }) : post(url, body));
   mount(); await textFields(); fireEvent.click(await screen.findByRole('button', { name: 'Опис' }));
   fireEvent.change(await screen.findByLabelText('Текст для магазину'), { target: { value: 'Новий текст' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Готово' })); fireEvent.click(screen.getByRole('button', { name: 'Перевірити зміни' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Готово' }));
+  // Publication busy state reaches the parent and its Escape listener through effects.
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Перевірити зміни' })));
   const dialog = await screen.findByRole('dialog', { name: 'Перевірка та застосування' });
   await waitFor(() => {
     expect(resolvePreview).toBeTypeOf('function');
