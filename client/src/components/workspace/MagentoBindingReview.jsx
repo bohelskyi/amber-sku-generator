@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../lib/api.js';
 import { useAuth } from '../../auth/auth-context.js';
 import { LoadingState, Notice, StatusBadge } from '../app/UiPrimitives.jsx';
 import MagentoDetails from './MagentoDetails.jsx';
 import { withRepairContext } from '../../lib/magento-repair-context.js';
+import { confirmationHint } from '../../lib/magento-review-confirmation.js';
 
 const root = '/admin/magento-integration';
 const kinds = { route: 'Набір атрибутів', attribute: 'Атрибут', option: 'Значення', category: 'Категорія Magento', policy: 'Правило доставки' };
@@ -25,12 +26,16 @@ function Evidence({ entry }) {
 function Decision({ entry, revision, busy, act }) {
   const [reason, setReason] = useState(''); const [identity, setIdentity] = useState('');
   const [policy, setPolicy] = useState(() => policies.includes(entry.identity) ? entry.identity : '');
+  const hintId = useId();
   const attribute = revision.bindings.attributes.find((item) => item.bindingKey === entry.id.split(':')[1]);
   const remote = revision.schema.attributes.find((item) => item.attribute_code === attribute?.attributeCode);
   const choices = entry.kind === 'route' ? revision.schema.attributeSets.map((set) => ({ id: set.attribute_set_id, label: set.attribute_set_name }))
     : entry.kind === 'category' ? (entry.candidates || []).map((category) => ({ id: category.categoryId, label: category.path }))
       : entry.kind === 'option' ? (remote?.options || []).filter((option) => !option.isEmpty).map((option) => ({ id: option.value, label: option.label })) : [];
   const base = { expectedRevision: revision.revision, binding: entry.id };
+  const approvalDisabled = busy || !entry.identity || (!entry.exact && !reason.trim()) || (entry.kind === 'policy' && !policies.includes(policy));
+  const hint = approvalDisabled ? confirmationHint({ busy, reasonCode: !entry.identity ? choices.length && (entry.kind !== 'option' || entry.evaluated) ? 'candidate' : 'missing_mapping'
+    : entry.kind === 'policy' && !policies.includes(policy) ? 'policy' : 'reason' }) : '';
   return <article className="space-y-2 border-t py-3" aria-label={`${kinds[entry.kind]}: ${entry.label || entry.target}`}>
     <p className="text-sm"><strong>{kinds[entry.kind]}</strong> · {entry.label || 'не визначено'} <StatusBadge>{states[entry.reviewState] || 'Потрібна перевірка'}</StatusBadge></p>
     {entry.evaluated && <p className="text-sm">Значення за правилом Amber: {entry.evaluated}</p>}
@@ -39,9 +44,10 @@ function Decision({ entry, revision, busy, act }) {
     {entry.kind === 'policy' && <label className="block text-sm">Доставка поля<select className="input" value={policy} disabled={busy} onChange={(event) => setPolicy(event.target.value)}>
       <option value="">Оберіть правило доставки</option><option value="authoritative_create_update">Створення та оновлення</option><option value="initialize_create_only">Лише під час створення{entry.target === 'product_online' ? ' · вимкнений товар' : ''}</option><option value="magento_managed">Зберігати значення Magento</option>
     </select></label>}
-    <label className="block text-sm">Пояснення перевірки<input className="input" maxLength={2000} value={reason} disabled={busy} onChange={(event) => setReason(event.target.value)} /></label>
-    <div className="flex flex-wrap gap-2"><button type="button" className="btn btn-outline btn-compact-md" disabled={busy || !entry.identity || (!entry.exact && !reason.trim()) || (entry.kind === 'policy' && !policies.includes(policy))} onClick={() => act('decision', { ...base, action: 'approve', acceptReview: true, ...(reason ? { reason } : {}), ...(entry.kind === 'policy' ? { policy, ...(entry.target === 'product_online' && entry.row === 'base' && policy === 'initialize_create_only' ? { createValue: '2' } : {}) } : {}) })}>Підтвердити зв’язок</button>
+    <label className="block text-sm">Пояснення перевірки<input className="input" maxLength={2000} value={reason} disabled={busy} aria-describedby={hint ? hintId : undefined} onChange={(event) => setReason(event.target.value)} /></label>
+    <div className="flex flex-wrap gap-2"><button type="button" className="btn btn-outline btn-compact-md" disabled={approvalDisabled} aria-describedby={hint ? hintId : undefined} onClick={() => act('decision', { ...base, action: 'approve', acceptReview: true, ...(reason ? { reason } : {}), ...(entry.kind === 'policy' ? { policy, ...(entry.target === 'product_online' && entry.row === 'base' && policy === 'initialize_create_only' ? { createValue: '2' } : {}) } : {}) })}>Підтвердити зв’язок</button>
       <button type="button" className="btn btn-outline btn-compact-md" disabled={busy || !reason.trim()} onClick={() => act('decision', { ...base, action: 'block', reason })}>Відмовити з поясненням</button></div>
+    {hint && <p className="text-sm" id={hintId}>{hint}</p>}
     <Evidence entry={entry} />
   </article>;
 }
