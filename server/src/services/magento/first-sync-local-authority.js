@@ -20,12 +20,22 @@ function validChLocal(field,meta) {
   const value=require('./first-sync-field-plan').normalizeDecimal(field.local.value,6);
   return field.type==='decimal' && field.scale===6 && value!==null && value!=='0' && !value.startsWith('-');
 }
+// Catalog owner decision: KL jewelry size uses a decimal point like weight. Amber
+// wins only when Magento differs by decimal commas alone (`3/1,8` -> `3/1.8`).
+function validKlSizeLocal(field,meta) {
+  if(meta.localAuthority!=='kl-jewelry-size-decimal-point-v1' || field.target!=='rozmir_iuvelirnoho_vyrobu' || field.scope!=='all'
+    || field.type!=='text' || field.local?.known!==true || field.local.present!==true || field.remote?.known!==true
+    || field.remote.present!==true || !text(field.local.value) || !text(field.remote.value)) return false;
+  const local=field.local.value, remote=field.remote.value;
+  return !local.includes(',') && remote.includes(',') && remote.replace(/,/g,'.')===local;
+}
 function selectable(field,meta,result) {
   if(field.kind!=='derived' || result.reason!=='DERIVED_FORWARD_MISMATCH'
     || !field.mapping?.proven || !field.prospective?.verified || meta.reason || meta.readReason
     || meta.outwardPolicy!=='authoritative_create_update')return false;
   if(validSeoLocal(field))return true;
   if(validChLocal(field,meta))return true;
+  if(validKlSizeLocal(field,meta))return true;
   const price=require('./first-sync-field-plan').normalizeDecimal(field.local?.value,2);
   return field.target==='price' && field.scope==='all' && field.type==='decimal' && field.unit==='UAH'
     && meta.canonicalLocalPriceProven===true
