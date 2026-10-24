@@ -23,6 +23,8 @@ function queryContext(config, query) {
   // historical product rows. Group counts still deduplicate public identities.
   // Facets keep separate scopes: all queued categories, then category/search
   // reasons, then the requested reason's actual members and page.
+  // Match presentProblems' co-occurring local-name context without changing
+  // diagnostics. Only that variant adds a key suffix; all other group IDs stay stable.
   const sql = `WITH base_queue AS (
     ${problemSelectSql} ${problemJoinSql} WHERE (r.state='needs_attention' OR d.state<>'finalized')
   ), queue AS (
@@ -35,8 +37,12 @@ function queryContext(config, query) {
         WHEN q.name_state IN ('conflict','baseline_required') THEN jsonb_build_array(jsonb_build_object('code',CASE WHEN q.name_state='conflict' THEN 'NAME_CONFLICT' ELSE 'NAME_BASELINE_REQUIRED' END))
         WHEN jsonb_array_length(COALESCE(q.diagnostics,'[]'))>0 THEN q.diagnostics
         ELSE jsonb_build_array(jsonb_build_object('code',COALESCE(q.reason_code,'data_or_binding'))) END) problem
+  ), contextual AS (
+    SELECT *, problem->>'code'='NAME_READ_UNAVAILABLE' AND COALESCE(diagnostics @>
+      '[{"code":"PRODUCT_EVALUATION_NOT_READY","issueFields":["name"]}]'::jsonb,false) AS local_name_not_ready FROM expanded
   ), classified AS (
     SELECT *, CASE WHEN problem->>'code' IN ('reconciliation_required','TEST_DELETION_PENDING','AMBER_SYNC_ELIGIBILITY_UNRESOLVED','LIFECYCLE_HISTORICAL_AMBIGUITY') THEN 'recovery'
+      WHEN local_name_not_ready THEN 'product'
       WHEN problem->>'code' LIKE 'NAME_%' THEN 'names'
       WHEN problem->>'code' IN ('PRODUCT_EVALUATION_NOT_READY','REQUIRED_ATTRIBUTE_VALUE_MISSING','REQUIRED_NATIVE_FIELD_MISSING') THEN 'product'
       WHEN problem->>'code' IN ('authorization','configuration') THEN 'connection' ELSE 'integration' END AS reason_group,
@@ -49,10 +55,11 @@ function queryContext(config, query) {
         AND length(problem->'causeContext'->>'question') BETWEEN 1 AND 160
         AND length(problem->'causeContext'->>'value') BETWEEN 1 AND 500
         THEN problem->'causeContext' ELSE NULL END AS shared_context
-    FROM expanded
+    FROM contextual
   ), members AS (
-    SELECT *, md5(jsonb_build_array(problem->>'code',problem->>'diagnosticCode',problem->>'target',problem->>'field',
-      problem->>'scope',problem->>'reason',problem->>'path',problem->>'routeKey',shared_context)::text) AS group_id FROM classified ${reasonFilter}
+    SELECT *, md5((jsonb_build_array(problem->>'code',problem->>'diagnosticCode',problem->>'target',problem->>'field',
+      problem->>'scope',problem->>'reason',problem->>'path',problem->>'routeKey',shared_context)
+      || CASE WHEN local_name_not_ready THEN '["local_name_not_ready"]'::jsonb ELSE '[]'::jsonb END)::text) AS group_id FROM classified ${reasonFilter}
   )`;
   return { sql, values, limit, offset };
 }
@@ -76,7 +83,7 @@ async function groupPage(config, query = {}, db = pool) {
   [...values, limit, offset])).rows[0];
   const items = (response?.items || []).map(row => ({ id: row.group_id, productCount: row.product_count,
     diagnosticCount: row.diagnostic_count, sharedConfiguration: Boolean(row.sample.shared_context),
-    problem: presentProblem(row.sample.problem, row.sample.lifecycle),
+    problem: presentProblem(row.sample.problem, row.sample.lifecycle, row.sample.diagnostics || []),
     exampleProduct: { productId: row.sample.productId, article: row.sample.article, category: row.sample.category },
   }));
   return { items, pageInfo: pageInfo(limit, offset, Number(response?.total || 0), items.length),
@@ -92,7 +99,7 @@ async function groupProducts(config, groupId, query = {}, db = pool) {
   ), page AS (SELECT * FROM selected ORDER BY "productId" LIMIT $${values.length + 1} OFFSET $${values.length + 2})
   SELECT (SELECT COALESCE(jsonb_agg(to_jsonb(page) ORDER BY "productId"),'[]') FROM page) AS items,
     (SELECT count(*)::int FROM selected) AS total`, [...values, limit, offset])).rows[0];
-  const items = (response?.items || []).map(row => ({ ...presentProblemRow(row), groupProblem: presentProblem(row.problem, row.lifecycle) }));
+  const items = (response?.items || []).map(row => ({ ...presentProblemRow(row), groupProblem: presentProblem(row.problem, row.lifecycle, row.diagnostics || []) }));
   return { items, pageInfo: pageInfo(limit, offset, Number(response?.total || 0), items.length) };
 }
 module.exports = { groupPage, groupProducts };

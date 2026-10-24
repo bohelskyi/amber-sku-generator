@@ -104,7 +104,11 @@ function recordedDiagnostics(blockers, report, bindingRevisionId) {
     } : item;
   });
 }
-function presentProblem(item, lifecycle) {
+function presentProblem(item, lifecycle, context = []) {
+  if (item.code === 'NAME_READ_UNAVAILABLE' && context.some(candidate => candidate.code === 'PRODUCT_EVALUATION_NOT_READY'
+    && Array.isArray(candidate.issueFields) && candidate.issueFields.includes('name'))) {
+    return { ...item, message: 'Назви товару в Amber потрібно заповнити або виправити.', resolution: 'product' };
+  }
   if(item.code.startsWith('FIRST_SYNC_')) {
     const reasons={CANONICAL_WEIGHT_SETTER_UNSUPPORTED:'Автоматичне прийняття ваги поки не підтримує всі пов’язані дані товару.',
       CANONICAL_GENERIC_SETTER_UNSUPPORTED:'Історичне значення характеристики потребує окремого підтвердженого способу збереження.',
@@ -135,17 +139,7 @@ function presentProblem(item, lifecycle) {
             ? 'integration_preparation' : 'integration_configuration' };
 }
 function presentProblems(items = [], lifecycle) {
-  const localNameNotReady = items.some((item) => item.code === 'PRODUCT_EVALUATION_NOT_READY'
-    && Array.isArray(item.issueFields) && item.issueFields.includes('name'));
-  return items.map((item) => {
-    const problem = presentProblem(item, lifecycle);
-    if (localNameNotReady && item.code === 'NAME_READ_UNAVAILABLE') {
-      return { ...problem,
-        message: 'Назви товару в Amber потрібно заповнити або виправити.',
-        resolution: 'product' };
-    }
-    return problem;
-  });
+  return items.map(item => presentProblem(item, lifecycle, items));
 }
 async function saveDiagnostics(db, automatic, blockers) {
   await db.query(`UPDATE magento_product_sync_requests SET diagnostics=$3::jsonb

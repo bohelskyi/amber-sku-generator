@@ -219,6 +219,81 @@ test('attention confirmation timestamps require exact PostgreSQL delivery receip
       } finally { await client.query('ROLLBACK'); client.release(); }
       assert.deepEqual(await snapshot(), before, 'Facet reads perform no product, queue, job or audit mutations');
     });
+    await t.test('name cause groups separate local readiness from remote reads and retain full diagnostic context', async () => {
+      const groups = require('../src/services/magento/problem-groups');
+      const unavailable = { code: 'NAME_READ_UNAVAILABLE' };
+      const local = [unavailable, { code: 'PRODUCT_EVALUATION_NOT_READY', issueFields: ['weight', 'name'] }];
+      const fixtures = [
+        { diagnostics: local, resolution: 'product' }, { diagnostics: local, resolution: 'product' },
+        { diagnostics: [unavailable], resolution: 'name' },
+        ...[['weight'], 'name', { name: true }].map(issueFields => ({
+          diagnostics: [unavailable, { code: 'PRODUCT_EVALUATION_NOT_READY', issueFields }], resolution: 'name',
+        })),
+        { diagnostics: local, nameConflict: true },
+        { diagnostics: local, reason: 'reconciliation_required' },
+        { diagnostics: [...local, { code: 'FIRST_SYNC_FIELD_CONFLICT', target: 'weight' }], nameConflict: true, resolution: 'product' },
+      ];
+      for (const fixture of fixtures) {
+        fixture.product = await makeProduct('NM');
+        await db.query(`UPDATE magento_product_sync_requests SET state='needs_attention',reason_code=$2,
+          diagnostics=$3::jsonb WHERE product_id=$1`,
+        [fixture.product.id, fixture.reason || 'data_or_binding', JSON.stringify(fixture.diagnostics)]);
+        if (fixture.nameConflict) await db.query(`INSERT INTO magento_name_sync_states(origin_hash,public_product_identity_id,
+          remote_product_id,observed_amber_names,observed_remote_names,state) VALUES($1,$2,42,'{}','{}','conflict')`,
+        [origin, fixture.product.public_product_identity_id]);
+      }
+      const before = await snapshot();
+      const namesBefore = (await db.query('SELECT * FROM magento_name_sync_states ORDER BY public_product_identity_id')).rows;
+      const client = await db.connect();
+      try {
+        await client.query('BEGIN READ ONLY');
+        const all = await groups.groupPage(config, { category: 'NM', limit: 100 }, client);
+        assert.equal(all.summary.productCount, 9);
+        assert.equal(all.summary.diagnosticCount, 16, 'All effective diagnostics remain represented');
+        assert.equal(all.pageInfo.total, 6);
+        assert.deepEqual(all.summary.reasonCounts, [
+          { reason: 'integration', count: 1 }, { reason: 'names', count: 5 },
+          { reason: 'product', count: 6 }, { reason: 'recovery', count: 1 },
+        ]);
+        const nameGroups = all.items.filter(group => group.problem.code === unavailable.code);
+        assert.equal(nameGroups.length, 2, 'Different repairs must not share a sampled cause');
+        const localGroup = nameGroups.find(group => group.problem.resolution === 'product');
+        const remoteGroup = nameGroups.find(group => group.problem.resolution === 'name');
+        assert.notEqual(localGroup.id, remoteGroup.id);
+        assert.equal(localGroup.productCount, 3); assert.equal(localGroup.diagnosticCount, 3);
+        assert.equal(remoteGroup.productCount, 4); assert.equal(remoteGroup.diagnosticCount, 4);
+        assert.equal(localGroup.problem.message, 'Назви товару в Amber потрібно заповнити або виправити.');
+        assert.equal(remoteGroup.problem.message, 'Не вдалося прочитати назву Magento для перевірки.');
+        for (const code of [unavailable.code, 'PRODUCT_EVALUATION_NOT_READY', 'NAME_CONFLICT', 'reconciliation_required']) {
+          const oldId = (await client.query('SELECT md5(jsonb_build_array($1::text,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL)::text) AS id', [code])).rows[0].id;
+          assert.equal(all.items.find(group => group.problem.code === code && group !== localGroup).id, oldId,
+            'Unrelated and remote group identifiers remain stable');
+        }
+        for (const group of nameGroups) {
+          const members = await groups.groupProducts(config, group.id, { category: 'NM', limit: 100 }, client);
+          const expected = fixtures.filter(fixture => fixture.resolution === group.problem.resolution);
+          assert.deepEqual(members.items.map(member => member.productId).sort((a, b) => a - b), expected.map(fixture => fixture.product.id));
+          for (const member of members.items) {
+            assert.deepEqual(member.groupProblem, group.problem);
+            assert.deepEqual(member.groupProblem, member.problems.find(problem => problem.code === unavailable.code));
+          }
+        }
+        for (const [reason, expectedGroup] of [['product', localGroup], ['names', remoteGroup]]) {
+          const filtered = await groups.groupPage(config, { category: 'NM', reason }, client);
+          assert.deepEqual(filtered.items.filter(group => group.problem.code === unavailable.code).map(group => group.id), [expectedGroup.id]);
+          assert.deepEqual(filtered.summary.reasonCounts, all.summary.reasonCounts);
+        }
+        for (const [index, code] of [[6, 'NAME_CONFLICT'], [7, 'reconciliation_required']]) {
+          const group = all.items.find(item => item.problem.code === code);
+          const members = await groups.groupProducts(config, group.id, { category: 'NM' }, client);
+          assert.deepEqual(members.items.map(member => member.productId), [fixtures[index].product.id]);
+          assert.deepEqual(members.items[0].problems.map(problem => problem.code), [code], 'Higher-priority recovery/name state still overrides diagnostics');
+        }
+        await client.query('COMMIT');
+      } finally { await client.query('ROLLBACK'); client.release(); }
+      assert.deepEqual(await snapshot(), before, 'Grouping changes no saved diagnostic, product, job, lifecycle or audit');
+      assert.deepEqual((await db.query('SELECT * FROM magento_name_sync_states ORDER BY public_product_identity_id')).rows, namesBefore);
+    });
   } finally {
     if (db) await db.end();
     if (created) {

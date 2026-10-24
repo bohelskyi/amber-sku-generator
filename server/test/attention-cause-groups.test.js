@@ -64,3 +64,29 @@ test('group samples select one member per group without accumulating every membe
   assert.match(statement, /ORDER BY group_id,"productId"/);
   assert.doesNotMatch(statement, /\barray_agg\s*\(/i);
 });
+
+test('group cards and members use the same local-name context as their full diagnostic list', async () => {
+  const unavailable = { code: 'NAME_READ_UNAVAILABLE' };
+  for (const [label, context, resolution] of [
+    ['local missing name', [{ code: 'PRODUCT_EVALUATION_NOT_READY', issueFields: ['weight', 'name'] }], 'product'],
+    ['remote unavailable', [], 'name'],
+    ['unrelated local field', [{ code: 'PRODUCT_EVALUATION_NOT_READY', issueFields: ['weight'] }], 'name'],
+    ['string is not a field array', [{ code: 'PRODUCT_EVALUATION_NOT_READY', issueFields: 'name' }], 'name'],
+    ['object is not a field array', [{ code: 'PRODUCT_EVALUATION_NOT_READY', issueFields: { name: true } }], 'name'],
+    ['another diagnostic cannot supply readiness', [{ code: 'REQUIRED_NATIVE_FIELD_MISSING', issueFields: ['name'] }], 'name'],
+  ]) {
+    const diagnostics = [unavailable, ...context], before = structuredClone(diagnostics);
+    const row = { productId: 7, article: 'AG-000007', category: 'KL', state: 'needs_attention',
+      diagnostics, problem: unavailable };
+    const id = 'a'.repeat(32);
+    const page = await groupPage({ configured: false }, {}, { query: async () => ({ rows: [{
+      items: [{ group_id: id, product_count: 1, diagnostic_count: 1, sample: row }], total: 1,
+    }] }) });
+    const members = await groupProducts({ configured: false }, id, {}, { query: async () => ({ rows: [{ items: [row], total: 1 }] }) });
+    assert.equal(page.items[0].problem.resolution, resolution, label);
+    const member = members.items[0];
+    assert.deepEqual(member.groupProblem, page.items[0].problem, label);
+    assert.deepEqual(member.groupProblem, member.problems.find(problem => problem.code === unavailable.code), label);
+    assert.deepEqual(diagnostics, before, 'Presentation never changes recorded diagnostics');
+  }
+});
