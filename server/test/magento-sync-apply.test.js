@@ -124,3 +124,22 @@ test('authoritative category replacement uses independent native links and rejec
   assert.equal(matches(positionPlan.operations[1], observed([link('10', 3)])), false);
   assert.equal(matches(positionPlan.operations[1], observed([link('10', 5)])), true);
 });
+
+test('Magento-maintained custom_update_at is not preserved; every other untouched field still is', () => {
+  const { baseline, preserve } = require('../src/services/magento/sync-job-plan');
+  const { hash } = require('../src/services/magento/binding-contract');
+  const raw = { id: 7, sku: 'KL3/1', status: 1, custom_attributes: [{ attribute_code: 'custom_update_at', value: '2026-10-23 10:00:00' },
+    { attribute_code: 'am_shipping_type', value: '1' }, { attribute_code: 'decor_weight', value: '4.7' }], extension_attributes: {} };
+  const report = { sendability: { operations: { coreProduct: { candidatePayload: { product: { sku: 'KL3/1',
+    custom_attributes: [{ attribute_code: 'decor_weight', value: '4.7' }] } } } } } };
+  const recorded = baseline({ raw, domainEvidence: { inventory: null } }, report);
+  assert.equal(Object.hasOwn(recorded.preservation, 'custom.custom_update_at'), false);
+  assert.equal(Object.hasOwn(recorded.preservation, 'custom.am_shipping_type'), true);
+  const job = { sku: 'KL3/1', remote_product_id: '7', intent: { mode: 'update' },
+    baseline: { ...recorded, preservation: { ...recorded.preservation, 'custom.custom_update_at': hash('2026-10-23 10:00:00') },
+      domainEvidence: { inventory: null } } };
+  const saved = structuredClone(raw); saved.custom_attributes[0].value = '2026-10-24 13:20:00';
+  preserve(job, { raw: saved, domainEvidence: { inventory: null } });
+  saved.custom_attributes.splice(1, 1);
+  assert.throws(() => preserve(job, { raw: saved, domainEvidence: { inventory: null } }), { code: 'MAGENTO_SYNC_PRESERVED_FIELD_CHANGED' });
+});

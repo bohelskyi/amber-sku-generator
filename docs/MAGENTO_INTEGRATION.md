@@ -618,7 +618,13 @@ Authentication uses all four credentials with OAuth 1.0a, version `1.0`,
 HMAC-SHA256, a fresh cryptographic nonce, and Unix seconds. It does not use a
 standalone Bearer token. The signer applies RFC3986 encoding, sorts encoded
 key/value pairs (including duplicate query parameters), and separates the signing
-base URL from the query. See [Adobe OAuth authentication](https://developer.adobe.com/commerce/webapi/get-started/authentication/gs-authentication-oauth).
+base URL from the query. A path segment such as a legacy `KL3/...` article is sent
+encoded once (`KL3%2F...`), but the signing base URL uses the path Magento verifies:
+its Laminas normalization decodes, once, the escapes of unreserved characters and
+`:@&=+$,/;%`, and keeps every other escape as sent. Production rejected the
+escaped `%2F` form with `401 The signature is invalid`, so before this rule every
+per-SKU path request for such an article (for example a category-link removal)
+failed without reaching the endpoint. See [Adobe OAuth authentication](https://developer.adobe.com/commerce/webapi/get-started/authentication/gs-authentication-oauth).
 
 ## Read interface
 
@@ -1932,6 +1938,10 @@ remote preconditions. Magento-managed fields are omitted and preservation hashes
 are checked, including media, unknown attributes/extensions, update inventory and
 unproduced scoped EN content. Final acknowledgement also verifies unchanged EN
 values and required website memberships, not merely fields sent in the last request.
+The custom attribute `custom_update_at` is a Magento-maintained modification
+timestamp that an admin product save rewrites, like native `updated_at`; it is not
+recorded in new baselines and is skipped when an older baseline holds it. Every other
+untouched attribute, including one an admin save removes, still fails preservation.
 
 UPDATE revalidation restores native timestamp evidence omitted by the minimized
 baseline: `created_at` must match its original preservation hash, while Magento-owned

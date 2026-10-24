@@ -47,6 +47,9 @@ function intent(report, version = 2) {
     englishValues: Object.fromEntries(report.transport.storeViews.diff.filter((d) => d.authority === 'authoritative')
       .map((d) => [d.target, d.candidate])) });
 }
+// Magento-maintained modification timestamps are not product data: an admin
+// save rewrites them like native updated_at. Every other field stays preserved.
+const VOLATILE_CUSTOM = new Set(['custom_update_at']);
 function baseline(observation, report) {
   const { raw, domainEvidence } = observation;
   const written = fields(report.sendability.operations.coreProduct.candidatePayload.product);
@@ -54,7 +57,8 @@ function baseline(observation, report) {
   if (raw) {
     for (const [k, v] of Object.entries(raw)) if (!['custom_attributes', 'extension_attributes', 'updated_at'].includes(k)
       && !Object.hasOwn(written, k)) preservation[`native.${k}`] = hash(v);
-    for (const a of raw.custom_attributes || []) if (!Object.hasOwn(written, a.attribute_code) && a.attribute_code !== 'category_ids') {
+    for (const a of raw.custom_attributes || []) if (!Object.hasOwn(written, a.attribute_code) && a.attribute_code !== 'category_ids'
+      && !VOLATILE_CUSTOM.has(a.attribute_code)) {
       preservation[`custom.${a.attribute_code}`] = hash(a.value);
     }
     for (const [k, v] of Object.entries(raw.extension_attributes || {})) if (!['category_links', 'website_ids'].includes(k)) preservation[`extension.${k}`] = hash(v);
@@ -151,6 +155,7 @@ function preserve(job, observation) {
   if (observation.raw.sku !== job.sku) fail('MAGENTO_SYNC_REMOTE_IDENTITY_CHANGED');
   for (const [path, expected] of Object.entries(job.baseline.preservation)) {
     const [kind, key] = path.split('.');
+    if (kind === 'custom' && VOLATILE_CUSTOM.has(key)) continue; // Older baselines recorded it.
     const value = kind === 'native' ? observation.raw[key] : kind === 'extension' ? observation.raw.extension_attributes?.[key]
       : observation.raw.custom_attributes?.find((a) => a.attribute_code === key)?.value;
     if (value === undefined || hash(value) !== expected) fail('MAGENTO_SYNC_PRESERVED_FIELD_CHANGED');

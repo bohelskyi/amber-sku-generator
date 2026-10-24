@@ -77,22 +77,24 @@ test('OAuth uses RFC3986 encoding including Unicode and reserved punctuation', (
   assert.equal(percentEncode("!'()* /+~я"), '%21%27%28%29%2A%20%2F%2B~%D1%8F');
 });
 
-test('fixed OAuth HMAC-SHA256 fixture includes sorted duplicate queries and encoded signing path', () => {
+test('fixed OAuth HMAC-SHA256 fixture includes sorted duplicate queries and the decoded signing path Magento verifies', () => {
   const url = 'https://store.example.invalid/rest/all/V1/products/KL3%2F11131351005'
     + '?b=two+words&a=%2F&a=%21&empty=&unicode=%D1%8F';
   const header = signGetRequest(url, config, fixed);
   assert.ok(header.startsWith('OAuth '));
   assert.deepEqual(headerFields(header), {
     oauth_consumer_key: 'test-key', oauth_nonce: 'fixed-nonce',
-    oauth_signature: 'YBlaXWw5Gms4UkoUQRiljUczJ2RMo0cMx5WrovDKer4=',
+    oauth_signature: 'j4CYpXCcl3ossI2IPtb6Xmf/93o4ZdWsM/zmgOwHYU0=',
     oauth_signature_method: 'HMAC-SHA256', oauth_timestamp: '1700000000',
     oauth_token: 'test-token', oauth_version: '1.0',
   });
   // Fixture independently calculated with Python hmac/hashlib, using a literal
-  // normalized parameter string (not this signer's normalization).
+  // normalized parameter string and the decoded path `KL3/11131351005` (not this
+  // signer's normalization). The escaped path gave YBlaXWw5…, which Magento rejects.
   assert.equal(signGetRequest(url.replace('b=two+words&a=%2F&a=%21', 'a=%21&b=two%20words&a=%2F'), config, fixed), header);
   assert.notEqual(signGetRequest(url.replace('empty=', 'empty=changed'), config, fixed), header);
-  assert.notEqual(signGetRequest(url.replace('KL3%2F', 'KL3/'), config, fixed), header);
+  assert.equal(signGetRequest(url.replace('KL3%2F', 'KL3/'), config, fixed), header);
+  assert.notEqual(signGetRequest(url.replace('KL3%2F', 'KL3%20'), config, fixed), header);
 });
 
 test('OAuth defaults generate fresh cryptographic nonces and current Unix seconds', () => {
@@ -179,6 +181,11 @@ test('exact attribute absence lookup is bounded and does not infer an absent cod
   assert.equal((await client.findProductAttribute('new_color')).attribute_id, 999);
 });
 
+// Independent model of Magento's Laminas path normalization (decodes once only the
+// escapes of unreserved characters and `:@&=+$,/;%`), confirmed against production.
+const magentoSignedPath = (path) => path.replace(/%([0-9A-F]{2})/gi, (escape, hex) =>
+  ":@&=+$,/;%-_.~".includes(String.fromCharCode(parseInt(hex, 16))) || /[A-Za-z0-9]/.test(String.fromCharCode(parseInt(hex, 16)))
+    ? String.fromCharCode(parseInt(hex, 16)) : escape);
 test('SKU URL sent to fetch preserves exactly one encoded route value and matches independent signature reconstruction', async () => {
   for (const sku of ['KL3/11131351005', 'NM4/113120611026-001', "space ?#%/+!'()*я", '%2F', '../SKU']) {
     const client = createMagentoClient(config, { oauthOptions: fixed, fetchImpl: async (url, options) => {
@@ -192,12 +199,28 @@ test('SKU URL sent to fetch preserves exactly one encoded route value and matche
       delete oauth.oauth_signature;
       const pairs = [...parsed.searchParams, ...Object.entries(oauth)].map(([k, v]) => [percentEncode(k), percentEncode(v)]);
       pairs.sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0);
-      const base = ['GET', parsed.origin + parsed.pathname, pairs.map((pair) => pair.join('=')).join('&')].map(percentEncode).join('&');
+      const base = ['GET', parsed.origin + magentoSignedPath(parsed.pathname), pairs.map((pair) => pair.join('=')).join('&')].map(percentEncode).join('&');
       assert.equal(signature, createHmac('sha256', 'test-secret%26&test-token-secret%2F').update(base).digest('base64'));
       return json({ sku });
     } });
     assert.deepEqual(await client.getProductBySkuPathDiagnostic(sku), { sku });
   }
+});
+
+test('a legacy article with "/" is sent once-encoded but signed with the decoded path Magento verifies', () => {
+  const credentials = { consumerKey: 'test-key', consumerSecret: 'test-secret&', accessToken: 'test-token', accessTokenSecret: 'test-token-secret/' };
+  const options = { nonce: 'fixed-nonce', timestamp: 1700000000 };
+  const sent = 'https://magento.example.invalid/rest/all/V1/products/KL2%2F12351611011';
+  const decoded = 'https://magento.example.invalid/rest/all/V1/products/KL2/12351611011';
+  // Production: signing the decoded path was accepted (200); signing the escape was rejected (401).
+  assert.equal(signGetRequest(sent, credentials, options), signGetRequest(decoded, credentials, options));
+  // A double-encoded value is decoded once (`%25`), never twice.
+  assert.notEqual(signGetRequest('https://magento.example.invalid/rest/all/V1/products/KL2%252F1', credentials, options),
+    signGetRequest('https://magento.example.invalid/rest/all/V1/products/KL2/1', credentials, options));
+  // Escapes outside the normalized set (space, Cyrillic) stay as sent.
+  const { signedPath } = require('../src/services/magento/oauth');
+  assert.equal(signedPath('/rest/all/V1/products/a%20b%D1%8F%3F'), '/rest/all/V1/products/a%20b%D1%8F%3F');
+  assert.equal(signedPath('/rest/all/V1/products/KL3%2F1%25x%2D'), '/rest/all/V1/products/KL3/1%x-');
 });
 
 test('exact SKU lookup sends a query-only eq filter and signs the serialized URL sent to fetch', async () => {
