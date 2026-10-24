@@ -7,6 +7,12 @@ const { buildRepairManifest } = require('../export-exposure/repair-manifest');
 const cutover = require('./historical-cutover-baseline');
 
 const FORMAT = 'magento-historical-recount-exposure-v1';
+// A native recount successor has no encoded internal SKU (full_sku NULL, a characteristic
+// version), so it owns no reservation and its correction records the public article.
+const native = p => p.full_sku == null && p.characteristic_version_id != null;
+const nativeArtifact = (p, issue) => native(p) && issue?.productId === p.id
+  && (['PRODUCT_SKU_AMBIGUOUS', 'PRODUCT_SKU_IDENTITY_CONFLICT'].includes(issue.code)
+    || issue.code === 'CORRECTION_SKU_MISMATCH' && issue.storedSku === p.public_sku);
 const legacy = m => (m.lifecycle?.evidence?.origin === 'migration_039' && m.lifecycle.evidence.coverage === 'unresolved_historical')
   || cutover.verified(m);
 // Missing baseline pointers are not rewritten. Only actual, reciprocal recount
@@ -21,7 +27,7 @@ function lineageBlockers(members, corrections, currentId) {
     // An archived row that was already recounted (it has a successor) is retired too.
     const retired = p.id !== currentId && f?.route === 'retired'
       && (p.status === 'corrected' || p.status === 'archived' && p.corrected_to_product_id != null);
-    if (!reservation || reservation.first_product_id !== p.id) out.push('SKU_RESERVATION_CONFLICT');
+    if (!(p.id === currentId && native(p)) && (!reservation || reservation.first_product_id !== p.id)) out.push('SKU_RESERVATION_CONFLICT');
     if (p.id !== currentId && !retired) out.push('PREDECESSOR_NOT_RETIRED');
     const unknownBaseline = retired && legacy(member) && f.business_exclusion_state === 'unknown';
     if (retired && f?.evidence?.origin === 'cutover' && !cutover.verified(member)
@@ -70,7 +76,8 @@ async function read(client,config,sku,bindingRevisionId) {
 function blockers(state) {
   const h = state.historical, p = state.product;
   const out = [...stable.commonBlockers(state),...lineageBlockers(state.stable.members,state.stable.corrections,p.id)];
-  if (!h?.retainedFingerprint || h.retainedIssues.length) out.push('LIFECYCLE_EVIDENCE_UNAVAILABLE');
+  const current = state.stable.members.find(m => m.product.id === p.id)?.product;
+  if (!h?.retainedFingerprint || h.retainedIssues.some(issue => !(current && nativeArtifact(current, issue)))) out.push('LIFECYCLE_EVIDENCE_UNAVAILABLE');
   if (h?.outsideIdentity) out.push('CORRECTION_LINEAGE_CONFLICT');
   if (h?.oldSkus.length > 30) out.push('MAGENTO_HISTORY_TOO_LARGE');
   if (h?.requests.some(r => String(r.public_product_identity_id) !== String(p.public_product_identity_id)
@@ -98,7 +105,7 @@ function validateEvidence(plan,evidence) {
   c.safeData(evidence);
   return evidence;
 }
-module.exports = { FORMAT,lineageBlockers,blockers,validateEvidence,...stable.createRecipe({
+module.exports = { FORMAT,lineageBlockers,blockers,validateEvidence,nativeArtifact,...stable.createRecipe({
   format: FORMAT,event: 'product.magento_historical_recount_exposure_reconciled',reader: read,check: blockers,inspect,
   // Full request/retained inventory remains fingerprint-bound on the server;
   // the reviewed package contains only the exact identities and dispositions.

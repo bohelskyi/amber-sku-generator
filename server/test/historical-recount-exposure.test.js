@@ -96,3 +96,20 @@ test('an archived predecessor counts as retired only when it was already recount
   const live = fixture(); live.members[0].lifecycle.route = 'normal'; live.members[0].product.status = 'archived';
   assert.ok(service.lineageBlockers(live.members, live.corrections, 5).includes('PREDECESSOR_NOT_RETIRED'));
 });
+
+test('a native recount current needs no SKU reservation and only its own null-SKU artifacts are tolerated', () => {
+  // KL production shape: an Amber recount after cutover makes a native current (no full_sku).
+  const { members, corrections } = fixture(), current = members[4].product;
+  Object.assign(current, { full_sku: null, characteristic_version_id: 5, public_sku: 'CURRENT' });
+  members[4].reservation = null; corrections[3].corrected_sku = 'CURRENT';
+  assert.deepEqual(service.lineageBlockers(members, corrections, 5), []);
+  const ancestor = structuredClone(members); ancestor[3].reservation = null;
+  assert.ok(service.lineageBlockers(ancestor, corrections, 5).includes('SKU_RESERVATION_CONFLICT'));
+  const encoded = structuredClone(members); encoded[4].product.characteristic_version_id = null;
+  assert.ok(service.lineageBlockers(encoded, corrections, 5).includes('SKU_RESERVATION_CONFLICT'));
+  for (const issue of [{ code: 'PRODUCT_SKU_AMBIGUOUS', productId: 5 }, { code: 'PRODUCT_SKU_IDENTITY_CONFLICT', productId: 5 },
+    { code: 'CORRECTION_SKU_MISMATCH', correctionId: 14, productId: 5, storedSku: 'CURRENT' }]) assert.equal(service.nativeArtifact(current, issue), true);
+  for (const issue of [{ code: 'PRODUCT_SKU_AMBIGUOUS', productId: 4 }, { code: 'CORRECTION_SKU_MISMATCH', productId: 5, storedSku: 'OTHER' },
+    { code: 'RETAINED_FILE_UNREADABLE', productId: 5 }]) assert.equal(service.nativeArtifact(current, issue), false);
+  assert.equal(service.nativeArtifact({ ...current, characteristic_version_id: null }, { code: 'PRODUCT_SKU_AMBIGUOUS', productId: 5 }), false);
+});

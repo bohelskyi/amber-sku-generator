@@ -282,6 +282,13 @@ while it was current, so the new current product (with its own recorded pointer)
 use the same reviewed historical recipe. A plain retired source never gains a resolved
 policy this way. An `archived` predecessor counts as retired only when it was already
 recounted into the chain (it has a successor link and a `retired` route).
+Such a recount after cutover makes the current product native: `full_sku` is NULL
+with a characteristic version, so it owns no SKU reservation and its correction
+record stores the public article. For that native current only, the recipe skips the
+reservation check and tolerates exactly its own `PRODUCT_SKU_AMBIGUOUS`,
+`PRODUCT_SKU_IDENTITY_CONFLICT` and `CORRECTION_SKU_MISMATCH` (stored SKU equal to its
+public article) retained-evidence issues; every other issue and every ancestor's
+reservation remain blockers.
 
 Canonical cutover may have replaced a then-current migration baseline's evidence
 with `origin: cutover` before a later recount retired it. Such a retired ancestor
