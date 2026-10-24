@@ -73,10 +73,19 @@ it('UX4 invitations hide even supplied private metadata; decline never opens or 
 
 it('UX4 exact recipient review, pending invitation, revoke confirmation and dialog focus restoration', async () => {
   const member = { user_id: '2', display_name: 'Ірина', preferred_username: 'iryna', state: 'pending', epoch: '5' };
+  const initialRead = deferred();
+  api.get.mockReturnValueOnce(initialRead.promise);
   api.recipients.mockResolvedValue(response({ users: [{ id: '2', display_name: 'Ірина', preferred_username: 'iryna' }, { id: '3', display_name: 'Ірина', preferred_username: 'iryna.other' }] }));
   api.invite.mockImplementation(async () => { api.get.mockResolvedValue(response({ ...own, participants: [member] })); return response({ state: 'pending' }); });
   api.membership.mockImplementation(async () => { api.get.mockResolvedValue(response(own)); return response({ state: 'revoked', epoch: '6' }); });
-  mount(); await open(); const share = screen.getByRole('button', { name: 'Поділитися' }); share.focus(); fireEvent.click(share);
+  mount();
+  fireEvent.click(await screen.findByRole('link', { name: 'Відкрити / продовжити Каталог вересня' }));
+  await waitFor(() => expect(api.get).toHaveBeenCalledWith(own.id));
+  await act(async () => initialRead.resolve(response(own)));
+  await screen.findByRole('heading', { name: own.title });
+  // The initial session effect focuses recovery before the sharing dialog captures its opener.
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Перевірити товари' })));
+  const share = screen.getByRole('button', { name: 'Поділитися' }); share.focus(); fireEvent.click(share);
   let dialog = screen.getByRole('dialog'); expect(dialog.contains(document.activeElement)).toBe(true);
   fireEvent.change(screen.getByLabelText('Ім’я або логін одержувача'), { target: { value: 'Ірина' } }); click('Знайти користувача');
   await screen.findByLabelText('Одержувач'); expect(screen.getByRole('button', { name: 'Надіслати запрошення в застосунку' }).disabled).toBe(true);
@@ -89,7 +98,10 @@ it('UX4 exact recipient review, pending invitation, revoke confirmation and dial
   click('Відкликати доступ: Ірина'); click('Підтвердити відкликання'); await screen.findByText('Доступ відкликано.');
   expect(api.membership).toHaveBeenCalledWith(own.id, { action: 'revoke', userId: '2', expectedAccessEpoch: 'owner', expectedMemberEpoch: '5' });
   await waitFor(() => expect(screen.getByRole('button', { name: 'Закрити' }).disabled).toBe(false));
-  click('Закрити'); expect(document.activeElement).toBe(share);
+  click('Закрити');
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Поділитися експортом' })).toBeNull());
+  // Focus returns from the dialog effect's cleanup, after the close state has committed.
+  await waitFor(() => expect(document.activeElement).toBe(share));
 });
 
 it('UX4 view-only member reads stored result, has no create/confirm/invite and leaves only after confirmation', async () => {
@@ -114,8 +126,15 @@ it('UX4 uncertain transport retry retains original revision and attempt after ne
   api.get.mockResolvedValue(response({ ...own, currentAttemptId: attempt.id, attempt })); api.generate.mockRejectedValue(new Error('uncertain transport'));
   mount(); await open(); click('Перевірити товари'); await screen.findByText('Current'); click('Створити файли'); await screen.findByText('uncertain transport');
   const original = api.generate.mock.calls[0];
-  api.get.mockResolvedValue(response({ ...own, configurationRevision: '2', currentAttemptId: 'attempt-new', attempt: { ...attempt, id: 'attempt-new' } }));
+  const refreshedSession = response({ ...own, configurationRevision: '2', currentAttemptId: 'attempt-new', attempt: { ...attempt, id: 'attempt-new' } });
+  const refreshRead = deferred();
+  api.get.mockResolvedValue(refreshedSession).mockReturnValueOnce(refreshRead.promise);
   click('Оновити стан із сервера'); await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2));
+  await act(async () => refreshRead.resolve(refreshedSession));
+  await waitFor(() => {
+    expect(screen.queryByText('Current')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Перевірити товари' }).disabled).toBe(false);
+  });
   api.preview.mockResolvedValue(response({ ...preview, configurationRevision: '2', tableFingerprint: 'newer' }));
   click('Перевірити товари'); await screen.findByText('Current'); click('Повторити створення цього експорту');
   await waitFor(() => expect(api.generate).toHaveBeenCalledTimes(2)); expect(api.generate.mock.calls[1]).toEqual(original); expect(api.prepare).not.toHaveBeenCalled();

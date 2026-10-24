@@ -241,6 +241,7 @@ it('checks the originating product, confirms its new path and requires a separat
     source: undefined, evaluated: undefined, label: 'Default/Браслети/Світлі', identity: '42',
     candidates: [{ categoryId: '42', path: 'Default/Браслети/Світлі' }], exact: true, reviewState: 'proposed' };
   let confirmed = false;
+  let resolvePreview;
   const get = api.get.getMockImplementation();
   api.get.mockImplementation(async (url, config) => {
     const result = await get(url, config);
@@ -254,7 +255,7 @@ it('checks the originating product, confirms its new path and requires a separat
   const post = api.post.getMockImplementation();
   api.post.mockImplementation(async (url, body) => {
     if (url.endsWith('/decision')) { confirmed = true; draft = { ...draft, revision: '2' }; return { data: draft }; }
-    if (url.endsWith('/publication/preview')) return { data: { previewToken: 'impact-proof', blockers: [], affected: [], preservedNames: [], lostProducts: [], lostRoutes: [], totalProducts: 12 } };
+    if (url.endsWith('/publication/preview')) return new Promise((resolve) => { resolvePreview = resolve; });
     if (url.endsWith('/publication/apply')) { draft = { ...draft, state: 'published' }; return { data: { revision: draft } }; }
     return post(url, body);
   });
@@ -272,10 +273,19 @@ it('checks the originating product, confirms its new path and requires a separat
   expect((await screen.findByLabelText('Відповідність: Default/Браслети/Світлі')).value).toBe('42');
   expect(screen.getByText(/Перевірте шлях у колонці Magento/)).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'Застосувати правила' })).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: 'Підтвердити', exact: true }));
+  const confirm = screen.getByRole('button', { name: 'Підтвердити', exact: true });
+  await waitFor(() => expect(confirm.disabled).toBe(false));
+  await act(async () => fireEvent.click(confirm));
+  await waitFor(() => {
+    expect(resolvePreview).toBeTypeOf('function');
+    expect(screen.getByText('Перевіряємо вплив усього пакета на товари…')).toBeTruthy();
+  });
+  expect(api.post.mock.calls.some(([url]) => url.endsWith('/publication/apply'))).toBe(false);
+  await act(async () => resolvePreview({ data: { previewToken: 'impact-proof', blockers: [], affected: [], preservedNames: [], lostProducts: [], lostRoutes: [], totalProducts: 12 } }));
   const apply = await screen.findByRole('button', { name: 'Застосувати правила' });
   expect(api.post).toHaveBeenCalledWith('/admin/magento-integration/bindings/isolated/decision', { expectedRevision: '1', binding: categoryEntry.id, action: 'approve', acceptReview: true });
   expect(api.post.mock.calls.some(([url]) => url.endsWith('/publication/apply'))).toBe(false);
+  await waitFor(() => expect(apply.disabled).toBe(false));
   fireEvent.click(apply);
   await screen.findByText(/Поверніться до проблеми товару й натисніть «Перевірити товар у Magento»/);
   expect(screen.getByText('Розділи збережено. Поверніться до товару й перевірте результат.')).toBeTruthy();
@@ -485,6 +495,7 @@ it('restores a saved rule draft after reload and keeps it when a CAS save fails'
   saved = { id: 'family', draft: { revision: '8', definitionHash: 'hash', definition: structuredClone(definition) } };
   saved.draft.definition.groups[0].rows[0].cells.description.value = 'Відновлений опис';
   mount('/admin/catalog?category=BR&ruleDraft=family&source=current');
+  await screen.findByText('Чернетку збережено. Ще не застосовано.');
   await textFields();
   fireEvent.click(await screen.findByRole('button', { name: 'Опис' }));
   expect((await screen.findByLabelText('Текст для магазину')).value).toBe('Відновлений опис');
@@ -511,9 +522,22 @@ it('retains the stored schema and date when explicit Magento observation fails',
 
 it('uses a modal for the whole field on a narrow screen and preserves literal English separately', async () => {
   vi.stubGlobal('matchMedia', () => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+  let resolveEnglish;
+  const get = api.get.getMockImplementation();
+  api.get.mockImplementation((url, config) => url === '/admin/magento-integration/categories/BR' && config?.params?.rowId === 'english'
+    ? new Promise((resolve) => { resolveEnglish = resolve; }) : get(url, config));
   mount(); await textFields(); await screen.findByRole('button', { name: 'Опис' });
   fireEvent.change(screen.getByLabelText('Мова полів'), { target: { value: 'english' } });
   await waitFor(() => expect(api.get.mock.calls.some(([, config]) => config?.params?.rowId === 'english')).toBe(true));
+  expect(screen.getByLabelText('Мова полів').disabled).toBe(true);
+  // The old field remains visible while scope() reads English; its busy guard rejects this click.
+  fireEvent.click(screen.getByRole('button', { name: 'Опис' }));
+  expect(screen.queryByRole('dialog', { name: 'Поле Magento' })).toBeNull();
+  await act(async () => resolveEnglish({ data: projection(active, definition, 'english') }));
+  await waitFor(() => {
+    expect(screen.getByLabelText('Мова полів').value).toBe('english');
+    expect(screen.getByLabelText('Мова полів').disabled).toBe(false);
+  });
   fireEvent.click(screen.getByRole('button', { name: 'Опис' }));
   const dialog = await screen.findByRole('dialog', { name: 'Поле Magento' });
   expect((await within(dialog).findByLabelText('Текст для магазину')).value).toBe('Old description');
@@ -574,11 +598,22 @@ it('checks product impact after the single explicit check and waits for a separa
     return result;
   });
   const post = api.post.getMockImplementation();
-  api.post.mockImplementation(async (url, body) => url.endsWith('/publication/preview') ? { data: { previewToken: 'impact-proof', blockers: [], affected: [], preservedNames: [], lostProducts: [], lostRoutes: [], totalProducts: 12 } } : post(url, body));
+  let resolvePreview;
+  api.post.mockImplementation((url, body) => url.endsWith('/publication/preview')
+    ? new Promise((resolve) => { resolvePreview = resolve; }) : post(url, body));
   mount(); await textFields(); fireEvent.click(await screen.findByRole('button', { name: 'Опис' }));
   fireEvent.change(await screen.findByLabelText('Текст для магазину'), { target: { value: 'Новий опис' } });
   fireEvent.click(screen.getByRole('button', { name: 'Готово' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Перевірити зміни' }));
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Перевірити зміни' })));
+  const dialog = await screen.findByRole('dialog', { name: 'Перевірка та застосування' });
+  await waitFor(() => {
+    expect(resolvePreview).toBeTypeOf('function');
+    expect(within(dialog).getByText('Перевіряємо вплив усього пакета на товари…')).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: 'До редагування' }).disabled).toBe(true);
+  });
+  expect(screen.queryByRole('button', { name: 'Застосувати правила' })).toBeNull();
+  expect(api.post.mock.calls.some(([url]) => url.endsWith('/publication/apply'))).toBe(false);
+  await act(async () => resolvePreview({ data: { previewToken: 'impact-proof', blockers: [], affected: [], preservedNames: [], lostProducts: [], lostRoutes: [], totalProducts: 12 } }));
   const apply = await screen.findByRole('button', { name: 'Застосувати правила' });
   expect(apply.disabled).toBe(false);
   expect(api.post.mock.calls.filter(([url]) => url.endsWith('/publication/preview'))).toHaveLength(1);
@@ -599,7 +634,9 @@ it('keeps the focused review task open while publication checking is in flight',
     ? new Promise((resolve) => { resolvePreview = resolve; }) : post(url, body));
   mount(); await textFields(); fireEvent.click(await screen.findByRole('button', { name: 'Опис' }));
   fireEvent.change(await screen.findByLabelText('Текст для магазину'), { target: { value: 'Новий текст' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Готово' })); fireEvent.click(screen.getByRole('button', { name: 'Перевірити зміни' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Готово' }));
+  // Publication busy state reaches the parent and its Escape listener through effects.
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Перевірити зміни' })));
   const dialog = await screen.findByRole('dialog', { name: 'Перевірка та застосування' });
   await waitFor(() => {
     expect(resolvePreview).toBeTypeOf('function');
@@ -753,11 +790,12 @@ it('wide field context and keyboard tabs retain one staged rule and exact Magent
   const rules = mappedRuleFixture(); const before = JSON.stringify(rules); useLocalRuleFixture(rules);
   mount(); fireEvent.click(await screen.findByRole('button', { name: 'Колір Magento' }));
   const dialog = await screen.findByRole('dialog', { name: 'Поле Magento' });
-  expect(within(dialog).getByText(/Браслети ·/).textContent).toContain('UA · українською');
+  // The dialog shell can open while the field and its source registry are still loading.
+  expect((await within(dialog).findByText(/Браслети ·/)).textContent).toContain('UA · українською');
   const text = await within(dialog).findByLabelText('Значення для Magento: Нуль');
   fireEvent.change(text, { target: { value: '  Ручне значення  ' } });
+  const mappingTab = await within(dialog).findByRole('tab', { name: 'Відповідність у Magento' });
   const ruleTab = within(dialog).getByRole('tab', { name: 'Формування значення' });
-  const mappingTab = within(dialog).getByRole('tab', { name: 'Відповідність у Magento' });
   ruleTab.focus(); fireEvent.keyDown(ruleTab, { key: 'ArrowRight' });
   expect(document.activeElement).toBe(mappingTab); expect(mappingTab.getAttribute('aria-selected')).toBe('true');
   expect(within(dialog).queryByRole('button', { name: /Вибрати однозначні підказки/ })).toBeNull();
@@ -785,7 +823,7 @@ it('Escape and explicit cancel retain or discard both pending tabs, and returnin
   const rules = mappedRuleFixture(); const before = JSON.stringify(rules); useLocalRuleFixture(rules);
   mount(); fireEvent.click(await screen.findByRole('button', { name: 'Колір Magento' }));
   fireEvent.change(await screen.findByLabelText('Значення для Magento: Нуль'), { target: { value: 'Відкинути текст' } });
-  fireEvent.click(screen.getByRole('tab', { name: 'Відповідність у Magento' })); fireEvent.change(screen.getByLabelText('Magento для Нуль'), { target: { value: '20' } });
+  fireEvent.click(await screen.findByRole('tab', { name: 'Відповідність у Magento' })); fireEvent.change(screen.getByLabelText('Magento для Нуль'), { target: { value: '20' } });
   fireEvent.keyDown(document, { key: 'Escape' });
   fireEvent.click(within(await screen.findByRole('dialog', { name: 'Незбережене поле' })).getByRole('button', { name: 'Залишитися' }));
   expect(screen.getByLabelText('Magento для Нуль').value).toBe('20');
@@ -807,7 +845,7 @@ it('long field names and visible If/Then rules preserve the condition, fallback,
   rules.groups[0].rows[0].cells.description = { op: 'when', if: condition, then: { op: 'literal', value: 'Довгий початковий текст для картини. '.repeat(20) }, else: { op: 'literal', value: 'Збережений результат інакше' } };
   const before = JSON.stringify(rules); useLocalRuleFixture(rules, title);
   mount('/admin/catalog?category=BR&view=text'); fireEvent.click(await screen.findByRole('button', { name: title }));
-  const dialog = await screen.findByRole('dialog', { name: 'Поле Magento' }); expect(within(dialog).getByRole('heading', { name: title })).toBeTruthy();
+  const dialog = await screen.findByRole('dialog', { name: 'Поле Magento' }); expect(await within(dialog).findByRole('heading', { name: title })).toBeTruthy();
   const row = within(dialog).getByRole('region', { name: 'Умова 1' });
   expect(within(row).getByText('Якщо')).toBeTruthy(); expect(within(row).getByText('Тоді →')).toBeTruthy();
   const fallback = within(dialog).getByRole('region', { name: 'Інакше' }); expect(within(fallback).getByLabelText('Текст для магазину').value).toBe('Збережений результат інакше');

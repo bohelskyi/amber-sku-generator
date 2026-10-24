@@ -203,7 +203,7 @@ describe('authentication bootstrap and gate', () => {
     expect(screen.queryByText('Business application')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Увійти іншим обліковим записом' }));
     await waitFor(() => expect(apiClient.post).toHaveBeenCalledWith('/auth/logout'));
-    expect(locationObject.assign).toHaveBeenCalledWith('/');
+    await waitFor(() => expect(locationObject.assign).toHaveBeenCalledWith('/'));
   });
 
   it('shows disabled access without treating the session as unauthenticated', async () => {
@@ -222,7 +222,7 @@ describe('authentication bootstrap and gate', () => {
     expect(screen.queryByRole('button', { name: 'Увійти' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Вийти' }));
     await waitFor(() => expect(apiClient.post).toHaveBeenCalledWith('/auth/logout'));
-    expect(locationObject.assign).toHaveBeenCalledWith('/');
+    await waitFor(() => expect(locationObject.assign).toHaveBeenCalledWith('/'));
   });
 
   it('shows a non-sensitive provider error and retries /me on demand', async () => {

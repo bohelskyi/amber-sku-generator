@@ -63,6 +63,7 @@ function PriceChangeWorkflowHarness() {
     <button type="button" onClick={() => sku.handleDecode(decodedProduct.sku)}>Decode</button>
     <button type="button" onClick={sku.handleStartRecount}>Start recount</button>
     <button type="button" onClick={sku.handleApplyRecount}>Open price change</button>
+    <output aria-label="Завантажений товар">{sku.decodeData?.product?.id ?? ''}</output>
     <ProductPriceChangeDialog
       currentPriceUah={sku.decodeData?.pricing?.totalPriceUah}
       isApplying={sku.isPriceChangeApplying}
@@ -120,6 +121,7 @@ it('refreshes the authoritative Manual UAH result when marketing rounding is tog
   render(<PriceChangeWorkflowHarness />);
   fireEvent.click(await screen.findByText('Decode'));
   await waitFor(() => expect(post).toHaveBeenCalledWith('/decode', { sku: 'LN136021' }));
+  await waitFor(() => expect(screen.getByLabelText('Завантажений товар').textContent).toBe('71'));
   fireEvent.click(screen.getByText('Start recount'));
   fireEvent.click(screen.getByText('Open price change'));
 
@@ -191,6 +193,7 @@ it('requests and applies automatic pricing without override fields', async () =>
   render(<PriceChangeWorkflowHarness />);
   fireEvent.click(await screen.findByText('Decode'));
   await waitFor(() => expect(post).toHaveBeenCalledWith('/decode', { sku: 'LN136021' }));
+  await waitFor(() => expect(screen.getByLabelText('Завантажений товар').textContent).toBe('71'));
   fireEvent.click(screen.getByText('Start recount'));
   fireEvent.click(screen.getByText('Open price change'));
 
