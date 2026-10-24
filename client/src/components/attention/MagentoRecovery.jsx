@@ -3,6 +3,7 @@ import { useAuth } from '../../auth/auth-context.js';
 import { isActualAdministrator } from '../../auth/auth-model.js';
 import { Link } from 'react-router-dom';
 import { api } from '../../lib/api.js';
+import { problemCodeExplanation } from '../../lib/magento-problem-messages.js';
 import { Button, ConfirmDialog, Notice, TechnicalDisclosure } from '../ui/index.js';
 import MagentoControlledActions from '../workspace/MagentoControlledActions.jsx';
 import MagentoRecoveryHistory from './MagentoRecoveryHistory.jsx';
@@ -86,12 +87,12 @@ const blockerText = {
   MAGENTO_PRODUCT_NOT_FOUND: 'За цим артикулом товар не знайдено в Magento. Підтвердити попередню доставку неможливо.',
   MAGENTO_LOOKUP_ERROR: 'Magento не вдалося прочитати. Відновіть доступ і повторіть перевірку.',
   UNFINISHED_SYNC_WORK: 'Спочатку перевірте результат незавершеної операції доставки вище.',
-  DURABLE_REMOTE_ID_REQUIRED: 'Немає збереженого підтвердження ідентичності товару Magento.',
+  DURABLE_REMOTE_ID_REQUIRED: problemCodeExplanation('DURABLE_REMOTE_ID_REQUIRED'),
   CURRENT_PUBLIC_BINDING_REQUIRED: 'Потрібні чинні опубліковані налаштування інтеграції.',
-  PREDECESSOR_NOT_RETIRED: 'Попередня версія ще не виведена з обігу. Перевірте історію товару.',
+  PREDECESSOR_NOT_RETIRED: problemCodeExplanation('PREDECESSOR_NOT_RETIRED'),
   STABLE_RECOUNT_NOT_TERMINAL: 'Потрібна актуальна завершальна версія товару після переобліку.',
-  UPDATE_NOT_SENDABLE: 'Поточні дані або відповідності ще не дозволяють оновити товар. Виправте інші показані проблеми товару.',
-  LOCAL_EVIDENCE_CHANGED: 'Дані Amber змінилися під час перевірки. Прочитайте актуальний стан і повторіть перевірку.',
+  UPDATE_NOT_SENDABLE: problemCodeExplanation('UPDATE_NOT_SENDABLE'),
+  LOCAL_EVIDENCE_CHANGED: problemCodeExplanation('LOCAL_EVIDENCE_CHANGED'),
   CUTOVER_PREPARING: 'Триває контрольований перехід способу доставки. Рішення тимчасово недоступне.',
   STABLE_PUBLIC_SKU_NOT_ACTIVE: 'Сталі публічні артикули ще не активовані для цього встановлення.',
   MAGENTO_DELIVERY_CUTOVER_REQUIRED: 'Це рішення доступне після завершення переходу на пряму доставку Magento.',
@@ -99,12 +100,13 @@ const blockerText = {
   MAGENTO_SYNC_BUSY: 'Інша операція вже працює з цим товаром. Дочекайтеся її завершення та повторіть перевірку.',
   MAGENTO_RECOVERY_REVIEW_STALE: 'Початкова операція або дані Magento змінилися. Повторіть перевірку перед застосуванням.',
   MAGENTO_LIFECYCLE_REVIEW_STALE: 'Історія доставки змінилася. Прочитайте актуальні підтвердження й перевірте рішення заново.',
-  EXPOSURE_RECONCILIATION_CONFLICT: 'Підтвердження історії вже не відповідають поточному товару. Потрібна нова перевірка.',
+  EXPOSURE_RECONCILIATION_CONFLICT: problemCodeExplanation('EXPOSURE_RECONCILIATION_CONFLICT'),
   INSUFFICIENT_PERMISSION: 'Ваші дозволи змінилися. Цю дію має виконати оператор із потрібним доступом.',
 };
+const knownBlockerText = code => typeof code === 'string' && Object.hasOwn(blockerText, code) ? blockerText[code] : null;
 const errorText = (failure) => {
   const details = failure?.response?.data;
-  return blockerText[details?.code] || (typeof details?.error === 'string' && /[А-Яа-яІіЇїЄєҐґ]/u.test(details.error)
+  return knownBlockerText(details?.code) || (typeof details?.error === 'string' && /[А-Яа-яІіЇїЄєҐґ]/u.test(details.error)
     ? details.error : 'Не вдалося отримати підтверджений результат. Прочитайте стан початкової операції.');
 };
 const displayValue = (value) => value === null || value === undefined || value === '' ? 'Не задано' : String(value);
@@ -320,11 +322,11 @@ export function MagentoRecovery({ productId, categoryCode, onSaved, guided = fal
       </>}
       {canRecoverLifecycle && record.lifecycle && unfinishedJob && <p className="sync-problem-guidance">Спочатку завершіть перевірку початкової операції{canRecoverJob ? ' вище' : ' з оператором, який має дозвіл на відновлення завдань'}. Рішення щодо історії не замінює підтвердження надісланих змін.</p>}
       {canRecoverLifecycle && record.lifecycle && !unfinishedJob && availableKinds.length === 0 && !nextStep && !historyMode && <Notice>Для поточного стану немає окремого дозволеного рішення щодо історії доставки. Перевірте актуальну причину в товарі.</Notice>}
-      {blockers.length > 0 && <Notice tone="warning"><p>Застосування заблоковане:</p><ul className="list-disc pl-5">{blockers.map((code, index) => <li key={index}>{blockerText[code] || 'Наявних підтверджень недостатньо для цього рішення. Передайте опис проблеми відповідальному за інтеграцію; дію не застосовано.'}</li>)}</ul></Notice>}
+      {blockers.length > 0 && <Notice tone="warning"><p>Застосування заблоковане:</p><ul className="list-disc pl-5">{blockers.map((code, index) => <li key={index}>{knownBlockerText(code) || 'Наявних підтверджень недостатньо для цього рішення. Передайте опис проблеми відповідальному за інтеграцію; дію не застосовано.'}</li>)}</ul></Notice>}
       {lifecycle?.blockers?.includes('UPDATE_NOT_SENDABLE') && <section className="space-y-3" aria-label="Що виправити перед підтвердженням">
         <h4 className="sync-next-heading">Спочатку виправте налаштування для цього товару</h4>
         {lifecycle.review.payload.sync?.problems?.map((problem,index) => <div key={index}>
-          <p>{problem.message || 'Перевірте відповідність цього поля.'}</p>
+          <p>{problem.message && problem.message !== problem.code ? problem.message : problemCodeExplanation(problem.code) || problem.message || 'Перевірте відповідність цього поля.'}</p>
           {permissions.includes('export_templates.view') && <Link className="btn btn-outline btn-compact-md"
             to={problemRepairUrl(problem,{ productId,category: categoryCode },`/attention?problem=${productId}`)}>{nextAction(problem)}</Link>}
         </div>)}

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../../auth/auth-context.js';
 import { isActualAdministrator } from '../../auth/auth-model.js';
 import { api } from '../../lib/api.js';
+import { problemCodeExplanation } from '../../lib/magento-problem-messages.js';
 import { Button, ConfirmDialog, Notice, Pagination, StatusBadge, TechnicalDisclosure } from '../ui/index.js';
 
 const root = '/admin/magento-integration/first-sync';
@@ -42,13 +43,13 @@ const reasons = {
   DERIVED_FORWARD_MISMATCH: 'Обчислене значення Amber відрізняється від Magento. Отримання назад потребує перевірки джерел.',
   FIRST_SYNC_IDENTITY_CHANGED: 'Змінилася підтверджена ідентичність товару. Потрібна нова перевірка.',
   FIRST_SYNC_UNFINISHED_WORK: 'Для товару є незавершена дія. Спочатку узгодьте її результат.',
-  FIRST_SYNC_HISTORY_REVIEW_REQUIRED: 'Історія товару потребує окремої перевірки перед першим отриманням.',
+  FIRST_SYNC_HISTORY_REVIEW_REQUIRED: problemCodeExplanation('FIRST_SYNC_HISTORY_REVIEW_REQUIRED'),
   FIRST_SYNC_CUTOVER_REVIEW_AVAILABLE: 'Погоджений історичний baseline дозволяє окрему адміністративну перевірку перед переглядом полів.',
   FIRST_SYNC_LEGACY_SNAPSHOT_FLAG_REVIEW_AVAILABLE: 'Збережено історичну позначку експорту. Вона не підтверджує доставку Magento. Погоджений baseline дозволяє окремий адміністративний допуск до перевірки полів.',
   FIRST_SYNC_RETAINED_FILES_UNRESOLVED: 'Збережені CSV або їхня належність товарам не підтверджені. Потрібна перевірка історичних файлів; допуск до полів поки недоступний.',
   FIRST_SYNC_RETAINED_FILE_REVIEW_REQUIRED: 'Цей артикул є у збереженому CSV. Спочатку потрібне окреме узгодження цього файлу; допуск до полів поки недоступний.',
   FIRST_SYNC_REMOTE_IDENTITY_UNPROVEN: 'Точний артикул і Magento ID не підтверджені свіжим читанням. Повторіть перевірку.',
-  FIRST_SYNC_HISTORY_COMPONENT_UNSUPPORTED: 'Історія містить зміну ідентичності, перерахунок або непідтверджені зв’язки. Для цього товару потрібна окрема процедура узгодження історії.',
+  FIRST_SYNC_HISTORY_COMPONENT_UNSUPPORTED: problemCodeExplanation('FIRST_SYNC_HISTORY_COMPONENT_UNSUPPORTED'),
   FIRST_SYNC_CUTOVER_PROVENANCE_UNPROVEN: 'Повний ланцюг погодженого історичного baseline не підтверджено. Передайте причину відповідальному за інтеграцію.',
   FIRST_SYNC_REVIEW_PROGRESS_CHANGED: 'Попередній допуск або прогрес першого отримання змінився. Повторіть перевірку; збережені рішення не скидаються.',
   FIRST_SYNC_DELIVERY_HISTORY_CHANGED: 'Є інші свідчення передачі або зміна історичних лічильників. Потрібна окрема перевірка історії доставки.',
@@ -285,7 +286,7 @@ function FieldPanel({ sku, onChange, principalLifetime, canRecount, returnTo = '
         <TechnicalDisclosure summary="Причина й підтвердження поля">{() => <pre className="overflow-auto text-xs">{JSON.stringify({ target: field.target, scope: field.scope, status: field.status, reason: field.reason, received: field.received, blockers: plan.blockers.filter((blocker) => blocker.target === field.target && (!blocker.scope || blocker.scope === field.scope)) }, null, 2)}</pre>}</TechnicalDisclosure>
       </section>;
     })}
-    {plan && <TechnicalDisclosure summary="Межі перевірки й технічні причини">{() => <pre className="overflow-auto text-xs">{JSON.stringify({ mode: plan.mode, blockers: plan.blockers, coverage: plan.coverage }, null, 2)}</pre>}</TechnicalDisclosure>}
+    {plan && <TechnicalDisclosure summary="Межі перевірки й технічні причини">{() => <pre className="overflow-auto text-xs">{JSON.stringify({ mode: plan.mode, blockers: plan.blockers, coverage: plan.coverage, ...(plan.historyReviewAssessment ? { historyReviewAssessment: plan.historyReviewAssessment } : {}) }, null, 2)}</pre>}</TechnicalDisclosure>}
     <ConfirmDialog open={Boolean(selected)} title={selected ? `Підтвердити поле: ${fieldLabel(selected.field)}` : 'Підтвердити поле'} confirmLabel="Зберегти рішення цього поля" busy={busy} onClose={() => setDecision(null)} onConfirm={apply}>
       {selected && <div className="space-y-3"><p className="text-sm">Артикул: <strong>{sku}</strong></p><p>{seoField(selected.field)?'Текст чинного шаблону':'Значення Amber перед рішенням'}: <strong className="whitespace-pre-wrap break-words">{valueText(selected.field.local)}</strong></p><p>{seoField(selected.field)?selected.choice==='keep_local'?'SEO Amber до передавання':'SEO Magento для першої доставки':'Значення Amber після рішення'}: <strong className="whitespace-pre-wrap break-words">{valueText(selected.choice === 'accept_remote' ? selected.field.remote : selected.field.local)}</strong></p>
         <p>{selected.choice === 'keep_local' ? 'Дані Amber зберігаються. Це рішення очікуватиме окремої захищеної передачі та підтвердження Magento.' : seoField(selected.field) ? 'SEO Magento буде зафіксовано один раз і збережено під час першої доставки. Наступні окремі синхронізації використовують чинний шаблон.' : 'Обране рішення отримує підтверджене значення Magento в Amber для зазначеного поля й мови.'}</p><p className="text-sm">Порожні підтверджені поля й перші назви обробляються за погодженими правилами. Прийняття SEO Magento потребує явного вибору; інші заповнені конфлікти залишаються окремими рішеннями.</p></div>}

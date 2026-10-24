@@ -1,4 +1,5 @@
 import { withRepairContext } from '../../lib/magento-repair-context.js';
+import { problemCodePresentation } from '../../lib/magento-problem-messages.js';
 
 export const PRODUCT_FIELD_LABELS = Object.freeze({
   name: 'Назва українською та англійською', rozmir_suveniriv: 'Розмір',
@@ -54,7 +55,9 @@ export function problemTitle(problem = {}) {
     return problem.message || 'Історія попередньої доставки не підтверджена';
   }
   const subject = problemSubject(problem);
-  const message = problem.evaluationIssues?.[0]?.message || problem.message || 'Причину ще не визначено';
+  const presentation = problemCodePresentation(problem.diagnosticCode) || problemCodePresentation(problem.code);
+  const rawCodeMessage = (problem.message === problem.code || problem.message === problem.diagnosticCode) && problemCodePresentation(problem.message);
+  const message = problem.evaluationIssues?.[0]?.message || (!rawCodeMessage && problem.message) || presentation?.title || 'Причину ще не визначено';
   if (problem.diagnosticCode === 'NATIVE_CHARACTERISTICS_UPGRADE_REQUIRED' && problem.resolution === 'integration_configuration') return problem.message;
   return subject.path ? `${subject.path} — ${message}` : subject.field && !problem.evaluationIssues?.length ? `${subject.field}${subject.scope ? ` · ${subject.scope}` : ''}: ${message}` : message;
 }
@@ -90,6 +93,8 @@ export function problemImpact(problem = {}) {
   if ((problem.diagnosticCode || problem.code) === 'NAME_READ_UNAVAILABLE') return 'Magento не повернув повних даних для перевірки назви. Спочатку потрібно відновити достовірне читання.';
   if (problem.resolution === 'name') return 'Оновлення спільної назви потребує узгодження, щоб не перезаписати чужу зміну.';
   if (problem.resolution === 'lifecycle_reconciliation') return 'Amber ще не підтвердив, як попередні зміни цього товару потрапили в Magento. Спочатку перевіримо стан магазину, потім покажемо, що можна зробити.';
+  const presentation = problemCodePresentation(problem.diagnosticCode) || problemCodePresentation(problem.code);
+  if (presentation) return `${presentation.detail} ${presentation.nextStep}`;
   return 'Ця перешкода не дозволяє завершити синхронізацію цього товару.';
 }
 
