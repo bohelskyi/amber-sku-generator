@@ -1938,6 +1938,10 @@ remote preconditions. Magento-managed fields are omitted and preservation hashes
 are checked, including media, unknown attributes/extensions, update inventory and
 unproduced scoped EN content. Final acknowledgement also verifies unchanged EN
 values and required website memberships, not merely fields sent in the last request.
+The custom attribute `custom_update_at` is a Magento-maintained modification
+timestamp that an admin product save rewrites, like native `updated_at`; it is not
+recorded in new baselines and is skipped when an older baseline holds it. Every other
+untouched attribute, including one an admin save removes, still fails preservation.
 
 UPDATE revalidation restores native timestamp evidence omitted by the minimized
 baseline: `created_at` must match its original preservation hash, while Magento-owned
