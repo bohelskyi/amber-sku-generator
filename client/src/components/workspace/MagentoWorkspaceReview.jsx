@@ -4,9 +4,25 @@ import { deliveryPolicies, deliveryPolicyEffect, localValueLabel, matchesRepairV
 import { fieldLabels } from '../../lib/export-template-editor.js';
 import { LoadingState, Notice } from '../app/UiPrimitives.jsx';
 import MagentoDetails from './MagentoDetails.jsx';
+import { policyReviewConstraint, policyReviewChoice, canConfirmPolicy } from '../../lib/magento-policy-options.js';
 
 const root = '/admin/magento-integration';
 const kinds = { route: 'Набір атрибутів', attribute: 'Поле', option: 'Значення', policy: 'Поведінка поля', category: 'Розміщення' };
+const states = { proposed: 'Кандидат', review_required: 'Потрібна перевірка', approved: 'Підтверджено', blocked: 'Відмову розглянуто', not_applicable: 'Не застосовується' };
+const policyLanguage = (entry) => entry.row === 'english' ? 'EN' : entry.row === 'base' ? entry.label === 'en' ? 'EN' : 'UA' : 'Мову не визначено';
+
+function EnglishPolicyNote({ entry }) {
+  const constraint = policyReviewConstraint(entry);
+  if (!constraint) return null;
+  return <div className="mc-help"><p>Збережене правило: {Object.hasOwn(deliveryPolicies, entry.identity) ? deliveryPolicies[entry.identity] : entry.identity || 'Не визначено'}</p>
+    <p>Стан: {states[entry.reviewState] || 'Невідомий стан'}</p>
+    <p>{constraint.kind === 'scope' ? 'Мову або область цього правила не підтверджено. Підтвердження недоступне.'
+      : constraint.kind === 'control' ? entry.identity === 'magento_managed'
+        ? `Системне поле EN. Значення не змінюється через англійську версію. ${entry.reviewState === 'approved' ? 'Збережене правило вже підтверджено.' : ['proposed', 'review_required'].includes(entry.reviewState) ? 'Збережене правило ще потрібно підтвердити.' : 'Підтвердження для цього стану недоступне.'}`
+        : `Системне поле EN потребує збереженого правила «${deliveryPolicies.magento_managed}». Поточне правило не можна підтвердити тут.`
+        : `Для англійської версії цього поля підтримується лише «${deliveryPolicies.authoritative_create_update}».`}</p>
+  </div>;
+}
 
 // Explicit bounded decisions through the original CAS/authorization endpoints.
 // A partial failure leaves the saved original draft available for a fresh read.
@@ -53,22 +69,26 @@ export default function MagentoWorkspaceReview({ revision, categoryCode, categor
         : `Підготовку збережено. Потрібно підтвердити відповідності: ${unresolved.length}.`;
   useEffect(() => { onProgressChange?.(progress); }, [progress, onProgressChange]);
   const label = (entry) => {
-    if (entry.kind === 'policy') return `${data.revision.schema.attributes.find((a) => a.attribute_code === entry.target)?.default_frontend_label || fieldLabels[entry.target] || entry.target} · ${entry.label === 'en' ? 'EN' : 'UA'}`;
+    if (entry.kind === 'policy') return `${data.revision.schema.attributes.find((a) => a.attribute_code === entry.target)?.default_frontend_label || fieldLabels[entry.target] || entry.target} · ${policyLanguage(entry)}`;
     const match = entry.source?.match(/\.([^.=]+)=value_id:(-?\d+)$/);
     const question = entry.group === categoryCode && match ? questions.find((q) => q.id === match[1]) : null;
     const option = question?.options.find((o) => String(o.id) === match[2]);
     return question ? `${question.label}: ${option?.label || localValueLabel(questions, match[1], match[2], entry.evaluated)}` : entry.evaluated || entry.label || entry.target;
   };
   const options = (entry) => {
-    if (entry.kind === 'policy') return Object.entries(deliveryPolicies).map(([value, name]) => ({ value, label: name }));
+    if (entry.kind === 'policy') {
+      const constraint = policyReviewConstraint(entry);
+      return Object.entries(deliveryPolicies).filter(([value]) => !constraint || constraint.choices.includes(value)).map(([value, name]) => ({ value, label: name }));
+    }
     if (entry.kind === 'route') return data.revision.schema.attributeSets.map((s) => ({ value: String(s.attribute_set_id), label: s.attribute_set_name }));
     if (entry.kind === 'category') return (entry.candidates || []).map((c) => ({ value: c.categoryId, label: c.path }));
     const attribute = data?.revision.bindings.attributes.find((a) => a.bindingKey === entry.id.split(':')[1]);
     return (data?.revision.schema.attributes.find((a) => a.attribute_code === attribute?.attributeCode)?.options || []).filter((o) => !o.isEmpty).map((o) => ({ value: o.value, label: o.label }));
   };
-  const chosen = (entry) => choices[entry.id] ?? selections[decisionKey(entry)] ?? (entry.kind === 'policy' && entry.reviewState !== 'approved' ? '' : entry.identity == null ? '' : String(entry.identity));
+  const chosen = (entry) => policyReviewChoice(entry, choices[entry.id] ?? selections[decisionKey(entry)] ?? (entry.kind === 'policy' && entry.reviewState !== 'approved' ? '' : entry.identity == null ? '' : String(entry.identity)));
   async function approve(list) {
     if (flight.current || disabled || !data || data.revision.revision !== revision.revision) return;
+    if (list.some((entry) => !canConfirmPolicy(entry, chosen(entry)))) return;
     flight.current = true; setBusy(true); setError('');
     const ticket = sequence.current; let current = data.revision;
     try {
@@ -88,7 +108,7 @@ export default function MagentoWorkspaceReview({ revision, categoryCode, categor
       flight.current = false;
     }
   }
-  const eligible = (entry) => chosen(entry) !== '' && (entry.reviewState !== 'approved' || chosen(entry) !== String(entry.identity)) && (entry.exact && String(entry.identity) === chosen(entry) && entry.kind !== 'policy' || reason.trim().length >= 3);
+  const eligible = (entry) => canConfirmPolicy(entry, chosen(entry)) && chosen(entry) !== '' && (entry.reviewState !== 'approved' || chosen(entry) !== String(entry.identity)) && (entry.exact && String(entry.identity) === chosen(entry) && entry.kind !== 'policy' || reason.trim().length >= 3);
   return <section className="mc-review space-y-3" aria-label="Перевірка підготовлених відповідностей">
     <h3 className="font-semibold">{ready && !editPolicies ? 'Відповідності перевірено' : remainingCategories ? 'Підтвердьте відповідності інших категорій' : remainingFields ? 'Підтвердьте решту полів категорії' : placementReview ? 'Підтвердьте розділи магазину' : 'Перевірте ці відповідності'}</h3>
     {error && <Notice tone="error">{error}</Notice>}{!fresh && !error && <LoadingState label="Оновлюємо підтвердження…" compact />}
@@ -112,11 +132,13 @@ export default function MagentoWorkspaceReview({ revision, categoryCode, categor
       <MagentoDetails summary="Поведінка передавання полів">{() => <button type="button" className="btn btn-outline" disabled={busy || disabled} onClick={() => { setEditPolicies(!editPolicies); setPage(0); }}>{editPolicies ? 'Сховати поведінку підключених полів' : 'Змінити поведінку підключених полів'}</button>}</MagentoDetails>
       {!remainingCategories && entries.some((e) => e.group !== categoryCode) && <button className="btn btn-outline" type="button" onClick={() => { setAll(!all); setPage(0); }}>{all ? 'Лише поточна категорія' : 'Показати також інші категорії'}</button>}
       {(reason || visible.some((e) => !e.exact || e.kind === 'policy' || chosen(e) !== String(e.identity))) && <label className="mc-label">Пояснення перевірки<input className="input" maxLength={2000} disabled={busy || disabled} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Чому обрано цю відповідність або поведінку" /></label>}
-      {visible.length > 0 && <div className="mc-table-scroll"><table><thead><tr><th>Поле / значення менеджера</th><th>Відповідність Magento</th><th>Підтвердження</th></tr></thead><tbody>{visible.map((entry) => <tr key={entry.id} className={matchesRepairValue(entry, repairContext) ? 'is-repair-target' : undefined}>
-        <td>{entry.group !== categoryCode && <strong className="block">{categoryName(entry.group)}</strong>}{label(entry)}<small>{kinds[entry.kind]} · {entry.row === 'english' ? 'EN' : 'UA'}</small></td>
-        <td>{['policy', 'route', 'option', 'category'].includes(entry.kind) ? <select className="input" aria-label={`Відповідність: ${label(entry)}`} value={chosen(entry)} disabled={busy || disabled} onChange={(e) => setChoices({ ...choices, [entry.id]: e.target.value })}><option value="">Оберіть явно</option>{options(entry).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select> : entry.label || entry.target}{entry.kind === 'policy' && chosen(entry) && <small>{deliveryPolicyEffect(chosen(entry), entry.target)}</small>}</td>
+      {visible.length > 0 && <div className="mc-table-scroll"><table><thead><tr><th>Поле / значення менеджера</th><th>Відповідність Magento</th><th>Підтвердження</th></tr></thead><tbody>{visible.map((entry) => {
+        const constraint = policyReviewConstraint(entry);
+        return <tr key={entry.id} className={matchesRepairValue(entry, repairContext) ? 'is-repair-target' : undefined}>
+        <td>{entry.group !== categoryCode && <strong className="block">{categoryName(entry.group)}</strong>}{label(entry)}<small>{kinds[entry.kind]} · {entry.kind === 'policy' && entry.row !== 'base' ? policyLanguage(entry) : entry.row === 'english' ? 'EN' : 'UA'}</small></td>
+        <td><EnglishPolicyNote entry={entry} />{constraint && constraint.kind !== 'content' ? null : ['policy', 'route', 'option', 'category'].includes(entry.kind) ? <select className="input" aria-label={`Відповідність: ${label(entry)}`} value={chosen(entry)} disabled={busy || disabled} onChange={(e) => setChoices({ ...choices, [entry.id]: e.target.value })}><option value="">Оберіть явно</option>{options(entry).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select> : entry.label || entry.target}{entry.kind === 'policy' && chosen(entry) && <small>{deliveryPolicyEffect(chosen(entry), entry.target)}</small>}</td>
         <td><button type="button" className="btn btn-outline" disabled={busy || disabled || !eligible(entry)} onClick={() => approve([entry])}>Підтвердити</button></td>
-      </tr>)}</tbody></table></div>}
+      </tr>; })}</tbody></table></div>}
       {!visible.length && <p>{otherFields.length ? 'Вибране поле підтверджено. Відкрийте решту полів цієї категорії, щоб завершити перевірку.' : entries.length ? 'Питання цієї категорії підтверджено. Перевірте також інші категорії.' : 'Усі необхідні відповідності підтверджено.'}</p>}
       {visible.length > 1 && visible.some((e) => e.exact && e.kind !== 'policy') && <MagentoDetails summary="Однозначні підказки">{() => <button type="button" className="btn btn-outline" disabled={busy || disabled} onClick={() => approve(visible.filter((e) => e.exact && e.kind !== 'policy' && String(e.identity) === chosen(e)))}>Прийняти однозначні підказки на цій сторінці</button>}</MagentoDetails>}
       {visible.length > 1 && <button type="button" className="btn btn-primary" disabled={busy || disabled || !visible.every(eligible)} onClick={() => approve(visible)}>Підтвердити показані відповідності</button>}
