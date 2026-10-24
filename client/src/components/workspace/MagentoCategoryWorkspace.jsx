@@ -8,7 +8,8 @@ import { exportTemplatesApi as templates } from '../../api/export-templates-api.
 import { useDirtyNavigation } from '../../hooks/useDirtyNavigation.jsx';
 import { COLUMN_CONTRACT, columnChange, columnSourceChoices } from '../../lib/export-template-columns.js';
 import { at, summary } from '../../lib/export-template-presentation.js';
-import { assertCategoryScope, changedFields, decisionKey, deliveryPolicies, deliveryPolicyEffect, localValueLabel, matchesRepairValue, reviewScopeSummary, routeLabel, rulesIdentity, uniqueOptionSuggestions } from '../../lib/magento-category-workspace.js';
+import { assertCategoryScope, changedFields, decisionKey, localValueLabel, matchesRepairValue, reviewScopeSummary, routeLabel, rulesIdentity, uniqueOptionSuggestions } from '../../lib/magento-category-workspace.js';
+import { deliveryPolicyLabel, deliveryPolicyEffect } from '../../lib/magento-policy-labels.js';
 import { repairContext } from '../../lib/magento-repair-context.js';
 import { characteristicUses } from '../../lib/catalog-characteristics.js';
 import { ColumnInspector } from '../export-templates/ColumnInspector.jsx';
@@ -452,7 +453,7 @@ function CategoryEditor({ initial, baseline, categories, activePublication, onPu
           onPendingChange={setPending} onRequestClose={() => chooseField('')} onCancel={() => chooseField('')}
           onApply={(next, base) => { if (previewBusy || base !== definition) return false; assertCategoryScope(definition, next, categoryCode, rowId); setDefinition(next); if (mappingPending) { setSelections(fieldSelections); setSelectionDirty(true); } setFieldSelections(null); setPending(false); setField(''); replaceParams({ field: null }); return true; }} />}
         {fieldData && <MagentoDetails summary="Архівування та видалення">{() => <CatalogDeletionEntry {...deletionContext} field={{...fieldData,attribute:currentField}} questions={projection.questions}/>}</MagentoDetails>}
-        {currentField.policy && <div className="mc-help"><p>{deliveryPolicies[currentField.policy]}</p><p>{deliveryPolicyEffect(currentField.policy, currentField.target)}</p></div>}
+        {currentField.policy && <div className="mc-help"><p>{deliveryPolicyLabel(currentField.policy)}</p><p>{deliveryPolicyEffect(currentField.policy, currentField.target)}</p></div>}
         {!fieldConfigured && <MagentoDetails>{() => <p>Код: {currentField.code} · {currentField.inputType || 'службове поле'}</p>}</MagentoDetails>}
         {!fieldConfigured && <button type="button" className="btn btn-outline" onClick={() => chooseField('')}>Закрити поле</button>}
       </>}

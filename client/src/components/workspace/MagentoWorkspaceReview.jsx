@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../../lib/api.js';
-import { deliveryPolicies, deliveryPolicyEffect, localValueLabel, matchesRepairValue, decisionKey } from '../../lib/magento-category-workspace.js';
+import { localValueLabel, matchesRepairValue, decisionKey } from '../../lib/magento-category-workspace.js';
+import { deliveryPolicies, deliveryPolicyLabel, deliveryPolicyEffect, ruleApplyLabels } from '../../lib/magento-policy-labels.js';
 import { fieldLabels } from '../../lib/export-template-editor.js';
 import { LoadingState, Notice } from '../app/UiPrimitives.jsx';
 import MagentoDetails from './MagentoDetails.jsx';
@@ -60,7 +61,7 @@ export default function MagentoWorkspaceReview({ revision, categoryCode, categor
     return question ? `${question.label}: ${option?.label || localValueLabel(questions, match[1], match[2], entry.evaluated)}` : entry.evaluated || entry.label || entry.target;
   };
   const options = (entry) => {
-    if (entry.kind === 'policy') return Object.entries(deliveryPolicies).map(([value, name]) => ({ value, label: name }));
+    if (entry.kind === 'policy') return Object.keys(deliveryPolicies).map((value) => ({ value, label: deliveryPolicyLabel(value) }));
     if (entry.kind === 'route') return data.revision.schema.attributeSets.map((s) => ({ value: String(s.attribute_set_id), label: s.attribute_set_name }));
     if (entry.kind === 'category') return (entry.candidates || []).map((c) => ({ value: c.categoryId, label: c.path }));
     const attribute = data?.revision.bindings.attributes.find((a) => a.bindingKey === entry.id.split(':')[1]);
@@ -103,8 +104,8 @@ export default function MagentoWorkspaceReview({ revision, categoryCode, categor
       {unresolved.length > 0 && <p>Залишилося підтвердити: {unresolved.length}. {unresolved.some((e) => e.group !== categoryCode) && `В інших категоріях: ${unresolved.filter((e) => e.group !== categoryCode).length}.`}</p>}
       {focusTarget && <p className="mc-help">{remainingCategories ? 'Налаштування категорій застосовуються одним пакетом. Нижче показано решту відповідностей, які ще потрібно підтвердити.'
         : remainingFields ? 'Нижче показано інші поля цієї категорії, які ще потребують підтвердження.' : placementReview ? ready
-        ? 'Розділи підтверджено. Наступний крок — перевірка впливу на товари у блоці нижче, а потім «Застосувати зміни».'
-        : visible.length ? 'Перевірте шлях у колонці Magento й натисніть «Підтвердити». Після підтвердження всіх відповідностей з’явиться кнопка «Застосувати зміни».'
+        ? `Розділи підтверджено. Наступний крок — перевірка впливу на товари у блоці нижче, а потім «${ruleApplyLabels.apply}».`
+        : visible.length ? `Перевірте шлях у колонці Magento й натисніть «Підтвердити». Після підтвердження всіх відповідностей з’явиться кнопка «${ruleApplyLabels.apply}».`
           : otherFields.length ? 'Розділи цієї категорії підтверджено. Наступний крок — «Показати решту полів категорії» нижче.'
             : 'Розділи цієї категорії підтверджено. Наступний крок — «Показати також інші категорії» нижче.'
         : 'Спочатку показано вибране поле й набір характеристик. Для застосування всієї підготовки потрібно вирішити також решту питань.'}</p>}

@@ -5,6 +5,7 @@ import { AuthContext } from '../src/auth/auth-context.js';
 import { api } from '../src/lib/api.js';
 import MagentoProductDiagnosis from '../src/components/attention/MagentoProductDiagnosis.jsx';
 import MagentoProductComparison from '../src/components/attention/MagentoProductComparison.jsx';
+import * as policyLabels from '../src/lib/magento-policy-labels.js';
 
 vi.mock('../src/lib/api.js', () => ({ api: { get: vi.fn(), post: vi.fn() } }));
 const grants = ['export_templates.view', 'export_templates.manage', 'exports.view'];
@@ -42,9 +43,31 @@ it('shows unknown evidence and preserved Magento values without turning a warnin
   render(<MagentoProductComparison result={result} />);
   const row = screen.getByRole('row', { name: /Опис Опис Magento Опис Amber/ });
   expect(within(row).getByText('Зберігається Magento')).toBeTruthy();
+  expect(within(row).getByText('Зберігати значення Magento')).toBeTruthy();
   expect(within(row).queryByText('Потребує виправлення')).toBeNull();
   expect(screen.getByText('Немає достовірних даних')).toBeTruthy();
   expect(screen.getByRole('region', { name: 'Зауваження до перевірки' }).textContent).toContain('Це зауваження');
+});
+
+it('uses the shared policy presenter without reclassifying safe-preview or unapproved evidence', () => {
+  const original = policyLabels.deliveryPolicyLabel;
+  const label = vi.spyOn(policyLabels, 'deliveryPolicyLabel').mockImplementation((policy) => policy === 'magento_managed' ? 'Спільний підпис політики' : original(policy));
+  render(<MagentoProductComparison result={{ comparisons: result.comparisons.map((row) => ({ ...row,
+    ...(row.target === 'description' ? { policyState: 'review_required' } : {}),
+    ...(row.target === 'categories' ? { policy: 'preserve_by_safe_preview' } : {}),
+  })) }} />);
+  const row = screen.getByRole('row', { name: /Опис Опис Magento Опис Amber/ });
+  expect(within(row).getByText('Спільний підпис політики · правило не підтверджене')).toBeTruthy();
+  expect(label).toHaveBeenCalledWith('magento_managed');
+  expect(within(row).getByText('Зберігається Magento')).toBeTruthy();
+  expect(screen.getByText('Збережено до окремого рішення')).toBeTruthy();
+  expect(api.post).not.toHaveBeenCalled();
+});
+
+it.each(['future_policy', 'toString', 'constructor', undefined])('does not invent ownership text for an unknown policy %s', (policy) => {
+  render(<MagentoProductComparison result={{ comparisons: [{ ...result.comparisons[1], policy }] }} />);
+  const cell = screen.getByText('Зберігається Magento').closest('td');
+  expect(cell.textContent).toBe('Зберігається Magento');
 });
 
 it('hides diagnostics without both existing preview permissions', () => {

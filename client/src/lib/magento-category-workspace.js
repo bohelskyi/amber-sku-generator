@@ -1,8 +1,4 @@
-export const deliveryPolicies = {
-  authoritative_create_update: 'Оновлюється з менеджера',
-  initialize_create_only: 'Заповнюється лише для нового товару',
-  magento_managed: 'Вручну в Magento',
-};
+export { deliveryPolicies, deliveryPolicyEffects, deliveryPolicyEffect } from './magento-policy-labels.js';
 
 export function rulesIdentity(value) {
   const stable = (item) => Array.isArray(item) ? item.map(stable) : item && typeof item === 'object'
@@ -55,18 +51,6 @@ export function uniqueOptionSuggestions(entries, options) {
     const matches = options.filter((option) => !option.isEmpty && option.label === entry.evaluated);
     return matches.length === 1 ? [{ entry, option: matches[0] }] : [];
   });
-}
-
-export const deliveryPolicyEffects = {
-  authoritative_create_update: 'Для чинних товарів наступна підтверджена синхронізація оновить це поле з менеджера.',
-  initialize_create_only: 'Для чинних товарів це поле залишається без змін. Менеджер заповнює його тільки під час створення в Magento.',
-  magento_managed: 'Менеджер не змінює це поле в Magento. Підтримуйте його вручну в магазині.',
-};
-
-export function deliveryPolicyEffect(policy, target) {
-  return target === 'name' && policy === 'authoritative_create_update'
-    ? 'Нове правило формує назви нових товарів. Збережені назви чинних товарів залишаються закріпленими; їх застосування потребує окремого підтвердження Адміністратора.'
-    : deliveryPolicyEffects[policy];
 }
 
 export function localValueLabel(questions, questionKey, valueId, fallback) {
